@@ -1,0 +1,23 @@
+# Executables and Installer Binaries (Avoid pushing large files to GitHub)
+*.exe
+*.exe~
+NeoBox-Go.exe
+NeoBox_Setup_v1.5.6.exe
+
+# Wails and Frontend Build Output
+build/bin/
+frontend/dist/
+
+# Dependency Directories
+node_modules/
+frontend/node_modules/
+
+# User, Temporary and Agent-Specific Data
+test_user_data/
+.antigravitycli/
+.DS_Store
+Thumbs.db
+
+# Go Build and Test Artifacts
+*.test
+*.out

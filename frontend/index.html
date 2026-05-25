@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.ipify.org https://raw.githubusercontent.com;">
+  <title>NeoBox Glass</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Боковая панель -->
+  <aside>
+    <div class="nav-item active" data-target="view-home" title="Главная">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+    </div>
+    <div class="nav-item" data-target="view-servers" title="Серверы">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
+    </div>
+    <div class="nav-item" data-target="view-routes" title="Маршруты">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    </div>
+    <div class="nav-item" data-target="view-settings" title="Настройки">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+    </div>
+    <div class="nav-item" data-target="view-logs" title="Логи">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/><line x1="9" y1="9" x2="10" y2="9"/></svg>
+    </div>
+    
+    <div style="flex: 1;"></div>
+    
+    <div id="langToggle" class="nav-item" title="Сменить язык / Change Language" style="margin-bottom: 10px; font-weight: bold; font-size: 14px;">
+      RU
+    </div>
+  </aside>
+
+  <!-- Основной контент -->
+  <main>
+    <!-- Верхняя полоса управления -->
+    <div class="window-header">
+      <div class="window-title">NeoBox <span style="font-size: 10px; opacity: 0.5; margin-left: 6px; font-weight: normal; vertical-align: middle;">v1.5.6</span></div>
+      <div class="window-controls">
+        <button id="minimizeBtn" class="control-btn" title="Свернуть">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button id="closeBtn" class="control-btn close" title="Закрыть">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Вкладка ГЛАВНАЯ -->
+    <section id="view-home" class="view active">
+      <div class="status-header">
+        <div class="status-badge">
+          <div id="statusDot" class="status-dot"></div>
+          <span id="statusText">Отключено</span>
+        </div>
+        <div class="status-badge" style="background: rgba(56, 189, 248, 0.1);">
+          <span>IP: </span>
+          <span id="currentIp" style="color: var(--accent-color);">Определяется...</span>
+        </div>
+      </div>
+
+      <div class="power-container">
+        <div id="powerBtn" class="power-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+        </div>
+        
+        <div id="activeServerCard" class="current-server-card">
+          <div class="server-icon">🌐</div>
+          <div class="server-info">
+            <h3 id="activeServerName">Сервер не выбран</h3>
+            <p id="activeServerDetails">Выберите локацию во вкладке Серверы</p>
+          </div>
+        </div>
+
+        <!-- Скоростемер (Download / Upload) -->
+        <div class="speedometer-container" id="speedometerContainer" style="display: none;">
+          <div class="speed-badge download">
+            <svg class="speed-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>
+            <div class="speed-info">
+              <span class="speed-label" id="speedDownloadLabel">Загрузка</span>
+              <span id="speedDownload" class="speed-value">0.0 KB/s</span>
+            </div>
+          </div>
+          <div class="speed-badge upload">
+            <svg class="speed-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="16 9 12 5 8 9"/><line x1="12" y1="5" x2="12" y2="14"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>
+            <div class="speed-info">
+              <span class="speed-label" id="speedUploadLabel">Выгрузка</span>
+              <span id="speedUpload" class="speed-value">0.0 KB/s</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <button id="restartBtn" class="btn-glass" style="display: none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+            <span id="restartBtnText">Перезапустить</span>
+          </button>
+          <button id="disconnectBtn" class="btn-glass" style="display: none; border-color: var(--danger); color: var(--danger);">
+            <span id="disconnectBtnText">Отключиться</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Вкладка СЕРВЕРЫ -->
+    <section id="view-servers" class="view">
+      <div style="margin-bottom: 30px; padding: 20px; background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); border-radius: 12px;">
+        <h4 id="subManagementTitle" style="margin-bottom: 15px; color: var(--accent-color);">Управление подписками</h4>
+        <div style="display: flex; gap: 10px;">
+          <input type="text" id="subName" placeholder="Имя (например, Основная)">
+          <input type="text" id="subUrl" placeholder="URL подписки (vless/sub/base64)">
+          <button id="addSubBtn" class="btn-glass" style="background: var(--accent-color); color: #000; font-weight: bold;">Добавить</button>
+        </div>
+        <div style="margin-top: 15px; display: flex; gap: 10px;">
+           <button id="updateSubBtn" class="btn-glass" title="Загрузить свежие серверы для текущей подписки">Обновить текущую</button>
+           <button id="importClipboardBtn" class="btn-glass">Импорт из буфера</button>
+           <button id="importQrBtn" class="btn-glass">Импорт через QR-код</button>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px;">
+        <div style="display: flex; align-items: center; gap: 15px;">
+          <h2 id="myLocationsTitle" style="margin-bottom: 0;">Мои локации</h2>
+          <div class="sort-dropdown">
+            <button class="btn-glass" style="padding: 6px 12px; font-size: 12px; gap: 5px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-3 3-3-3"/><path d="M12 3v18"/><path d="m9 6 3-3 3 3"/></svg>
+              <span id="sortBtnText">Сортировка</span>
+            </button>
+            <div class="sort-menu">
+              <div class="sort-item active" data-sort="default">🔄 По умолчанию</div>
+              <div class="sort-item" data-sort="ping">🚀 Сначала быстрые</div>
+              <div class="sort-item" data-sort="name">🔤 По названию</div>
+              <div class="sort-item" data-sort="protocol">📡 По протоколу</div>
+            </div>
+          </div>
+        </div>
+        <button id="pingAllBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;">Проверить пинг всех</button>
+      </div>
+
+      <div id="subscription-tabs" style="display: flex; gap: 10px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 5px;">
+        <!-- Динамические вкладки -->
+      </div>
+
+      <div id="serversGrid" class="server-grid">
+        <!-- Динамические карточки серверов -->
+      </div>
+    </section>
+
+    <!-- Вкладка МАРШРУТЫ -->
+    <section id="view-routes" class="view">
+      <h2 id="routeSettingsTitle">Настройка маршрутов</h2>
+      <p id="directDomainsLabel" style="color: var(--text-dim); margin-bottom: 5px;">Укажите домены для прямого доступа (без прокси):</p>
+      <textarea id="customDirect" rows="4" placeholder="google.com&#10;yandex.ru" style="resize: none;"></textarea>
+      <div style="margin-top: 15px; margin-bottom: 20px;">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="bypassRuCheckbox"> <span id="bypassRuLabel">Обход блокировок РФ (автоматически)</span>
+        </label>
+      </div>
+      <div style="margin-bottom: 25px; display: flex; align-items: center;">
+        <button id="saveRoutesBtn" class="btn-glass" style="background: var(--accent-color); color: #000; width: 200px; justify-content: center;">Сохранить маршруты</button>
+        <span id="routesStatus" style="margin-left: 15px; color: var(--success); display: none;">Готово!</span>
+      </div>
+
+      <!-- НОВЫЙ БЛОК: Раздельное туннелирование (Split Tunneling) -->
+      <h3 id="splitTunnelingTitle" style="margin-top: 20px; color: var(--accent-color);">Туннелирование приложений (Только для TUN)</h3>
+      <p id="splitTunnelingDesc" style="color: var(--text-dim); margin-bottom: 10px; font-size: 13px;">Укажите названия .exe файлов (каждый с новой строки), например: <b>chrome.exe</b></p>
+      
+      <div class="process-mode-tabs" style="display: flex; gap: 5px; margin-bottom: 10px; background: rgba(255,255,255,0.05); padding: 5px; border-radius: 8px;">
+        <button class="process-tab active" data-mode="blacklist" style="flex: 1; padding: 8px; border: none; border-radius: 6px; background: var(--accent-color); color: #000; font-weight: bold; cursor: pointer; transition: 0.2s;">Черный список</button>
+        <button class="process-tab" data-mode="whitelist" style="flex: 1; padding: 8px; border: none; border-radius: 6px; background: transparent; color: var(--text-main); cursor: pointer; transition: 0.2s;">Белый список</button>
+      </div>
+      <input type="hidden" id="processModeHidden" value="blacklist">
+      
+      <textarea id="processListBlacklist" rows="6" placeholder="..." style="resize: none; display: block;"></textarea>
+      <textarea id="processListWhitelist" rows="6" placeholder="..." style="resize: none; display: none;"></textarea>
+      <div style="margin-top: 15px; display: flex; align-items: center;">
+        <button id="saveAppsBtn" class="btn-glass" style="background: var(--accent-color); color: #000; width: 220px; justify-content: center;">Сохранить приложения</button>
+        <span id="appsStatus" style="margin-left: 15px; color: var(--success); display: none;">Готово!</span>
+      </div>
+    </section>
+
+    <!-- Вкладка НАСТРОЙКИ -->
+    <section id="view-settings" class="view">
+      <h2 id="appSettingsTitle">Настройки приложения</h2>
+      
+      <div class="form-group" style="margin-top: 30px;">
+        <label id="dnsServerLabel">DNS Сервер</label>
+        <select id="dnsSelect">
+          <option value="1.1.1.1">Cloudflare (1.1.1.1)</option>
+          <option value="8.8.8.8">Google (8.8.8.8)</option>
+          <option value="9.9.9.9">Quad9 (9.9.9.9)</option>
+          <option value="custom">Свой сервер...</option>
+        </select>
+        <input type="text" id="customDnsInput" placeholder="https://..." style="display: none; margin-top: 10px;">
+      </div>
+
+      <div class="form-group">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+          <input type="checkbox" id="tunModeCheckbox"> 
+          <span id="tunModeLabel" style="color: var(--accent-color); font-weight: bold;">TUN Режим</span> <span id="tunModeDesc">(Весь трафик ПК через прокси)</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+          <input type="checkbox" id="systemProxyCheckbox" checked> <span id="systemProxyLabel">Системный прокси (HTTP/SOCKS)</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+          <input type="checkbox" id="autoConnectCheckbox"> <span id="autoConnectLabel">Авто-подключение при запуске</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+          <input type="checkbox" id="autoUpdateSubsCheckbox"> <span id="autoUpdateSubsLabel">Авто-обновление подписок</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+          <input type="checkbox" id="rememberServerCheckbox"> <span id="rememberServerLabel">Запоминать последний сервер</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+          <input type="checkbox" id="openAtLoginCheckbox"> <span id="openAtLoginLabel">Запускать вместе с Windows</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+          <input type="checkbox" id="startMinimizedCheckbox"> <span id="startMinimizedLabel">Запускать свернутым в трей</span>
+        </label>
+      </div>
+
+      <h3 id="securityTitle" style="margin-top: 25px; color: var(--accent-color);">Безопасность</h3>
+      <div class="form-group" style="margin-top: 15px;">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+          <input type="checkbox" id="killSwitchCheckbox"> <span id="killSwitchLabel">Kill Switch</span> <span id="killSwitchDesc" style="color: var(--text-dim); font-size: 12px;">(Блокировать интернет при обрыве VPN)</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+          <input type="checkbox" id="dnsLeakCheckbox" checked> <span id="dnsLeakLabel">Защита от утечек DNS</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+          <input type="checkbox" id="ipv6LeakCheckbox" checked> <span id="ipv6LeakLabel">Блокировка IPv6 (утечки IP)</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+          <input type="checkbox" id="fakeDnsCheckbox" checked> <span id="fakeDnsLabel">FakeDNS</span> <span id="fakeDnsDesc" style="color: var(--text-dim); font-size: 12px;">(Ускорение DNS и защита от утечек)</span>
+        </label>
+      </div>
+
+      <button id="saveSettingsBtn" class="btn-glass" style="background: var(--accent-color); color: #000; width: 200px; justify-content: center;">Сохранить всё</button>
+      <span id="settingsStatus" style="margin-left: 15px; color: var(--success); display: none;">Готово!</span>
+    </section>
+
+    <!-- Вкладка ЛОГИ -->
+    <section id="view-logs" class="view">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h2 id="logsTitle">Системный журнал</h2>
+        <button id="clearLogsBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;">Очистить</button>
+      </div>
+      <div class="log-viewer" style="height: calc(100vh - 160px); min-height: 400px; display: flex; flex-direction: column;">
+        <div class="log-tabs">
+          <button class="log-tab active" data-filter="ALL">Все</button>
+          <button class="log-tab" data-filter="DEBUG">Отладка</button>
+          <button class="log-tab" data-filter="INFO">Инфо</button>
+          <button class="log-tab" data-filter="WARN">Предупреждения</button>
+          <button class="log-tab" data-filter="ERROR">Ошибки</button>
+        </div>
+        <div class="log-output" id="fullLogOutput" style="flex: 1; overflow-y: auto;"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Панель логов (скрытая системная) -->
+  <div id="logOutput" style="display: none;"></div>
+
+  <!-- Кастомное модальное окно -->
+  <div id="modalOverlay" class="modal-overlay">
+    <div class="modal-content">
+      <h3 id="modalTitle">Введите значение</h3>
+      <input type="text" id="modalInput" placeholder="...">
+      <div class="modal-actions">
+        <button id="modalCancel" class="btn-glass">Отмена</button>
+        <button id="modalConfirm" class="btn-glass" style="background: var(--accent-color); color: #000; font-weight: bold;">ОК</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Кастомное модальное окно уведомлений / ошибок (alert/error) -->
+  <div id="alertOverlay" class="modal-overlay alert-modal-overlay">
+    <div class="modal-content alert-modal-content">
+      <div class="alert-icon-container">
+        <!-- SVG Warning Sign -->
+        <svg class="alert-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+          <line x1="12" y1="9" x2="12" y2="13"></line>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+      </div>
+      <h3 id="alertTitleText">Внимание</h3>
+      <div id="alertMessageText" class="alert-message-content"></div>
+      <div id="errorTerminalContainer" style="display: none;">
+        <pre id="errorTerminalText"></pre>
+      </div>
+      <div class="modal-actions" style="margin-top: 20px;">
+        <button id="alertCopyBtn" class="btn-glass" style="display: none; border-color: rgba(255,255,255,0.15);">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px; display: inline-block;"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+          <span id="alertCopyBtnText">Копировать</span>
+        </button>
+        <button id="alertConfirmBtn" class="btn-glass" style="background: var(--accent-color); color: #000; font-weight: bold; border: none; padding-left: 24px; padding-right: 24px;">ОК</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Специальный интерактивный виджет прокрутки для вкладки Серверы -->
+  <div class="custom-scroll-widget" id="serversScrollWidget">
+    <div class="scroll-arrow scroll-arrow-up" id="scrollUpBtn" title="Вверх">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
+    </div>
+    <div class="scroll-track" id="scrollTrack">
+      <div class="scroll-thumb" id="scrollThumb"></div>
+    </div>
+    <div class="scroll-arrow scroll-arrow-down" id="scrollDownBtn" title="Вниз">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+  </div>  <!-- Модальное окно сканера QR-кодов -->
+  <div id="qrModalOverlay" class="modal-overlay">
+    <div class="modal-content" style="max-width: 500px; text-align: center; position: relative;">
+      <h3 id="qrModalTitle" style="margin-bottom: 15px; color: var(--accent-color);">Импорт через QR-код</h3>
+      
+      <div id="qrScannerContainer" style="width: 100%; height: 300px; background: #000; border-radius: 12px; overflow: hidden; position: relative; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--glass-border);">
+        <video id="qrVideo" style="width: 100%; height: 100%; object-fit: cover; display: none;"></video>
+        <canvas id="qrCanvas" style="display: none;"></canvas>
+        
+        <div id="qrScannerPlaceholder" style="color: var(--text-dim); text-align: center; padding: 20px;">
+          <p id="qrPlaceholderText">Выберите способ импорта ниже</p>
+        </div>
+        
+        <div id="qrScannerReticle" style="position: absolute; width: 180px; height: 180px; border: 2px dashed var(--accent-color); border-radius: 16px; display: none; box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);"></div>
+      </div>
+
+      <input type="file" id="qrFileInput" accept="image/*" style="display: none;">
+
+      <div style="display: flex; gap: 10px; justify-content: center; margin-bottom: 20px;">
+        <button id="qrStartCameraBtn" class="btn-glass" style="flex: 1; justify-content: center;">🎥 Запустить камеру</button>
+        <button id="qrUploadFileBtn" class="btn-glass" style="flex: 1; justify-content: center;">📁 Выбрать файл</button>
+      </div>
+
+      <div class="modal-actions" style="border-top: 1px solid var(--glass-border); padding-top: 15px;">
+        <button id="qrModalClose" class="btn-glass" style="width: 100%; justify-content: center;">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/jsqr@1.4.0/dist/jsQR.js"></script>
+  <script type="module" src="wails-bridge.js"></script>
+  <script type="module" src="renderer.js"></script>
+</body>
+</html>
