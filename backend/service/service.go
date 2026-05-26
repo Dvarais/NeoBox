@@ -466,7 +466,7 @@ func (s *AppService) CheckUpdates() map[string]interface{} {
 	response := map[string]interface{}{"available": false}
 
 	client := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequest("GET", "https://api.github.com/repos/Dvarais/NeoBox-Releases/releases/latest", nil)
+	req, err := http.NewRequest("GET", "https://api.github.com/repos/Dvarais/NeoBox/releases/latest", nil)
 	if err != nil {
 		return response
 	}
