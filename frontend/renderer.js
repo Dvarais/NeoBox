@@ -196,7 +196,6 @@ function applyLanguage() {
 
   renderSubTabs(subTabsContainer, translations, currentLanguage, updateCards, (title, def) => showPrompt('modalOverlay', 'modalTitle', 'modalInput', 'modalCancel', 'modalConfirm', title, def), (title) => showConfirm('modalOverlay', 'modalTitle', 'modalInput', 'modalCancel', 'modalConfirm', title), loadSubscriptions);
   updateCards();
-  window.api.setLanguage(currentLanguage);
 }
 
 document.getElementById('langToggle').onclick = () => {
@@ -447,7 +446,9 @@ window.api.onLog((data) => {
   if (cleanData.includes('connection was aborted by the software in your host machine')) return;
   
   addLogEntry(cleanData);
-  if (cleanData.includes('started') && appState !== 'on') updateAppInterface('on');
+  // Use a precise pattern so partial matches like 'DNS server started' or
+  // 'restarted' don't falsely trigger the connected state.
+  if (/\bsing-box\s+started\b/i.test(cleanData) && appState !== 'on') updateAppInterface('on');
 });
 
 clearLogsBtn.onclick = () => {
@@ -482,7 +483,13 @@ window.api.onTrayStartReconnect((data) => {
   updateAppInterface('connecting');
   (async () => {
     try {
-      const res = await window.api.startXray(data.link, data.useSystemProxy);
+      // Read useSystemProxy from saved settings to ensure it's current,
+      // not stale from the moment the tray menu was built.
+      const freshSettings = await window.api.getSettings();
+      const useSystemProxy = freshSettings && freshSettings.systemProxy != null
+        ? !!freshSettings.systemProxy
+        : !!data.useSystemProxy;
+      const res = await window.api.startXray(data.link, useSystemProxy);
       if (res && !res.success) {
         showAlert(translations[currentLanguage].errorDialogTitle, res.error || 'Unknown error', true, translations[currentLanguage]);
         updateAppInterface('off');
@@ -565,23 +572,14 @@ function collectAndSaveSettings() {
 }
 
 document.getElementById('saveRoutesBtn').onclick = async () => {
-  const settings = await window.api.getSettings() || {};
-  settings.customDirect = document.getElementById('customDirect').value.split('\n').map(s => s.trim()).filter(s => s.length > 0);
-  settings.bypassRu = document.getElementById('bypassRuCheckbox').checked;
-  window.api.saveSettings(settings);
-  
+  await collectAndSaveSettings();
   const status = document.getElementById('routesStatus');
   status.style.display = 'inline';
   setTimeout(() => status.style.display = 'none', 2000);
 };
 
 document.getElementById('saveAppsBtn').onclick = async () => {
-  const settings = await window.api.getSettings() || {};
-  settings.processMode = processModeHidden.value;
-  settings.processListBlacklist = processListBlacklistEl.value.split('\n').map(s => s.trim()).filter(s => s.length > 0);
-  settings.processListWhitelist = processListWhitelistEl.value.split('\n').map(s => s.trim()).filter(s => s.length > 0);
-  window.api.saveSettings(settings);
-  
+  await collectAndSaveSettings();
   const status = document.getElementById('appsStatus');
   status.style.display = 'inline';
   setTimeout(() => status.style.display = 'none', 2000);
@@ -616,7 +614,7 @@ async function init() {
     if (update && update.available) {
       const showUpdate = await showConfirm(
         'modalOverlay', 'modalTitle', 'modalInput', 'modalCancel', 'modalConfirm',
-        `${translations[currentLanguage].renamePromptTitle === 'Переименовать подписку' ? 'Доступно обновление' : 'Update Available'}: v${update.version}\n\n${update.body || ''}`
+        `${currentLanguage === 'RU' ? 'Доступно обновление' : 'Update Available'}: v${update.version}\n\n${update.body || ''}`
       );
       if (showUpdate) {
         window.api.openUpdateLink(update.url);
@@ -996,28 +994,20 @@ function debounce(func, wait) {
 }
 
 // --- Автосохранение при вводе в текстовые поля на лету ---
-document.getElementById('customDirect').oninput = debounce(async () => {
-  const settings = await window.api.getSettings() || {};
-  settings.customDirect = document.getElementById('customDirect').value.split('\n').map(s => s.trim()).filter(s => s.length > 0);
-  window.api.saveSettings(settings);
+document.getElementById('customDirect').oninput = debounce(() => {
+  collectAndSaveSettings();
 }, 500);
 
-document.getElementById('bypassRuCheckbox').onchange = async () => {
-  const settings = await window.api.getSettings() || {};
-  settings.bypassRu = document.getElementById('bypassRuCheckbox').checked;
-  window.api.saveSettings(settings);
+document.getElementById('bypassRuCheckbox').onchange = () => {
+  collectAndSaveSettings();
 };
 
-processListBlacklistEl.oninput = debounce(async () => {
-  const settings = await window.api.getSettings() || {};
-  settings.processListBlacklist = processListBlacklistEl.value.split('\n').map(s => s.trim()).filter(s => s.length > 0);
-  window.api.saveSettings(settings);
+processListBlacklistEl.oninput = debounce(() => {
+  collectAndSaveSettings();
 }, 500);
 
-processListWhitelistEl.oninput = debounce(async () => {
-  const settings = await window.api.getSettings() || {};
-  settings.processListWhitelist = processListWhitelistEl.value.split('\n').map(s => s.trim()).filter(s => s.length > 0);
-  window.api.saveSettings(settings);
+processListWhitelistEl.oninput = debounce(() => {
+  collectAndSaveSettings();
 }, 500);
 
 // --- Специальный интерактивный виджет прокрутки ---

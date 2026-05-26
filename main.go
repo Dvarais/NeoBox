@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -33,6 +34,15 @@ func main() {
 	// 1. Resolve user data directory for settings/subscriptions
 	homeDir, _ := os.UserHomeDir()
 	userDataDir := filepath.Join(homeDir, "AppData", "Roaming", "NeoBox")
+	// Ensure the directory exists before writing the encryption key
+	_ = os.MkdirAll(userDataDir, 0755)
+
+	// Initialize AES encryption key (must be before migration and service startup).
+	// This replaces the old DPAPI approach which was session-dependent and caused
+	// settings loss after shutdown/privilege changes.
+	if err := security.InitEncryption(userDataDir); err != nil {
+		fmt.Printf("Warning: failed to initialize encryption: %v\n", err)
+	}
 
 	// Run migration from old Electron version if present and new Go version folder doesn't exist
 	migrateOldSettings(userDataDir)
@@ -95,48 +105,54 @@ func main() {
 	}
 }
 
-// migrateOldSettings automatically copies old settings.json and subscriptions.json
-// from AppData/Roaming/NeoBox to AppData/Roaming/NeoBox-Go, decrypting with DPAPI,
-// modifying autoConnect to false, and re-encrypting using the Go DPAPI module.
+// migrateOldSettings migrates settings and subscriptions from the old Electron-based
+// NeoBox version (which stored data in AppData/Roaming/NeoBox/data/) to the new Go
+// version (which stores directly in AppData/Roaming/NeoBox/).
+//
+// The key fix: both versions share the same root folder (%APPDATA%\NeoBox), so we
+// cannot check directory existence. Instead, we check for the new-format settings.json
+// directly — if it doesn't exist but the old data/ subfolder does, we migrate.
 func migrateOldSettings(userDataDir string) {
-	oldDir := filepath.Join(filepath.Dir(userDataDir), "NeoBox")
-	oldDataDir := filepath.Join(oldDir, "data")
+	// Old Electron version stored data in a "data" subfolder
+	oldDataDir := filepath.Join(userDataDir, "data")
 
-	// If the new directory doesn't exist yet, but the old data folder does
-	if _, err := os.Stat(userDataDir); os.IsNotExist(err) {
-		if _, err := os.Stat(oldDataDir); err == nil {
-			// Create the new user data directory
-			if err := os.MkdirAll(userDataDir, 0755); err != nil {
-				return
-			}
+	// New Go version stores files directly in userDataDir
+	newSettings := filepath.Join(userDataDir, "settings.json")
+	newSubs := filepath.Join(userDataDir, "subscriptions.json")
 
-			// 1. Migrate subscriptions.json
-			oldSubs := filepath.Join(oldDataDir, "subscriptions.json")
-			newSubs := filepath.Join(userDataDir, "subscriptions.json")
-			if _, err := os.Stat(oldSubs); err == nil {
-				_ = copyFile(oldSubs, newSubs)
-			}
+	// Only migrate if new-format settings don't exist yet but old data folder does
+	if _, err := os.Stat(newSettings); !os.IsNotExist(err) {
+		return // Already migrated or fresh install — nothing to do
+	}
+	if _, err := os.Stat(oldDataDir); err != nil {
+		return // No old data folder found — nothing to migrate
+	}
 
-			// 2. Migrate settings.json
-			oldSettings := filepath.Join(oldDataDir, "settings.json")
-			newSettings := filepath.Join(userDataDir, "settings.json")
-			if _, err := os.Stat(oldSettings); err == nil {
-				if err := copyFile(oldSettings, newSettings); err == nil {
-					// Read, decrypt, change autoConnect, re-encrypt
-					if encData, err := os.ReadFile(newSettings); err == nil {
-						decrypted, err := decryptElectronSafeStorage(encData)
-						if err == nil {
-							var settingsMap map[string]interface{}
-							if err := json.Unmarshal(decrypted, &settingsMap); err == nil {
-								// Set autoConnect to false to prevent startup loop on first migration start
-								settingsMap["autoConnect"] = false
+	// Ensure the target directory exists
+	if err := os.MkdirAll(userDataDir, 0755); err != nil {
+		return
+	}
 
-								// Re-serialize and encrypt using native Go DPAPI
-								if newJSON, err := json.Marshal(settingsMap); err == nil {
-									if encryptedBytes, err := security.Encrypt(newJSON); err == nil {
-										_ = os.WriteFile(newSettings, encryptedBytes, 0600)
-									}
-								}
+	// 1. Migrate subscriptions.json
+	oldSubs := filepath.Join(oldDataDir, "subscriptions.json")
+	if _, err := os.Stat(oldSubs); err == nil {
+		_ = copyFile(oldSubs, newSubs)
+	}
+
+	// 2. Migrate settings.json — decrypt Electron DPAPI, set autoConnect=false, re-encrypt
+	oldSettings := filepath.Join(oldDataDir, "settings.json")
+	if _, err := os.Stat(oldSettings); err == nil {
+		if err := copyFile(oldSettings, newSettings); err == nil {
+			if encData, err := os.ReadFile(newSettings); err == nil {
+				decrypted, err := decryptElectronSafeStorage(encData)
+				if err == nil {
+					var settingsMap map[string]interface{}
+					if err := json.Unmarshal(decrypted, &settingsMap); err == nil {
+						// Prevent auto-connect loop on first run after migration
+						settingsMap["autoConnect"] = false
+						if newJSON, err := json.Marshal(settingsMap); err == nil {
+							if encryptedBytes, err := security.Encrypt(newJSON); err == nil {
+								_ = os.WriteFile(newSettings, encryptedBytes, 0600)
 							}
 						}
 					}

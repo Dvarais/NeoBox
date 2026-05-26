@@ -14,10 +14,14 @@ func hideWindow(cmd *exec.Cmd) {
 // SetupAutostart creates a task in Windows Task Scheduler with the highest execution privileges
 // (RL Highest) to allow it to run on logon and bypass UAC prompts for TUN mode setup.
 func SetupAutostart(taskName string, appPath string) error {
+	// Escape backslashes and double-quotes in the path to prevent schtasks argument injection.
+	safePath := strings.ReplaceAll(appPath, `\`, `\\`)
+	safePath = strings.ReplaceAll(safePath, `"`, `\"`)
+
 	// schtasks requires administrative rights to create a task with highest privileges (/rl highest)
 	cmd := exec.Command("schtasks", "/create",
 		"/tn", taskName,
-		"/tr", `"`+strings.ReplaceAll(appPath, `\`, `\\`)+`"`,
+		"/tr", `"`+safePath+`"`,
 		"/sc", "onlogon",
 		"/rl", "highest",
 		"/f",

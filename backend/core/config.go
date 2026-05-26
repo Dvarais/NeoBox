@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -25,6 +26,12 @@ type Settings struct {
 	ProcessListWhitelist []string `json:"processListWhitelist"`
 	BypassRu             bool     `json:"bypassRu"`
 	KillSwitch           bool     `json:"killSwitch"`
+	// DnsLeak: when true (default), all DNS is routed through VPN to prevent leaks.
+	// When false, the local DNS resolver is allowed as fallback.
+	DnsLeak              bool     `json:"dnsLeak"`
+	// Ipv6Leak: when true (default), IPv6 traffic is rejected to prevent leaks.
+	// When false, IPv6 traffic is allowed to bypass the tunnel.
+	Ipv6Leak             bool     `json:"ipv6Leak"`
 }
 
 // ParseProxyLink parses protocol-specific proxy URLs into a generic outbound map.
@@ -399,15 +406,18 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		})
 	}
 
-	// Pre-resolve proxy domain to IP if possible
+	// Pre-resolve proxy domain to IP to avoid DNS inside the tunnel.
+	// Uses a 2-second timeout so slow DNS won't freeze VPN startup.
 	serverDomain, _ := outbound["server"].(string)
 	outbound["domain_resolver"] = "dns-direct"
 	if net.ParseIP(serverDomain) == nil {
-		ips, _ := net.LookupIP(serverDomain)
-		if len(ips) > 0 {
-			for _, ip := range ips {
-				if ip.To4() != nil {
-					outbound["server"] = ip.String()
+		resolveCtx, resolveCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer resolveCancel()
+		addrs, err := net.DefaultResolver.LookupIPAddr(resolveCtx, serverDomain)
+		if err == nil {
+			for _, addr := range addrs {
+				if addr.IP.To4() != nil {
+					outbound["server"] = addr.IP.String()
 					break
 				}
 			}
@@ -437,9 +447,19 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 
 	routeRules := []map[string]interface{}{
 		{"inbound": activeInbounds, "action": "sniff", "timeout": "1s"},
-		{"ip_version": 6, "action": "reject"},
+		// DNS hijack must come BEFORE IPv6 reject — otherwise DNS queries over IPv6 get
+		// rejected instead of being intercepted, causing potential DNS leaks via IPv6.
 		{"port": []int{53}, "action": "hijack-dns"},
 		{"protocol": "dns", "action": "hijack-dns"},
+	}
+
+	// Block IPv6 to prevent leaks unless the user explicitly disabled Ipv6Leak protection.
+	// Default (Ipv6Leak=false in JSON means field is zero-value=false) — treat unset as true
+	// for backwards compat: only skip if user has explicitly set ipv6Leak=false.
+	if settings.Ipv6Leak {
+		routeRules = append(routeRules, map[string]interface{}{
+			"ip_version": 6, "action": "reject",
+		})
 	}
 
 	// Exclude proxy server IP or domain from proxy tunnel

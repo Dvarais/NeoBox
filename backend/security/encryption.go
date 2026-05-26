@@ -1,70 +1,126 @@
 package security
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"fmt"
-	"syscall"
-	"unsafe"
+	"io"
+	"os"
+	"path/filepath"
+	"sync"
 )
 
 var (
-	dllcrypt32            = syscall.NewLazyDLL("crypt32.dll")
-	procCryptProtectData   = dllcrypt32.NewProc("CryptProtectData")
-	procCryptUnprotectData = dllcrypt32.NewProc("CryptUnprotectData")
+	keyFilePath string
+	keyOnce     sync.Once
+	cachedKey   []byte
+	cachedKeyErr error
 )
 
-type DATA_BLOB struct {
-	cbData uint32
-	pbData *byte
+// InitEncryption must be called once at startup with the user data directory.
+// It generates a persistent AES-256 key on first run and caches it for future calls.
+// Using a file-based key instead of Windows DPAPI makes encryption session-independent:
+// settings survive full shutdowns, privilege changes (admin vs user), and Windows updates.
+func InitEncryption(dataDir string) error {
+	keyFilePath = filepath.Join(dataDir, "key.bin")
+	_, err := loadOrCreateKey()
+	return err
 }
 
-// Encrypt encrypts a byte slice using the Windows DPAPI (CryptProtectData).
+// loadOrCreateKey returns the cached key, loading from disk or generating it on first call.
+func loadOrCreateKey() ([]byte, error) {
+	keyOnce.Do(func() {
+		if keyFilePath == "" {
+			cachedKeyErr = fmt.Errorf("encryption not initialized: call InitEncryption first")
+			return
+		}
+
+		data, err := os.ReadFile(keyFilePath)
+		if err == nil && len(data) == 32 {
+			cachedKey = data
+			return
+		}
+
+		// Generate a new random 32-byte AES-256 key
+		newKey := make([]byte, 32)
+		if _, err := io.ReadFull(rand.Reader, newKey); err != nil {
+			cachedKeyErr = fmt.Errorf("failed to generate encryption key: %w", err)
+			return
+		}
+		if err := os.WriteFile(keyFilePath, newKey, 0600); err != nil {
+			cachedKeyErr = fmt.Errorf("failed to save encryption key: %w", err)
+			return
+		}
+		cachedKey = newKey
+	})
+	return cachedKey, cachedKeyErr
+}
+
+// Encrypt encrypts data using AES-256-GCM with a random nonce.
+// Output format: [12-byte nonce][ciphertext+tag]
 func Encrypt(data []byte) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("data to encrypt is empty")
 	}
 
-	var inBlob DATA_BLOB
-	inBlob.cbData = uint32(len(data))
-	inBlob.pbData = &data[0]
-
-	var outBlob DATA_BLOB
-	r, _, err := procCryptProtectData.Call(
-		uintptr(unsafe.Pointer(&inBlob)),
-		0, 0, 0, 0, 0,
-		uintptr(unsafe.Pointer(&outBlob)),
-	)
-	if r == 0 {
-		return nil, fmt.Errorf("CryptProtectData failed: %w", err)
+	key, err := loadOrCreateKey()
+	if err != nil {
+		return nil, err
 	}
-	defer syscall.LocalFree(syscall.Handle(unsafe.Pointer(outBlob.pbData)))
 
-	result := make([]byte, outBlob.cbData)
-	copy(result, unsafe.Slice(outBlob.pbData, outBlob.cbData))
-	return result, nil
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, fmt.Errorf("failed to generate nonce: %w", err)
+	}
+
+	// Seal appends ciphertext to nonce: result = nonce || ciphertext
+	ciphertext := gcm.Seal(nonce, nonce, data, nil)
+	return ciphertext, nil
 }
 
-// Decrypt decrypts a byte slice using the Windows DPAPI (CryptUnprotectData).
+// Decrypt decrypts AES-256-GCM data previously encrypted by Encrypt.
+// Expects format: [12-byte nonce][ciphertext+tag]
 func Decrypt(data []byte) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("encrypted data is empty")
 	}
 
-	var inBlob DATA_BLOB
-	inBlob.cbData = uint32(len(data))
-	inBlob.pbData = &data[0]
-
-	var outBlob DATA_BLOB
-	r, _, err := procCryptUnprotectData.Call(
-		uintptr(unsafe.Pointer(&inBlob)),
-		0, 0, 0, 0, 0,
-		uintptr(unsafe.Pointer(&outBlob)),
-	)
-	if r == 0 {
-		return nil, fmt.Errorf("CryptUnprotectData failed: %w", err)
+	key, err := loadOrCreateKey()
+	if err != nil {
+		return nil, err
 	}
-	defer syscall.LocalFree(syscall.Handle(unsafe.Pointer(outBlob.pbData)))
 
-	result := make([]byte, outBlob.cbData)
-	copy(result, unsafe.Slice(outBlob.pbData, outBlob.cbData))
-	return result, nil
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	nonceSize := gcm.NonceSize()
+	if len(data) < nonceSize {
+		return nil, fmt.Errorf("ciphertext too short: expected at least %d bytes", nonceSize)
+	}
+
+	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decryption failed (wrong key or corrupted data): %w", err)
+	}
+
+	return plaintext, nil
 }

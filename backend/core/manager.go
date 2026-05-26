@@ -83,6 +83,10 @@ func (m *CoreManager) stopRaw() error {
 	if m.instance != nil {
 		err := m.instance.Close()
 		m.instance = nil
+		if err != nil {
+			// Log the error but continue — a failed close should not block a restart.
+			fmt.Printf("[CoreManager] warning: sing-box Close() returned error: %v\n", err)
+		}
 		return err
 	}
 	return nil

@@ -10,6 +10,7 @@ import {
   NotifyWindowShown,
   PingServer, 
   RequestAdmin, 
+  RestartXray,
   SaveSettings, 
   SaveSubscriptions, 
   StartXray, 
@@ -30,9 +31,8 @@ window.api = {
     return res;
   },
   restartXray: async (link, useSystemProxy) => {
-    await StopXray();
     const settings = await window.api.getSettings();
-    const res = await StartXray(link, JSON.stringify(settings), useSystemProxy);
+    const res = await RestartXray(link, JSON.stringify(settings), useSystemProxy);
     if (res && !res.success && res.error === 'admin_required') {
       window.api.requestAdmin();
     }
@@ -56,19 +56,26 @@ window.api = {
   
   // Settings & Subscriptions
   getSettings: async () => {
-    const s = await GetSettings();
-    return JSON.parse(s);
+    try {
+      const s = await GetSettings();
+      return JSON.parse(s);
+    } catch (e) {
+      console.error('getSettings parse error:', e);
+      return {};
+    }
   },
   saveSettings: (settings) => SaveSettings(JSON.stringify(settings)),
   getSubscriptions: async () => {
-    const s = await GetSubscriptions();
-    return JSON.parse(s);
+    try {
+      const s = await GetSubscriptions();
+      return JSON.parse(s);
+    } catch (e) {
+      console.error('getSubscriptions parse error:', e);
+      return [];
+    }
   },
   saveSubscriptions: async (subs) => {
     return SaveSubscriptions(JSON.stringify(subs));
-  },
-  setLanguage: (lang) => {
-    // Handled dynamically on frontend renderer
   },
   fetchSubscription: (url) => FetchSubscription(url),
   importFromClipboard: async () => {
@@ -102,7 +109,6 @@ window.api = {
   onPingResult: (callback) => {
     window.api._pingCallback = callback;
   },
-  onSpeedtestResult: (callback) => {},
   onTrayToggleConnection: (callback) => EventsOn('tray-toggle-connection', callback),
   onSubscriptionsUpdated: (callback) => EventsOn('subscriptions-updated', callback),
   onTrayServerSelected: (callback) => EventsOn('tray-server-selected', callback),

@@ -26,6 +26,8 @@ export function RebuildTrayServers():Promise<void>;
 
 export function RequestAdmin():Promise<void>;
 
+export function RestartXray(arg1:string,arg2:string,arg3:boolean):Promise<Record<string, any>>;
+
 export function SaveSettings(arg1:string):Promise<boolean>;
 
 export function SaveSubscriptions(arg1:string):Promise<boolean>;

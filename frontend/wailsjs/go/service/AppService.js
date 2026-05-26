@@ -50,6 +50,10 @@ export function RequestAdmin() {
   return window['go']['service']['AppService']['RequestAdmin']();
 }
 
+export function RestartXray(arg1, arg2, arg3) {
+  return window['go']['service']['AppService']['RestartXray'](arg1, arg2, arg3);
+}
+
 export function SaveSettings(arg1) {
   return window['go']['service']['AppService']['SaveSettings'](arg1);
 }

@@ -83,8 +83,11 @@ func (s *AppService) GetSettings() string {
 
 	decrypted, err := security.Decrypt(encryptedData)
 	if err != nil {
-		// If decryption fails, try reading as plain text (e.g. if was not encrypted)
-		return string(encryptedData)
+		// Дешифровка не удалась — скорее всего DPAPI-ключ сессии изменился
+		// после «Завершения работы». Удаляем повреждённый файл, чтобы
+		// при следующем SaveSettings настройки записались корректно.
+		_ = os.Remove(filePath)
+		return "{}"
 	}
 
 	return string(decrypted)
@@ -93,16 +96,17 @@ func (s *AppService) GetSettings() string {
 // SaveSettings encrypts and saves settings.json.
 func (s *AppService) SaveSettings(settingsJSON string) bool {
 	filePath := filepath.Join(s.userDataDir, "settings.json")
-	
+
 	// Apply autostart update if needed based on settings changes
 	var settingsMap map[string]interface{}
 	if err := json.Unmarshal([]byte(settingsJSON), &settingsMap); err == nil {
 		openAtLogin, _ := settingsMap["openAtLogin"].(bool)
 		exePath, err := os.Executable()
 		if err == nil {
-			if openAtLogin {
+			alreadyEnabled := security.IsAutostartEnabled("NeoBox")
+			if openAtLogin && !alreadyEnabled {
 				_ = security.SetupAutostart("NeoBox", exePath)
-			} else {
+			} else if !openAtLogin && alreadyEnabled {
 				_ = security.RemoveAutostart("NeoBox")
 			}
 		}
@@ -141,7 +145,10 @@ func (s *AppService) GetSubscriptions() string {
 		} else {
 			decrypted, err := security.Decrypt(encryptedData)
 			if err != nil {
-				decryptedJSON = string(encryptedData)
+				// Дешифровка не удалась — DPAPI-ключ сессии изменился
+				// после «Завершения работы». Удаляем повреждённый файл.
+				_ = os.Remove(filePath)
+				decryptedJSON = "[]"
 			} else {
 				decryptedJSON = string(decrypted)
 			}
@@ -195,12 +202,15 @@ func (s *AppService) SaveSubscriptions(subsJSON string) bool {
 }
 
 // StartXray parses the selected proxy URL and runs sing-box.
-func (s *AppService) StartXray(link string, settingsJSON string, useSystemProxy bool) map[string]interface{} {
+// NOTE: settingsJSON is kept for API compatibility but is intentionally ignored —
+// settings are always read fresh from disk to prevent stale/empty frontend state
+// (e.g., after a DPAPI key change) from launching VPN with wrong configuration.
+func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[string]interface{} {
 	response := map[string]interface{}{"success": false}
 
-	// 1. Parse settings
+	// 1. Read settings directly from disk (authoritative source)
 	var settings core.Settings
-	if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil {
+	if err := json.Unmarshal([]byte(s.GetSettings()), &settings); err != nil {
 		response["error"] = fmt.Sprintf("Failed to parse settings: %v", err)
 		return response
 	}
@@ -209,6 +219,16 @@ func (s *AppService) StartXray(link string, settingsJSON string, useSystemProxy 
 	if settings.TunMode && !s.CheckAdmin() {
 		response["error"] = "admin_required"
 		return response
+	}
+
+	// 1c. Verify the mixed proxy port is available before attempting to start.
+	// If port 20809 is already bound by another process, sing-box will fail with a
+	// cryptic error. We give a clear message here instead.
+	if ln, err := net.Listen("tcp", "127.0.0.1:20809"); err != nil {
+		response["error"] = "Порт 20809 уже занят другим процессом. Закройте конфликтующее приложение и попробуйте снова."
+		return response
+	} else {
+		_ = ln.Close()
 	}
 
 	// 2. Parse proxy URL
@@ -294,6 +314,26 @@ func (s *AppService) StopXray() map[string]interface{} {
 
 	response["success"] = true
 	return response
+}
+
+// RestartXray restarts the VPN core without disturbing the system proxy backup.
+// Unlike calling StopXray + StartXray separately, this preserves the proxy backup
+// state so the user's original proxy settings are correctly restored on final disconnect.
+func (s *AppService) RestartXray(link string, settingsJSON string, useSystemProxy bool) map[string]interface{} {
+	// Stop the core and traffic monitor only — do NOT touch system proxy or kill switch.
+	if s.cancelMonitor != nil {
+		s.cancelMonitor()
+		s.cancelMonitor = nil
+	}
+	_ = s.coreManager.Stop()
+
+	// Emit stopped event so UI knows the old session ended
+	if s.wailsCtx != nil {
+		wailsruntime.EventsEmit(s.wailsCtx, "xray-stopped", nil)
+	}
+
+	// Start fresh session — proxy backup is still intact from the original StartXray call.
+	return s.StartXray(link, settingsJSON, useSystemProxy)
 }
 
 // CheckAdmin checks if the application runs with administrative/elevated privileges.
