@@ -194,6 +194,19 @@ function applyLanguage() {
     tab.textContent = t[`log${filter.charAt(0) + filter.slice(1).toLowerCase()}`];
   });
 
+  // Update Modal translations
+  const updateModalTitleEl = document.getElementById('updateModalTitle');
+  if (updateModalTitleEl) updateModalTitleEl.textContent = t.updateModalTitle;
+  
+  const updateModalChangelogTitleEl = document.querySelector('.update-changelog-title');
+  if (updateModalChangelogTitleEl) updateModalChangelogTitleEl.textContent = t.updateModalChangelogTitle;
+  
+  const updateModalCancelEl = document.getElementById('updateModalCancel');
+  if (updateModalCancelEl) updateModalCancelEl.textContent = t.updateModalCancel;
+  
+  const updateModalConfirmEl = document.getElementById('updateModalConfirm');
+  if (updateModalConfirmEl) updateModalConfirmEl.textContent = t.updateModalConfirm;
+
   renderSubTabs(subTabsContainer, translations, currentLanguage, updateCards, (title, def) => showPrompt('modalOverlay', 'modalTitle', 'modalInput', 'modalCancel', 'modalConfirm', title, def), (title) => showConfirm('modalOverlay', 'modalTitle', 'modalInput', 'modalCancel', 'modalConfirm', title), loadSubscriptions);
   updateCards();
 }
@@ -606,19 +619,116 @@ window.api.onWindowRestored(() => {
   document.body.classList.remove('window-hidden');
 });
 
+function showUpdateModal(update) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('updateModalOverlay');
+    const versionEl = document.getElementById('updateModalVersion');
+    const changelogEl = document.getElementById('updateModalChangelog');
+    const cancelBtn = document.getElementById('updateModalCancel');
+    const confirmBtn = document.getElementById('updateModalConfirm');
+    const progressSection = document.getElementById('updateProgressSection');
+    const progressStatus = document.getElementById('updateProgressStatus');
+    const progressPercent = document.getElementById('updateProgressPercent');
+    const progressBar = document.getElementById('updateProgressBar');
+    const actions = document.getElementById('updateModalActions');
+    const t = translations[currentLanguage];
+
+    // Set text contents
+    versionEl.textContent = `v${update.version}`;
+    changelogEl.textContent = update.body || (currentLanguage === 'RU' ? 'Описание изменений отсутствует.' : 'No changelog description provided.');
+
+    // Reset styles
+    progressSection.style.display = 'none';
+    progressBar.style.width = '0%';
+    progressPercent.textContent = '0%';
+    progressStatus.textContent = t.updateProgressStatusDownloading || 'Downloading update...';
+    progressStatus.style.color = 'var(--text-dim)';
+    
+    // Reset buttons visibility and states
+    actions.style.display = 'flex';
+    cancelBtn.style.display = 'block';
+    cancelBtn.disabled = false;
+    confirmBtn.style.display = 'block';
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = t.updateModalConfirm || 'Update Now';
+
+    overlay.style.display = 'flex';
+
+    cancelBtn.onclick = () => {
+      overlay.style.display = 'none';
+      resolve(false);
+    };
+
+    confirmBtn.onclick = async () => {
+      // If we don't have downloadUrl for some reason (e.g. GitHub API didn't return a build), fall back to opening webpage
+      if (!update.downloadUrl) {
+        window.api.openUpdateLink(update.url);
+        overlay.style.display = 'none';
+        resolve(true);
+        return;
+      }
+
+      // Transition UI to download state
+      cancelBtn.style.display = 'none';
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = currentLanguage === 'RU' ? 'Загрузка...' : 'Downloading...';
+      progressSection.style.display = 'block';
+
+      const cleanupEvents = [];
+
+      const onProgress = (percent) => {
+        progressBar.style.width = `${percent}%`;
+        progressPercent.textContent = `${percent}%`;
+      };
+
+      const onComplete = () => {
+        progressBar.style.width = '100%';
+        progressPercent.textContent = '100%';
+        progressStatus.textContent = t.updateProgressStatusComplete || 'Installing...';
+        progressStatus.style.color = 'var(--success)';
+        
+        cleanupEvents.forEach(dereg => dereg());
+        setTimeout(() => {
+          overlay.style.display = 'none';
+          resolve(true);
+        }, 1500);
+      };
+
+      const onError = (errMsg) => {
+        progressStatus.textContent = `${t.updateProgressStatusError || 'Update failed'}: ${errMsg}`;
+        progressStatus.style.color = 'var(--danger)';
+        
+        // Show cancel button again to allow closing or retrying
+        cancelBtn.style.display = 'block';
+        cancelBtn.disabled = false;
+        confirmBtn.style.display = 'none';
+        
+        cleanupEvents.forEach(dereg => dereg());
+      };
+
+      // Subscribe to Wails events via our bridge api
+      const unsubProgress = window.api.onUpdateProgress(onProgress);
+      const unsubComplete = window.api.onUpdateComplete(onComplete);
+      const unsubError = window.api.onUpdateError(onError);
+      cleanupEvents.push(unsubProgress, unsubComplete, unsubError);
+
+      try {
+        // Trigger download process in background Go service
+        await window.api.downloadAndInstallUpdate(update.downloadUrl);
+      } catch (err) {
+        onError(err.message || err);
+      }
+    };
+  });
+}
+
 // Инициализация
 async function init() {
   // Проверка обновлений
   try {
     const update = await window.api.checkUpdates();
     if (update && update.available) {
-      const showUpdate = await showConfirm(
-        'modalOverlay', 'modalTitle', 'modalInput', 'modalCancel', 'modalConfirm',
-        `${currentLanguage === 'RU' ? 'Доступно обновление' : 'Update Available'}: v${update.version}\n\n${update.body || ''}`
-      );
-      if (showUpdate) {
-        window.api.openUpdateLink(update.url);
-      }
+      await showUpdateModal(update);
     }
   } catch (e) { console.error('Update check failed:', e); }
 

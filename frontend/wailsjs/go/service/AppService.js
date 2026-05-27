@@ -10,6 +10,10 @@ export function CheckUpdates() {
   return window['go']['service']['AppService']['CheckUpdates']();
 }
 
+export function DownloadAndInstallUpdate(arg1) {
+  return window['go']['service']['AppService']['DownloadAndInstallUpdate'](arg1);
+}
+
 export function FetchSubscription(arg1) {
   return window['go']['service']['AppService']['FetchSubscription'](arg1);
 }

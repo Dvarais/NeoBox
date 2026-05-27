@@ -276,6 +276,46 @@
     </div>
   </div>
 
+  <!-- Модальное окно обновления (Update Modal) -->
+  <div id="updateModalOverlay" class="modal-overlay">
+    <div class="modal-content update-modal-content">
+      <div class="update-header">
+        <div class="update-icon-wrapper">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+          </svg>
+        </div>
+        <div class="update-title-area">
+          <h3 id="updateModalTitle">Доступно обновление</h3>
+          <span id="updateModalVersion" class="update-badge">v1.5.8</span>
+        </div>
+      </div>
+      
+      <div class="update-body">
+        <p class="update-changelog-title">Что нового:</p>
+        <div id="updateModalChangelog" class="update-changelog">
+          <!-- Описание изменений -->
+        </div>
+      </div>
+      
+      <!-- Прогресс скачивания -->
+      <div id="updateProgressSection" class="update-progress-section" style="display: none;">
+        <div class="progress-info">
+          <span id="updateProgressStatus">Скачивание обновления...</span>
+          <span id="updateProgressPercent">0%</span>
+        </div>
+        <div class="progress-bar-container">
+          <div id="updateProgressBar" class="progress-bar" style="width: 0%;"></div>
+        </div>
+      </div>
+      
+      <div id="updateModalActions" class="modal-actions">
+        <button id="updateModalCancel" class="btn-glass">Позже</button>
+        <button id="updateModalConfirm" class="btn-glass btn-primary-premium">Обновить сейчас</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Кастомное модальное окно уведомлений / ошибок (alert/error) -->
   <div id="alertOverlay" class="modal-overlay alert-modal-overlay">
     <div class="modal-content alert-modal-content">

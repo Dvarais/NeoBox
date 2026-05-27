@@ -86,9 +86,14 @@ export const translations = {
     qrStartCameraBtn: '🎥 Запустить камеру',
     qrUploadFileBtn: '📁 Выбрать файл',
     qrPlaceholderText: 'Выберите способ импорта ниже',
-    qrNoCodeError: 'На изображении не найден QR-код!',
-    qrCameraError: 'Не удалось получить доступ к камере!',
-    qrSuccessImport: 'Сервер успешно добавлен через QR-код!'
+    qrSuccessImport: 'Сервер успешно добавлен через QR-код!',
+    updateModalTitle: 'Доступно обновление',
+    updateModalChangelogTitle: 'Что нового:',
+    updateModalCancel: 'Позже',
+    updateModalConfirm: 'Обновить сейчас',
+    updateProgressStatusDownloading: 'Скачивание обновления...',
+    updateProgressStatusComplete: 'Установка...',
+    updateProgressStatusError: 'Ошибка при обновлении'
   },
   EN: {
     statusOff: 'Disconnected',
@@ -177,8 +182,13 @@ export const translations = {
     qrStartCameraBtn: '🎥 Start Camera',
     qrUploadFileBtn: '📁 Choose File',
     qrPlaceholderText: 'Choose import method below',
-    qrNoCodeError: 'No QR code found in this image!',
-    qrCameraError: 'Failed to access camera!',
-    qrSuccessImport: 'Server successfully added via QR code!'
+    qrSuccessImport: 'Server successfully added via QR code!',
+    updateModalTitle: 'Update Available',
+    updateModalChangelogTitle: 'What\'s New:',
+    updateModalCancel: 'Later',
+    updateModalConfirm: 'Update Now',
+    updateProgressStatusDownloading: 'Downloading update...',
+    updateProgressStatusComplete: 'Installing...',
+    updateProgressStatusError: 'Update failed'
   }
 };

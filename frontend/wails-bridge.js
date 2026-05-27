@@ -2,6 +2,7 @@
 import { 
   CheckAdmin, 
   CheckUpdates, 
+  DownloadAndInstallUpdate,
   FetchSubscription, 
   GetSettings, 
   GetSubscriptions, 
@@ -117,9 +118,13 @@ window.api = {
 
   // Auto update
   checkUpdates: () => CheckUpdates(),
+  downloadAndInstallUpdate: (downloadURL) => DownloadAndInstallUpdate(downloadURL),
   openUpdateLink: (url) => {
     window.open(url, '_blank');
   },
+  onUpdateProgress: (callback) => EventsOn('update-progress', callback),
+  onUpdateComplete: (callback) => EventsOn('update-complete', callback),
+  onUpdateError: (callback) => EventsOn('update-error', callback),
 
   // Admin rights
   checkAdmin: () => CheckAdmin(),

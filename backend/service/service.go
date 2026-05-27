@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -580,9 +581,133 @@ func (s *AppService) CheckUpdates() map[string]interface{} {
 		response["version"] = latestVersion
 		response["url"] = htmlURL
 		response["body"] = body
+
+		// Extract download URL for the Windows .exe installer
+		if assets, ok := releaseInfo["assets"].([]interface{}); ok {
+			for _, assetVal := range assets {
+				if asset, ok := assetVal.(map[string]interface{}); ok {
+					name, _ := asset["name"].(string)
+					url, _ := asset["browser_download_url"].(string)
+					if strings.HasSuffix(strings.ToLower(name), ".exe") {
+						response["downloadUrl"] = url
+						response["assetName"] = name
+						break
+					}
+				}
+			}
+		}
 	}
 
 	return response
+}
+
+// DownloadAndInstallUpdate downloads the installer from the given URL,
+// reporting progress to the frontend, and runs it upon completion.
+func (s *AppService) DownloadAndInstallUpdate(downloadURL string) error {
+	s.wailsCtxMu.RLock()
+	wCtx := s.wailsCtx
+	s.wailsCtxMu.RUnlock()
+
+	if wCtx == nil {
+		return fmt.Errorf("wails context is not initialized")
+	}
+
+	// Extract filename from download URL
+	parts := strings.Split(downloadURL, "/")
+	filename := "neobox_update.exe"
+	if len(parts) > 0 {
+		filename = parts[len(parts)-1]
+	}
+
+	tempDir := os.TempDir()
+	installerPath := filepath.Join(tempDir, filename)
+
+	// Start downloading in a background goroutine so we return immediately to the frontend,
+	// allowing it to show the progress bar.
+	go func() {
+		err := s.performDownload(wCtx, downloadURL, installerPath)
+		if err != nil {
+			wailsruntime.EventsEmit(wCtx, "update-error", err.Error())
+			return
+		}
+
+		// Download complete!
+		wailsruntime.EventsEmit(wCtx, "update-complete", nil)
+
+		// Wait a split second for frontend to process before starting installer
+		time.Sleep(1 * time.Second)
+
+		// Start installer asynchronously
+		cmd := exec.Command(installerPath)
+		err = cmd.Start()
+		if err != nil {
+			wailsruntime.EventsEmit(wCtx, "update-error", "Failed to start installer: "+err.Error())
+			return
+		}
+
+		// Quit our application immediately so the installer can overwrite NeoBox.exe
+		wailsruntime.Quit(wCtx)
+	}()
+
+	return nil
+}
+
+func (s *AppService) performDownload(ctx context.Context, url, destPath string) error {
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "NeoBox-App")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad status: %s", resp.Status)
+	}
+
+	out, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	totalSize := resp.ContentLength
+	buffer := make([]byte, 32*1024)
+	var downloaded int64
+	var lastPercent int = -1
+
+	for {
+		n, err := resp.Body.Read(buffer)
+		if n > 0 {
+			_, writeErr := out.Write(buffer[:n])
+			if writeErr != nil {
+				return writeErr
+			}
+			downloaded += int64(n)
+
+			if totalSize > 0 {
+				percentage := int(float64(downloaded) / float64(totalSize) * 100)
+				if percentage != lastPercent {
+					wailsruntime.EventsEmit(ctx, "update-progress", percentage)
+					lastPercent = percentage
+				}
+			}
+		}
+
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *AppService) isNewer(latest, current string) bool {
