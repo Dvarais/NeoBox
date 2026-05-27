@@ -54,6 +54,10 @@ export function RestartXray(arg1, arg2, arg3) {
   return window['go']['service']['AppService']['RestartXray'](arg1, arg2, arg3);
 }
 
+export function RunDiagnostics() {
+  return window['go']['service']['AppService']['RunDiagnostics']();
+}
+
 export function SaveSettings(arg1) {
   return window['go']['service']['AppService']['SaveSettings'](arg1);
 }
@@ -84,6 +88,10 @@ export function StartAutoUpdateScheduler() {
 
 export function StartXray(arg1, arg2, arg3) {
   return window['go']['service']['AppService']['StartXray'](arg1, arg2, arg3);
+}
+
+export function StopAutoUpdateScheduler() {
+  return window['go']['service']['AppService']['StopAutoUpdateScheduler']();
 }
 
 export function StopXray() {

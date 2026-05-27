@@ -28,6 +28,8 @@ export function RequestAdmin():Promise<void>;
 
 export function RestartXray(arg1:string,arg2:string,arg3:boolean):Promise<Record<string, any>>;
 
+export function RunDiagnostics():Promise<string>;
+
 export function SaveSettings(arg1:string):Promise<boolean>;
 
 export function SaveSubscriptions(arg1:string):Promise<boolean>;
@@ -43,6 +45,8 @@ export function SetWindowVisible(arg1:boolean):Promise<void>;
 export function StartAutoUpdateScheduler():Promise<void>;
 
 export function StartXray(arg1:string,arg2:string,arg3:boolean):Promise<Record<string, any>>;
+
+export function StopAutoUpdateScheduler():Promise<void>;
 
 export function StopXray():Promise<Record<string, any>>;
 
