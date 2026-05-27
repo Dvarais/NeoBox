@@ -32,15 +32,22 @@ body.window-hidden {
 
 /* Window Header */
 .window-header {
+  position: fixed;
+  top: 0;
+  left: 70px; /* Начинается после боковой панели aside */
+  right: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 10px 20px;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(22, 27, 44, 0.4);
+  backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--glass-border);
-  margin: -30px -30px 30px -30px; /* Компенсируем padding у main */
   -webkit-app-region: drag;
+  --wails-draggable: drag; /* Поддержка перетаскивания Wails */
   height: 45px;
+  z-index: 999; /* Всегда поверх контента main */
+  user-select: none; /* Запрещаем выделение текста */
 }
 
 .window-title {
@@ -49,12 +56,17 @@ body.window-hidden {
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 1px;
+  -webkit-app-region: drag;
+  --wails-draggable: drag;
+  user-select: none;
+  pointer-events: none; /* Клик проходит сквозь заголовок на шапку */
 }
 
 .window-controls {
   display: flex;
   gap: 5px;
   -webkit-app-region: no-drag;
+  --wails-draggable: no-drag;
 }
 
 .control-btn {
@@ -99,10 +111,12 @@ aside {
   gap: 30px;
   z-index: 100;
   -webkit-app-region: drag; /* Позволяет перетаскивать окно за боковую панель */
+  --wails-draggable: drag;
 }
 
 .nav-item, #langToggle {
   -webkit-app-region: no-drag; /* Кнопки должны оставаться кликабельными */
+  --wails-draggable: no-drag;
 }
 
 .nav-item {
@@ -132,7 +146,7 @@ main {
   flex: 1;
   position: relative;
   overflow-y: auto;
-  padding: 30px;
+  padding: 65px 30px 30px 30px; /* Отступ сверху 65px, чтобы контент не перекрывался фиксированной шапкой */
 }
 
 .view {

@@ -50,6 +50,10 @@ ManifestDPIAware true
 
 !include "MUI.nsh"
 
+; Fix: явно задаём стандартный шрифт Windows чтобы избежать «билеберды» на экране запуска
+!define MUI_FONT "Segoe UI"
+!define MUI_FONT_SIZE 9
+
 !define MUI_ICON "..\icon.ico"
 !define MUI_UNICON "..\icon.ico"
 # !define MUI_WELCOMEFINISHPAGE_BITMAP "resources\leftimage.bmp" #Include this to add a bitmap on the left side of the Welcome Page. Must be a size of 164x314
@@ -129,10 +133,20 @@ do_uninstall_go:
     Sleep 1000
 
 end_uninstall_detection:
-    # Clean up legacy installation folders if left behind to ensure a fresh clean state
+    # Clean up legacy Electron installation folder (NOT user data in APPDATA\NeoBox)
     SetShellVarContext current
     RMDir /r "$LOCALAPPDATA\Programs\neobox"
-    RMDir /r "$APPDATA\NeoBox"
+
+    ; Fix: удаляем ключи автозапуска Electron-версии NeoBox из реестра
+    ; чтобы при старте системы не открывалась старая версия
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "NeoBox"
+    DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "NeoBox"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "neobox"
+    DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "neobox"
+
+    ; Fix: НЕ удаляем $APPDATA\NeoBox здесь — пользовательские данные
+    ; (settings.json, subscriptions.json) должны сохраняться при обновлении!
+    ; Удаление пользовательских данных происходит ТОЛЬКО при полной деинсталляции (см. ниже).
     !insertmacro wails.setShellContext
 
     !insertmacro wails.webview2runtime

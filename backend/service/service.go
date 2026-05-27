@@ -32,7 +32,7 @@ import (
 // currentVersion is the application version. Update this before each release.
 // FIX #14: Extracted from CheckUpdates into a package-level constant so it
 // cannot be missed during release preparation.
-const currentVersion = "1.5.7"
+const currentVersion = "1.5.8"
 
 type TrayServerItem struct {
 	Item *systray.MenuItem
