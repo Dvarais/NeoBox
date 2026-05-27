@@ -2,7 +2,7 @@
 *.exe
 *.exe~
 NeoBox-Go.exe
-NeoBox_Setup_v1.5.6.exe
+NeoBox_Setup_v1.5.7.exe
 
 # Wails and Frontend Build Output
 build/bin/

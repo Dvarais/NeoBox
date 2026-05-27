@@ -14,7 +14,7 @@ NeoBox is a secure, high-performance VPN client for Windows powered by sing-box 
 NeoBox is compiled for Windows. Windows 10 or Windows 11 is recommended to support the full visual effects of the Acrylic translucent backdrop.
 
 #### Steps
-1. Download the latest installer `NeoBox_Setup_v1.5.6.exe` or the standalone executable `NeoBox.exe` from the Releases section of the GitHub repository.
+1. Download the latest installer `NeoBox_Setup_v1.5.7.exe` or the standalone executable `NeoBox.exe` from the Releases section of the GitHub repository.
 2. Run the installer to install NeoBox on your system.
 3. Launch the application.
 4. If you enable TUN mode, the application will prompt you for Administrator privileges. This is required because creating a virtual network interface (using the Wintun driver) to route system-wide traffic requires administrative control.
@@ -59,7 +59,7 @@ NeoBox — это безопасный и высокопроизводитель
 NeoBox скомпилирован под операционную систему Windows. Для полноценной поддержки визуального эффекта Acrylic рекомендуется использовать Windows 10 или Windows 11.
 
 #### Шаги установки
-1. Загрузите актуальный установщик `NeoBox_Setup_v1.5.6.exe` или портативную версию `NeoBox.exe` из раздела релизов (Releases) репозитория на GitHub.
+1. Загрузите актуальный установщик `NeoBox_Setup_v1.5.7.exe` or портативную версию `NeoBox.exe` из раздела релизов (Releases) репозитория на GitHub.
 2. Запустите установщик для установки NeoBox в систему.
 3. Запустите установленное приложение.
 4. При включении TUN-режима приложение запросит права администратора. Это необходимо, так как создание виртуального сетевого интерфейса (через драйвер Wintun) для маршрутизации системного трафика требует привилегий суперпользователя.

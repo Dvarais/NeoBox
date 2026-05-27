@@ -267,6 +267,11 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 				serverPart := parts[1]
 
 				authParts := strings.SplitN(auth, ":", 2)
+				// FIX #11: Guard against missing ":" — SplitN returns a 1-element slice if
+				// the separator is absent, making authParts[1] an index-out-of-range panic.
+				if len(authParts) < 2 {
+					return nil, fmt.Errorf("invalid shadowsocks legacy auth format: missing ':'")
+				}
 				method := authParts[0]
 				password := authParts[1]
 
@@ -376,8 +381,30 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 }
 
 // GenerateConfig generates a complete sing-box configuration map.
-func GenerateConfig(outbound map[string]interface{}, settings Settings, useSystemProxy bool, cacheDBPath string) (map[string]interface{}, error) {
+//
+// FIX #16: The function no longer mutates the caller's outbound map. It creates a shallow
+// copy so that domain_resolver injection and server IP resolution don't side-effect the
+// original map (important for PingServer which also calls ParseProxyLink on the same link).
+// FIX #3: All type assertions on outbound fields are now safe (using the two-value form)
+// and return descriptive errors instead of panicking.
+//
+// clashSecret is injected into the Clash API config so only NeoBox itself can
+// communicate with the local API endpoint on port 9097. Pass an empty string to
+// disable authentication (not recommended in production).
+func GenerateConfig(outbound map[string]interface{}, settings Settings, useSystemProxy bool, cacheDBPath string, clashSecret string) (map[string]interface{}, error) {
 	tunMode := settings.TunMode
+
+	// FIX #3 + #16: Extract and validate required fields before any work.
+	outboundTag, ok := outbound["tag"].(string)
+	if !ok || outboundTag == "" {
+		return nil, fmt.Errorf("outbound map is missing required string field 'tag'")
+	}
+
+	// FIX #16: Work on a shallow copy so we don't mutate the caller's map.
+	workOutbound := make(map[string]interface{}, len(outbound))
+	for k, v := range outbound {
+		workOutbound[k] = v
+	}
 
 	// 1. DNS Section (Nuclear Strategy: No local DNS, only IP-based DoH for remote, local for direct)
 	dnsServers := []map[string]interface{}{
@@ -386,15 +413,15 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			"tag":    "dns-remote",
 			"server": "1.1.1.1",
 			"path":   "/dns-query",
-			"detour": outbound["tag"].(string),
+			"detour": outboundTag,
 			"tls": map[string]interface{}{
 				"enabled":     true,
 				"server_name": "cloudflare-dns.com",
 			},
 		},
 		{
-			"type":   "local",
-			"tag":    "dns-direct",
+			"type": "local",
+			"tag":  "dns-direct",
 		},
 	}
 
@@ -408,8 +435,8 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 
 	// Pre-resolve proxy domain to IP to avoid DNS inside the tunnel.
 	// Uses a 2-second timeout so slow DNS won't freeze VPN startup.
-	serverDomain, _ := outbound["server"].(string)
-	outbound["domain_resolver"] = "dns-direct"
+	serverDomain, _ := workOutbound["server"].(string)
+	workOutbound["domain_resolver"] = "dns-direct"
 	if net.ParseIP(serverDomain) == nil {
 		resolveCtx, resolveCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer resolveCancel()
@@ -417,7 +444,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		if err == nil {
 			for _, addr := range addrs {
 				if addr.IP.To4() != nil {
-					outbound["server"] = addr.IP.String()
+					workOutbound["server"] = addr.IP.String()
 					break
 				}
 			}
@@ -463,7 +490,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 	}
 
 	// Exclude proxy server IP or domain from proxy tunnel
-	serverIPStr, _ := outbound["server"].(string)
+	serverIPStr, _ := workOutbound["server"].(string)
 	if net.ParseIP(serverIPStr) != nil {
 		routeRules = append(routeRules, map[string]interface{}{
 			"ip_cidr":  []string{serverIPStr + "/32"},
@@ -506,7 +533,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			routeRules = append(routeRules, map[string]interface{}{
 				"process_name": processList,
 				"action":       "route",
-				"outbound":     outbound["tag"].(string),
+				"outbound":     outboundTag,
 			})
 			routeRules = append(routeRules, map[string]interface{}{
 				"action":   "route",
@@ -536,7 +563,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		routeRules = append(routeRules, map[string]interface{}{
 			"ip_cidr":  []string{"198.18.0.0/15"},
 			"action":   "route",
-			"outbound": outbound["tag"].(string),
+			"outbound": outboundTag,
 		})
 	}
 
@@ -578,7 +605,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			},
 		},
 		"outbounds": []interface{}{
-			outbound,
+			workOutbound,
 			map[string]interface{}{"type": "direct", "tag": "direct"},
 			map[string]interface{}{"type": "block", "tag": "block"},
 		},
@@ -586,16 +613,19 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			"rules":                   routeRules,
 			"auto_detect_interface":   true,
 			"default_domain_resolver": "dns-direct",
-			"final":                   outbound["tag"].(string),
+			"final":                   outboundTag,
 		},
 		"experimental": map[string]interface{}{
 			"cache_file": map[string]interface{}{
-				"enabled":       true,
-				"path":          cacheDBPath,
-				"store_fakeip":  true,
+				"enabled":      true,
+				"path":         cacheDBPath,
+				"store_fakeip": true,
 			},
 			"clash_api": map[string]interface{}{
 				"external_controller": "127.0.0.1:9097",
+				// Security: always require a per-session secret so other processes on
+				// the machine cannot control the VPN core via the local Clash API.
+				"secret": clashSecret,
 			},
 		},
 	}
@@ -627,8 +657,8 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			"tag":            "tun-in",
 			"interface_name": "tun-neobox",
 			"address":        []string{"172.18.0.1/30", "fdfe:dcba:9876::1/126"},
-			"auto_route":      true,
-			"strict_route":    true,
+			"auto_route":     true,
+			"strict_route":   true,
 			"stack":          "gvisor",
 			"mtu":            1280,
 		})
@@ -639,11 +669,21 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 }
 
 // FetchSubscription loads subscription contents (both JSON-based xray-ext and standard lists).
+//
+// Security: HTTP (non-TLS) subscription URLs are rejected to prevent MITM attacks
+// where an attacker on the same network could substitute malicious proxy servers.
+// Use HTTPS URLs for all subscriptions.
 func FetchSubscription(subURL string) ([]string, error) {
 	trimmedURL := strings.TrimSpace(subURL)
 	trimmedURL = strings.ReplaceAll(trimmedURL, " ", "%20")
 	trimmedURL = strings.ReplaceAll(trimmedURL, "\t", "%09")
 	lowerURL := strings.ToLower(trimmedURL)
+
+	// Security: block plain HTTP subscription URLs — only HTTPS is allowed.
+	// Direct proxy links (vless://, vmess://, etc.) bypass this check.
+	if strings.HasPrefix(lowerURL, "http://") {
+		return nil, fmt.Errorf("небезопасный URL подписки: используйте HTTPS вместо HTTP для защиты от перехвата")
+	}
 	if strings.HasPrefix(lowerURL, "vless://") || strings.HasPrefix(lowerURL, "vmess://") ||
 		strings.HasPrefix(lowerURL, "ss://") || strings.HasPrefix(lowerURL, "trojan://") ||
 		strings.HasPrefix(lowerURL, "tuic://") || strings.HasPrefix(lowerURL, "hysteria2://") ||
@@ -669,17 +709,21 @@ func FetchSubscription(subURL string) ([]string, error) {
 			}
 			resp, err := proxyClient.Do(req)
 			if err == nil {
+				// FIX #10: Handle ReadAll error explicitly instead of silently ignoring it.
 				limitReader := io.LimitReader(resp.Body, 20*1024*1024)
-				tempBytes, _ := io.ReadAll(limitReader)
+				tempBytes, readErr := io.ReadAll(limitReader)
 				resp.Body.Close()
-				
-				tempData := strings.TrimSpace(string(tempBytes))
-				isHTML := strings.Contains(strings.ToLower(tempData), "<html") || strings.Contains(strings.ToLower(tempData), "<script")
-				if !isHTML && len(tempData) > 0 {
-					rawData = tempData
-					bodyBytes = tempBytes
+				if readErr != nil {
+					fetchErr = fmt.Errorf("proxy response read error: %w", readErr)
 				} else {
-					fetchErr = fmt.Errorf("proxy returned HTML or empty data")
+					tempData := strings.TrimSpace(string(tempBytes))
+					isHTML := strings.Contains(strings.ToLower(tempData), "<html") || strings.Contains(strings.ToLower(tempData), "<script")
+					if !isHTML && len(tempData) > 0 {
+						rawData = tempData
+						bodyBytes = tempBytes
+					} else {
+						fetchErr = fmt.Errorf("proxy returned HTML or empty data")
+					}
 				}
 			} else {
 				fetchErr = err
@@ -697,20 +741,28 @@ func FetchSubscription(subURL string) ([]string, error) {
 			}
 			resp, err := directClient.Do(req)
 			if err == nil {
+				// FIX #10: Handle ReadAll error explicitly.
 				limitReader := io.LimitReader(resp.Body, 20*1024*1024)
-				tempBytes, _ := io.ReadAll(limitReader)
+				tempBytes, readErr := io.ReadAll(limitReader)
 				resp.Body.Close()
-				
-				tempData := strings.TrimSpace(string(tempBytes))
-				isHTML := strings.Contains(strings.ToLower(tempData), "<html") || strings.Contains(strings.ToLower(tempData), "<script")
-				if !isHTML && len(tempData) > 0 {
-					rawData = tempData
-					bodyBytes = tempBytes
-				} else {
+				if readErr != nil {
 					if fetchErr != nil {
-						fetchErr = fmt.Errorf("direct returned HTML or empty; proxy error: %v", fetchErr)
+						fetchErr = fmt.Errorf("direct read error: %v; proxy error: %v", readErr, fetchErr)
 					} else {
-						fetchErr = fmt.Errorf("direct returned HTML or empty data")
+						fetchErr = fmt.Errorf("direct response read error: %w", readErr)
+					}
+				} else {
+					tempData := strings.TrimSpace(string(tempBytes))
+					isHTML := strings.Contains(strings.ToLower(tempData), "<html") || strings.Contains(strings.ToLower(tempData), "<script")
+					if !isHTML && len(tempData) > 0 {
+						rawData = tempData
+						bodyBytes = tempBytes
+					} else {
+						if fetchErr != nil {
+							fetchErr = fmt.Errorf("direct returned HTML or empty; proxy error: %v", fetchErr)
+						} else {
+							fetchErr = fmt.Errorf("direct returned HTML or empty data")
+						}
 					}
 				}
 			} else {

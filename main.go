@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"unsafe"
 
 	"NeoBox/backend/core"
 	"NeoBox/backend/security"
@@ -19,6 +20,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	syswindows "golang.org/x/sys/windows"
 )
 
 //go:embed all:frontend/dist
@@ -28,8 +30,20 @@ var assets embed.FS
 var trayIcon []byte
 
 func main() {
-	// Clean up any other running instances of the app before starting!
-	killExistingInstances()
+	// Clean up any other running instances of the app before starting.
+	// Uses a Windows named mutex as the primary single-instance guard.
+	mutexHandle, alreadyRunning := acquireSingleInstanceMutex()
+	if alreadyRunning {
+		// Another instance is already running — bring it to foreground and exit.
+		fmt.Println("Another NeoBox instance is already running.")
+		os.Exit(0)
+	}
+	if mutexHandle != 0 {
+		defer syswindows.CloseHandle(mutexHandle)
+	}
+
+	// Fallback: kill orphaned instances that didn't clean up their mutex
+	killOrphanedInstances()
 
 	// 1. Resolve user data directory for settings/subscriptions
 	homeDir, _ := os.UserHomeDir()
@@ -84,6 +98,8 @@ func main() {
 			appService.StartAutoUpdateScheduler()
 		},
 		OnShutdown: func(ctx context.Context) {
+			// FIX #9: Stop the auto-update background goroutine before cleaning up VPN.
+			appService.StopAutoUpdateScheduler()
 			// Safe shutdown of VPN processes and proxy cleanup on close
 			_ = coreManager.Stop()
 			appService.SetSystemProxy(false)
@@ -105,6 +121,22 @@ func main() {
 	}
 }
 
+// acquireSingleInstanceMutex creates a Windows named mutex to ensure only one
+// instance of NeoBox runs at a time. Returns the mutex handle and whether
+// another instance is already running.
+func acquireSingleInstanceMutex() (syswindows.Handle, bool) {
+	mutexName, _ := syswindows.UTF16PtrFromString("Global\\NeoBox-SingleInstance-Mutex")
+	handle, err := syswindows.CreateMutex(nil, false, mutexName)
+	if err != nil {
+		if err == syswindows.ERROR_ALREADY_EXISTS {
+			return 0, true // Another instance holds the mutex
+		}
+		// CreateMutex failed for another reason — allow startup anyway
+		return 0, false
+	}
+	return handle, false
+}
+
 // migrateOldSettings migrates settings and subscriptions from the old Electron-based
 // NeoBox version (which stored data in AppData/Roaming/NeoBox/data/) to the new Go
 // version (which stores directly in AppData/Roaming/NeoBox/).
@@ -120,9 +152,10 @@ func migrateOldSettings(userDataDir string) {
 	newSettings := filepath.Join(userDataDir, "settings.json")
 	newSubs := filepath.Join(userDataDir, "subscriptions.json")
 
-	// Only migrate if new-format settings don't exist yet but old data folder does
-	if _, err := os.Stat(newSettings); !os.IsNotExist(err) {
-		return // Already migrated or fresh install — nothing to do
+	// Only migrate if new-format settings don't exist yet but old data folder does.
+	// FIX #17: simplified from !os.IsNotExist(err) double-negation to err == nil.
+	if _, err := os.Stat(newSettings); err == nil {
+		return // File exists — already migrated or fresh install with settings
 	}
 	if _, err := os.Stat(oldDataDir); err != nil {
 		return // No old data folder found — nothing to migrate
@@ -144,6 +177,8 @@ func migrateOldSettings(userDataDir string) {
 	if _, err := os.Stat(oldSettings); err == nil {
 		if err := copyFile(oldSettings, newSettings); err == nil {
 			if encData, err := os.ReadFile(newSettings); err == nil {
+				// FIX #1: Use Windows DPAPI (CryptUnprotectData) to decrypt Electron safeStorage.
+				// The old code incorrectly called security.Decrypt() (AES-GCM) on DPAPI data.
 				decrypted, err := decryptElectronSafeStorage(encData)
 				if err == nil {
 					var settingsMap map[string]interface{}
@@ -156,19 +191,63 @@ func migrateOldSettings(userDataDir string) {
 							}
 						}
 					}
+				} else {
+					// DPAPI decryption failed (e.g., different user session or corrupted data).
+					// Remove the partially-copied file so the app starts with clean defaults.
+					_ = os.Remove(newSettings)
 				}
 			}
 		}
 	}
 }
 
+// dpApiBlob is the Windows DATA_BLOB structure used by CryptUnprotectData.
+type dpApiBlob struct {
+	cbData uint32
+	pbData *byte
+}
+
+var (
+	modCrypt32             = syswindows.NewLazySystemDLL("crypt32.dll")
+	procCryptUnprotectData = modCrypt32.NewProc("CryptUnprotectData")
+)
+
+// decryptWithDPAPI decrypts data that was encrypted with Windows CryptProtectData (DPAPI).
+// This is required to read settings encrypted by the old Electron safeStorage implementation.
+func decryptWithDPAPI(data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("empty data")
+	}
+	inBlob := dpApiBlob{cbData: uint32(len(data)), pbData: &data[0]}
+	var outBlob dpApiBlob
+
+	r, _, err := procCryptUnprotectData.Call(
+		uintptr(unsafe.Pointer(&inBlob)),
+		0, 0, 0, 0, 0,
+		uintptr(unsafe.Pointer(&outBlob)),
+	)
+	if r == 0 {
+		return nil, fmt.Errorf("CryptUnprotectData failed: %w", err)
+	}
+	defer syswindows.LocalFree(syswindows.Handle(unsafe.Pointer(outBlob.pbData))) //nolint:errcheck
+
+	if outBlob.cbData == 0 {
+		return []byte{}, nil
+	}
+	plaintext := make([]byte, outBlob.cbData)
+	copy(plaintext, unsafe.Slice(outBlob.pbData, outBlob.cbData))
+	return plaintext, nil
+}
+
 // decryptElectronSafeStorage decrypts Electron safeStorage DPAPI encrypted strings.
 // Electron safeStorage prepends a "v10" prefix (0x76, 0x31, 0x30) to the DPAPI payload on Windows.
+// FIX #1: Previously this incorrectly called security.Decrypt() (AES-GCM) on DPAPI data.
 func decryptElectronSafeStorage(data []byte) ([]byte, error) {
 	if len(data) > 3 && string(data[:3]) == "v10" {
 		data = data[3:]
 	}
-	return security.Decrypt(data)
+	// Correctly use Windows DPAPI (CryptUnprotectData) instead of AES-GCM
+	return decryptWithDPAPI(data)
 }
 
 // copyFile copies a file from src to dst.
@@ -189,13 +268,23 @@ func copyFile(src, dst string) error {
 	return err
 }
 
-func killExistingInstances() {
+// killOrphanedInstances kills NeoBox processes that are running from the same executable
+// path as the current process but did not acquire the single-instance mutex (orphaned).
+// This serves as a fallback for instances that crashed before releasing the mutex.
+//
+// FIX #2: Uses full executable path comparison (via QueryFullProcessImageName) instead of
+// just the filename, preventing accidental kills of unrelated processes with the same name.
+func killOrphanedInstances() {
 	currentPID := os.Getpid()
 	currentExecutable, err := os.Executable()
 	if err != nil {
 		return
 	}
-	execName := filepath.Base(currentExecutable)
+	// Resolve symlinks to get the canonical path
+	currentExecutable, err = filepath.EvalSymlinks(currentExecutable)
+	if err != nil {
+		return
+	}
 
 	processes, err := ps.Processes()
 	if err != nil {
@@ -203,13 +292,52 @@ func killExistingInstances() {
 	}
 
 	for _, p := range processes {
-		if p.Pid() != currentPID && p.Executable() == execName {
-			proc, err := os.FindProcess(p.Pid())
-			if err == nil {
-				_ = proc.Kill()
-				time.Sleep(100 * time.Millisecond)
-			}
+		if p.Pid() == currentPID {
+			continue
 		}
+
+		// Get full executable path for this process using Windows API
+		fullPath, err := getProcessFullPath(p.Pid())
+		if err != nil {
+			continue
+		}
+
+		// Resolve to canonical path before comparing
+		fullPath, err = filepath.EvalSymlinks(fullPath)
+		if err != nil {
+			continue
+		}
+
+		if !filepath.IsAbs(fullPath) || fullPath != currentExecutable {
+			continue
+		}
+
+		proc, err := os.FindProcess(p.Pid())
+		if err != nil {
+			continue
+		}
+		_ = proc.Kill()
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
+// getProcessFullPath returns the full executable path of a process by PID using
+// Windows QueryFullProcessImageNameW API, which is more reliable than go-ps.
+func getProcessFullPath(pid int) (string, error) {
+	handle, err := syswindows.OpenProcess(
+		syswindows.PROCESS_QUERY_LIMITED_INFORMATION,
+		false,
+		uint32(pid),
+	)
+	if err != nil {
+		return "", err
+	}
+	defer syswindows.CloseHandle(handle) //nolint:errcheck
+
+	buf := make([]uint16, syswindows.MAX_PATH)
+	size := uint32(len(buf))
+	if err := syswindows.QueryFullProcessImageName(handle, 0, &buf[0], &size); err != nil {
+		return "", err
+	}
+	return syswindows.UTF16ToString(buf[:size]), nil
+}

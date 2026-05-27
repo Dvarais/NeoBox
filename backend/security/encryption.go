@@ -22,7 +22,13 @@ var (
 // It generates a persistent AES-256 key on first run and caches it for future calls.
 // Using a file-based key instead of Windows DPAPI makes encryption session-independent:
 // settings survive full shutdowns, privilege changes (admin vs user), and Windows updates.
+//
+// FIX #13 / NOTE: This function uses sync.Once internally, so only the first call takes
+// effect. Calling InitEncryption a second time with a different path will be silently
+// ignored. This is intentional — the key must not change during a single process run.
+// Ensure this is called exactly once at application startup before any Encrypt/Decrypt calls.
 func InitEncryption(dataDir string) error {
+	// keyFilePath must be set before keyOnce.Do() is called; it is read within the Once body.
 	keyFilePath = filepath.Join(dataDir, "key.bin")
 	_, err := loadOrCreateKey()
 	return err
@@ -51,6 +57,11 @@ func loadOrCreateKey() ([]byte, error) {
 		if err := os.WriteFile(keyFilePath, newKey, 0600); err != nil {
 			cachedKeyErr = fmt.Errorf("failed to save encryption key: %w", err)
 			return
+		}
+		// Best-effort: apply Windows ACL so only the current user can access the key.
+		// os.WriteFile with mode 0600 is a no-op on Windows — icacls provides real protection.
+		if err := ProtectFile(keyFilePath); err != nil {
+			fmt.Printf("[encryption] warning: failed to protect key file with ACL: %v\n", err)
 		}
 		cachedKey = newKey
 	})

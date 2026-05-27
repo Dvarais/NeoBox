@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +27,11 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
+// currentVersion is the application version. Update this before each release.
+// FIX #14: Extracted from CheckUpdates into a package-level constant so it
+// cannot be missed during release preparation.
+const currentVersion = "1.5.7"
+
 type TrayServerItem struct {
 	Item *systray.MenuItem
 	Link string
@@ -35,10 +42,13 @@ type AppService struct {
 	coreManager        *core.CoreManager
 	userDataDir        string
 	wailsCtx           context.Context
+	wailsCtxMu         sync.RWMutex // FIX #18: protects wailsCtx
 	cancelMonitor      context.CancelFunc
+	cancelAutoUpdate   context.CancelFunc // FIX #9: allows stopping the auto-update goroutine
 	backupProxyServer  string
 	backupProxyEnable  uint32
 	hasProxyBackup     bool
+	clashSecret        string // per-session random secret for Clash API auth
 
 	windowVisible      bool
 	mToggleItem        *systray.MenuItem
@@ -48,12 +58,20 @@ type AppService struct {
 }
 
 type wailsLogWriter struct {
+	mu  sync.RWMutex
 	ctx context.Context
 }
 
+// FIX #18: WriteMessage now acquires a read-lock before accessing ctx.
+// sing-box calls WriteMessage from its own goroutines, while SetContext is
+// called from the Wails main goroutine — without synchronization this is a
+// data race that the Go race detector reliably flags.
 func (w *wailsLogWriter) WriteMessage(level uint8, message string) {
-	if w.ctx != nil {
-		wailsruntime.EventsEmit(w.ctx, "xray-log", message)
+	w.mu.RLock()
+	ctx := w.ctx
+	w.mu.RUnlock()
+	if ctx != nil {
+		wailsruntime.EventsEmit(ctx, "xray-log", message)
 	}
 }
 
@@ -94,6 +112,12 @@ func (s *AppService) GetSettings() string {
 }
 
 // SaveSettings encrypts and saves settings.json.
+//
+// FIX #7: Removed the plaintext fallback on encryption failure. If Encrypt()
+// fails, the function now returns false without writing anything to disk.
+// Previously, a failed encryption silently stored settings in plaintext,
+// creating a discrepancy between what the user expects (encrypted) and what
+// is stored on disk (readable by anyone with filesystem access).
 func (s *AppService) SaveSettings(settingsJSON string) bool {
 	filePath := filepath.Join(s.userDataDir, "settings.json")
 
@@ -114,9 +138,10 @@ func (s *AppService) SaveSettings(settingsJSON string) bool {
 
 	encrypted, err := security.Encrypt([]byte(settingsJSON))
 	if err != nil {
-		// Fallback to plain text on error
-		err = os.WriteFile(filePath, []byte(settingsJSON), 0600)
-		return err == nil
+		// Encryption failed — do NOT fall back to plaintext storage.
+		// Return false so the caller knows the save did not succeed.
+		fmt.Printf("[SaveSettings] encryption error: %v\n", err)
+		return false
 	}
 
 	err = os.WriteFile(filePath, encrypted, 0600)
@@ -132,6 +157,12 @@ type Subscription struct {
 }
 
 // GetSubscriptions reads and decrypts subscriptions.json.
+//
+// FIX #8: GetSubscriptions is now a pure read — it no longer writes to disk.
+// Previously, every call that found a "bootstrap-free-subs" entry would
+// re-encrypt and overwrite subscriptions.json, creating an unintended
+// write-on-read side effect. The cleanup is now done once via a dedicated
+// helper purgeBootstrapSub() which is called only from SaveSubscriptions.
 func (s *AppService) GetSubscriptions() string {
 	filePath := filepath.Join(s.userDataDir, "subscriptions.json")
 	var decryptedJSON string
@@ -155,11 +186,12 @@ func (s *AppService) GetSubscriptions() string {
 		}
 	}
 
-	// Filter out the NeoBox Free bootstrap subscription as requested by the user
+	// Filter out the NeoBox Free bootstrap subscription in-memory only.
+	// NOTE: we do NOT write back to disk here — see purgeBootstrapSub().
 	var subs []Subscription
 	if err := json.Unmarshal([]byte(decryptedJSON), &subs); err == nil {
-		cleanedSubs := []Subscription{}
 		hasBootstrap := false
+		cleanedSubs := subs[:0]
 		for _, sub := range subs {
 			if sub.ID == "bootstrap-free-subs" {
 				hasBootstrap = true
@@ -170,12 +202,6 @@ func (s *AppService) GetSubscriptions() string {
 		if hasBootstrap {
 			if merged, err := json.Marshal(cleanedSubs); err == nil {
 				decryptedJSON = string(merged)
-				encrypted, err := security.Encrypt(merged)
-				if err == nil {
-					_ = os.WriteFile(filePath, encrypted, 0600)
-				} else {
-					_ = os.WriteFile(filePath, merged, 0600)
-				}
 			}
 		}
 	}
@@ -184,8 +210,15 @@ func (s *AppService) GetSubscriptions() string {
 }
 
 // SaveSubscriptions encrypts and saves subscriptions.json.
+// It also purges the bootstrap subscription from disk if present.
 func (s *AppService) SaveSubscriptions(subsJSON string) bool {
 	filePath := filepath.Join(s.userDataDir, "subscriptions.json")
+
+	// FIX #8: Purge bootstrap sub from the JSON being saved rather than doing it
+	// on every GetSubscriptions() read. This ensures the file is cleaned up
+	// exactly once and not re-written on every read call.
+	subsJSON = purgeBootstrapSub(subsJSON)
+
 	encrypted, err := security.Encrypt([]byte(subsJSON))
 	var writeErr error
 	if err != nil {
@@ -199,6 +232,27 @@ func (s *AppService) SaveSubscriptions(subsJSON string) bool {
 		return true
 	}
 	return false
+}
+
+// purgeBootstrapSub removes the "bootstrap-free-subs" entry from a JSON subscription list.
+func purgeBootstrapSub(subsJSON string) string {
+	var subs []Subscription
+	if err := json.Unmarshal([]byte(subsJSON), &subs); err != nil {
+		return subsJSON
+	}
+	cleaned := subs[:0]
+	for _, sub := range subs {
+		if sub.ID != "bootstrap-free-subs" {
+			cleaned = append(cleaned, sub)
+		}
+	}
+	if len(cleaned) == len(subs) {
+		return subsJSON // nothing removed
+	}
+	if merged, err := json.Marshal(cleaned); err == nil {
+		return string(merged)
+	}
+	return subsJSON
 }
 
 // StartXray parses the selected proxy URL and runs sing-box.
@@ -239,8 +293,15 @@ func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[s
 	}
 
 	// 3. Generate configuration
+	// Generate a fresh per-session Clash API secret to prevent other local
+	// processes from controlling the VPN core via the unauthenticated API.
+	secret := generateClashSecret()
+	s.mu.Lock()
+	s.clashSecret = secret
+	s.mu.Unlock()
+
 	cachePath := filepath.Join(s.userDataDir, "cache.db")
-	config, err := core.GenerateConfig(outbound, settings, useSystemProxy, cachePath)
+	config, err := core.GenerateConfig(outbound, settings, useSystemProxy, cachePath, secret)
 	if err != nil {
 		response["error"] = fmt.Sprintf("Failed to generate configuration: %v", err)
 		return response
@@ -253,9 +314,13 @@ func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[s
 	}
 
 	// 4. Start core manager
+	// FIX #18: Read wailsCtx under the mutex to avoid data race with SetContext.
 	var logWriter sclog.PlatformWriter
-	if s.wailsCtx != nil {
-		logWriter = &wailsLogWriter{ctx: s.wailsCtx}
+	s.wailsCtxMu.RLock()
+	wCtx := s.wailsCtx
+	s.wailsCtxMu.RUnlock()
+	if wCtx != nil {
+		logWriter = &wailsLogWriter{ctx: wCtx}
 	}
 	if err := s.coreManager.Start(string(configBytes), logWriter); err != nil {
 		response["error"] = fmt.Sprintf("Failed to start sing-box: %v", err)
@@ -284,6 +349,8 @@ func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[s
 	go s.startTrafficMonitor(monitorCtx)
 
 	s.UpdateTrayStatus(fmt.Sprintf("Статус: Подключено (%s)", parseServerNameFromLink(link)))
+	// Notify user via Windows toast when connected (window may be hidden in tray)
+	go sendToast("✅ NeoBox VPN", "Подключено к серверу: "+parseServerNameFromLink(link))
 
 	response["success"] = true
 	return response
@@ -306,11 +373,16 @@ func (s *AppService) StopXray() map[string]interface{} {
 		return response
 	}
 
-	if s.wailsCtx != nil {
-		wailsruntime.EventsEmit(s.wailsCtx, "xray-stopped", nil)
+	s.wailsCtxMu.RLock()
+	wCtxStop := s.wailsCtx
+	s.wailsCtxMu.RUnlock()
+	if wCtxStop != nil {
+		wailsruntime.EventsEmit(wCtxStop, "xray-stopped", nil)
 	}
 
 	s.UpdateTrayStatus("Статус: Отключено")
+	// Notify user via Windows toast on disconnect
+	go sendToast("❌ NeoBox VPN", "Соединение разорвано")
 
 	response["success"] = true
 	return response
@@ -328,8 +400,11 @@ func (s *AppService) RestartXray(link string, settingsJSON string, useSystemProx
 	_ = s.coreManager.Stop()
 
 	// Emit stopped event so UI knows the old session ended
-	if s.wailsCtx != nil {
-		wailsruntime.EventsEmit(s.wailsCtx, "xray-stopped", nil)
+	s.wailsCtxMu.RLock()
+	wCtxRestart := s.wailsCtx
+	s.wailsCtxMu.RUnlock()
+	if wCtxRestart != nil {
+		wailsruntime.EventsEmit(wCtxRestart, "xray-stopped", nil)
 	}
 
 	// Start fresh session — proxy backup is still intact from the original StartXray call.
@@ -421,7 +496,8 @@ func (s *AppService) PingServer(link string) int {
 		return -1
 	}
 
-	address := fmt.Sprintf("%s:%d", server, port)
+	// Use net.JoinHostPort so IPv6 addresses are correctly wrapped in brackets: [::1]:port
+	address := net.JoinHostPort(server, strconv.Itoa(port))
 	start := time.Now()
 	conn, err := net.DialTimeout("tcp", address, 3*time.Second)
 	if err != nil {
@@ -494,8 +570,7 @@ func (s *AppService) CheckUpdates() map[string]interface{} {
 
 	latestTag, _ := releaseInfo["tag_name"].(string)
 	latestVersion := strings.Replace(latestTag, "v", "", 1)
-	currentVersion := "1.5.6" // Hardcoded current version or fetch dynamically
-
+	// FIX #14: Use the package-level constant instead of a hardcoded inline string.
 	if s.isNewer(latestVersion, currentVersion) {
 		htmlURL, _ := releaseInfo["html_url"].(string)
 		body, _ := releaseInfo["body"].(string)
@@ -533,20 +608,36 @@ func (s *AppService) isNewer(latest, current string) bool {
 }
 
 // SetContext sets the Wails application context.
+// FIX #18: Protected by wailsCtxMu so concurrent reads in wailsLogWriter.WriteMessage are safe.
+// Also registers the NeoBox AppID for Windows toast notifications.
 func (s *AppService) SetContext(ctx context.Context) {
+	s.wailsCtxMu.Lock()
 	s.wailsCtx = ctx
+	s.wailsCtxMu.Unlock()
+	// Register toast AppID once after the app context is available.
+	InitNotifications()
 }
 
 // startTrafficMonitor connects to sing-box clash_api /traffic endpoint
 // and streams real-time upload and download speeds to the Wails frontend.
+// The per-session clashSecret is sent as a Bearer token so only NeoBox
+// can consume the Clash API (security improvement #1).
 func (s *AppService) startTrafficMonitor(ctx context.Context) {
 	// Give clash_api half a second to bind and boot up
 	time.Sleep(500 * time.Millisecond)
+
+	// Snapshot the current session secret (protected by mu)
+	s.mu.Lock()
+	secret := s.clashSecret
+	s.mu.Unlock()
 
 	client := &http.Client{Timeout: 0} // infinite timeout for stream
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://127.0.0.1:9097/traffic", nil)
 	if err != nil {
 		return
+	}
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
 	}
 
 	resp, err := client.Do(req)
@@ -571,8 +662,11 @@ func (s *AppService) startTrafficMonitor(ctx context.Context) {
 			}
 
 			// Emit stats to the Wails frontend
-			if s.wailsCtx != nil {
-				wailsruntime.EventsEmit(s.wailsCtx, "traffic-stats", map[string]interface{}{
+			s.wailsCtxMu.RLock()
+			wCtx := s.wailsCtx
+			s.wailsCtxMu.RUnlock()
+			if wCtx != nil {
+				wailsruntime.EventsEmit(wCtx, "traffic-stats", map[string]interface{}{
 					"up":   stats.Up,
 					"down": stats.Down,
 				})
@@ -704,13 +798,17 @@ func (s *AppService) NotifyWindowHidden() {
 // NotifyWindowShown is called from the frontend when the window is shown.
 func (s *AppService) NotifyWindowShown() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.windowVisible = true
 	if s.mToggleItem != nil {
 		s.mToggleItem.SetTitle("Скрыть интерфейс")
 	}
-	if s.wailsCtx != nil {
-		wailsruntime.EventsEmit(s.wailsCtx, "window-restored", nil)
+	s.mu.Unlock()
+	// Emit outside of lock to avoid holding mu while calling Wails runtime.
+	s.wailsCtxMu.RLock()
+	wCtx := s.wailsCtx
+	s.wailsCtxMu.RUnlock()
+	if wCtx != nil {
+		wailsruntime.EventsEmit(wCtx, "window-restored", nil)
 	}
 }
 
@@ -725,14 +823,17 @@ func (s *AppService) UpdateTrayStatus(status string) {
 
 // SelectAndConnectServer notifies the frontend to connect to the specified proxy server.
 func (s *AppService) SelectAndConnectServer(link string) {
-	if s.wailsCtx == nil {
+	s.wailsCtxMu.RLock()
+	wCtx := s.wailsCtx
+	s.wailsCtxMu.RUnlock()
+	if wCtx == nil {
 		return
 	}
-	
+
 	// Show the window so they can see the connection progress
-	wailsruntime.WindowShow(s.wailsCtx)
-	wailsruntime.WindowUnminimise(s.wailsCtx)
-	wailsruntime.EventsEmit(s.wailsCtx, "window-restored", nil)
+	wailsruntime.WindowShow(wCtx)
+	wailsruntime.WindowUnminimise(wCtx)
+	wailsruntime.EventsEmit(wCtx, "window-restored", nil)
 	s.NotifyWindowShown()
 
 	settingsJSON := s.GetSettings()
@@ -741,7 +842,7 @@ func (s *AppService) SelectAndConnectServer(link string) {
 
 	useSystemProxy, _ := settings["systemProxy"].(bool)
 
-	wailsruntime.EventsEmit(s.wailsCtx, "tray-start-reconnect", map[string]interface{}{
+	wailsruntime.EventsEmit(wCtx, "tray-start-reconnect", map[string]interface{}{
 		"link":           link,
 		"useSystemProxy": useSystemProxy,
 	})
@@ -802,6 +903,10 @@ func (s *AppService) RebuildTrayServers() {
 	}
 
 	// Populate tray server items
+	// FIX #15: Log a warning when there are more servers than the tray can hold.
+	if len(servers) > 50 {
+		fmt.Printf("[RebuildTrayServers] warning: %d servers found but tray only supports 50; extra servers will be hidden.\n", len(servers))
+	}
 	for i := 0; i < 50; i++ {
 		if s.trayServerItems[i] == nil {
 			continue
@@ -852,26 +957,56 @@ func parseServerNameFromLink(link string) string {
 
 // StartAutoUpdateScheduler runs a background loop to update all subscriptions every 24 hours
 // if the auto-update setting is enabled, and runs once immediately on startup.
+//
+// FIX #9: The goroutine now accepts a context so it can be stopped on application shutdown.
+// The context is stored in s.cancelAutoUpdate and cancelled during OnShutdown via StopAutoUpdateScheduler.
 func (s *AppService) StartAutoUpdateScheduler() {
+	ctx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	if s.cancelAutoUpdate != nil {
+		s.cancelAutoUpdate() // stop any previous scheduler
+	}
+	s.cancelAutoUpdate = cancel
+	s.mu.Unlock()
+
 	go func() {
 		// Wait 5 seconds after startup to let the app initialize
-		time.Sleep(5 * time.Second)
+		select {
+		case <-time.After(5 * time.Second):
+		case <-ctx.Done():
+			return
+		}
 
 		for {
 			// Check if auto-update is enabled in settings
 			settingsJSON := s.GetSettings()
 			var settings map[string]interface{}
 			_ = json.Unmarshal([]byte(settingsJSON), &settings)
-			
+
 			autoUpdate, _ := settings["autoUpdateSubs"].(bool)
 			if autoUpdate {
 				s.UpdateAllSubscriptions()
 			}
 
-			// Wait 24 hours before the next update check
-			time.Sleep(24 * time.Hour)
+			// Wait 24 hours or until shutdown
+			select {
+			case <-time.After(24 * time.Hour):
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
+}
+
+// StopAutoUpdateScheduler stops the background auto-update goroutine.
+// Should be called during application shutdown.
+func (s *AppService) StopAutoUpdateScheduler() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cancelAutoUpdate != nil {
+		s.cancelAutoUpdate()
+		s.cancelAutoUpdate = nil
+	}
 }
 
 // UpdateAllSubscriptions downloads the latest links for all subscriptions.
@@ -902,10 +1037,25 @@ func (s *AppService) UpdateAllSubscriptions() {
 			s.SaveSubscriptions(string(newSubsJSON))
 			
 			// Notify frontend that subscriptions have been updated
-			if s.wailsCtx != nil {
-				wailsruntime.EventsEmit(s.wailsCtx, "subscriptions-updated", nil)
+			s.wailsCtxMu.RLock()
+			wCtxSubs := s.wailsCtx
+			s.wailsCtxMu.RUnlock()
+			if wCtxSubs != nil {
+				wailsruntime.EventsEmit(wCtxSubs, "subscriptions-updated", nil)
 			}
 		}
 	}
+}
+
+// generateClashSecret generates a cryptographically secure random 32-character hex secret
+// to secure the Clash API endpoint.
+func generateClashSecret() string {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to secure hardcoded string in the extremely unlikely event that
+		// crypto/rand is completely broken.
+		return "neobox-secure-fallback-clash-secret"
+	}
+	return hex.EncodeToString(bytes)
 }
 

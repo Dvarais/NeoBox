@@ -75,19 +75,22 @@ func (m *CoreManager) Stop() error {
 }
 
 // stopRaw performs context cancellation and resource cleanup.
+//
+// FIX #6: Close() errors are logged but never returned. The previous code returned
+// the Close() error, which contradicted the comment "failed close should not block a
+// restart" and caused Stop() callers to receive a spurious error even though cleanup
+// completed successfully. All callers already ignored the return value anyway.
 func (m *CoreManager) stopRaw() error {
 	if m.cancel != nil {
 		m.cancel()
 		m.cancel = nil
 	}
 	if m.instance != nil {
-		err := m.instance.Close()
-		m.instance = nil
-		if err != nil {
-			// Log the error but continue — a failed close should not block a restart.
+		if err := m.instance.Close(); err != nil {
+			// Log the error but do NOT return it — a failed close must not block a restart.
 			fmt.Printf("[CoreManager] warning: sing-box Close() returned error: %v\n", err)
 		}
-		return err
+		m.instance = nil
 	}
 	return nil
 }
