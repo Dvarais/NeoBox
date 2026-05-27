@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,7 +23,7 @@ import (
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	sclog "github.com/sagernet/sing-box/log"
-	"github.com/getlantern/systray"
+	"fyne.io/systray"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
@@ -678,6 +679,7 @@ func (s *AppService) startTrafficMonitor(ctx context.Context) {
 // InitTray starts the system tray loop in a background goroutine.
 func (s *AppService) InitTray(iconBytes []byte) {
 	go func() {
+		runtime.LockOSThread()
 		systray.Run(func() {
 			systray.SetIcon(iconBytes)
 			systray.SetTitle("NeoBox")
