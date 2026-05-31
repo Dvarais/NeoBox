@@ -9,9 +9,11 @@ import {
   ImportClipboard, 
   NotifyWindowHidden,
   NotifyWindowShown,
+  OpenLogsFolder,
   PingServer, 
   RequestAdmin, 
   RestartXray,
+  SaveLogs,
   SaveSettings, 
   SaveSubscriptions, 
   StartXray, 
@@ -19,6 +21,10 @@ import {
 } from './wailsjs/go/service/AppService.js';
 
 import { EventsOn } from './wailsjs/runtime/runtime.js';
+
+// Global session bytes counters shared between modules
+window.sessionBytesDown = 0;
+window.sessionBytesUp = 0;
 
 // Expose them as window.api to maintain total compatibility with original renderer.js!
 window.api = {
@@ -44,6 +50,10 @@ window.api = {
     const container = document.getElementById('speedometerContainer');
     if (container) {
       container.style.display = 'none';
+    }
+    const totalContainer = document.getElementById('speedometerTotalContainer');
+    if (totalContainer) {
+      totalContainer.style.display = 'none';
     }
     return res;
   },
@@ -126,6 +136,15 @@ window.api = {
   onUpdateComplete: (callback) => EventsOn('update-complete', callback),
   onUpdateError: (callback) => EventsOn('update-error', callback),
 
+  // Logs
+  saveLogs: (content) => SaveLogs(content),
+  openLogsFolder: () => OpenLogsFolder(),
+
+  // Watchdog events
+  onWatchdogReconnecting: (cb) => EventsOn('watchdog-reconnecting', cb),
+  onWatchdogReconnected: (cb) => EventsOn('watchdog-reconnected', cb),
+  onWatchdogFailed: (cb) => EventsOn('watchdog-failed', cb),
+
   // Admin rights
   checkAdmin: () => CheckAdmin(),
   requestAdmin: () => RequestAdmin(),
@@ -180,14 +199,84 @@ EventsOn('traffic-stats', (data) => {
     }
     speedDownload.textContent = formatSpeed(data.down);
     speedUpload.textContent = formatSpeed(data.up);
+
+    // Накапливаем суммарный трафик за сессию
+    // data.down/up — текущая скорость в bytes/s, интервал поллинга ~1с
+    window.sessionBytesDown += (data.down || 0);
+    window.sessionBytesUp   += (data.up   || 0);
+
+    const totalContainer = document.getElementById('sessionTotalContainer');
+    const totalDown = document.getElementById('sessionTotalDown');
+    const totalUp   = document.getElementById('sessionTotalUp');
+    if (totalContainer && totalDown && totalUp) {
+      if (totalContainer.style.display === 'none') totalContainer.style.display = 'flex';
+      totalDown.textContent = formatBytesLocal(window.sessionBytesDown);
+      totalUp.textContent   = formatBytesLocal(window.sessionBytesUp);
+    }
+
+    const speedTotalContainer = document.getElementById('speedometerTotalContainer');
+    const speedTotal = document.getElementById('speedTotal');
+    if (speedTotalContainer && speedTotal) {
+      if (speedTotalContainer.style.display !== 'flex') speedTotalContainer.style.display = 'flex';
+      speedTotal.textContent = formatBytesLocal(window.sessionBytesDown + window.sessionBytesUp);
+    }
+
+    // Игровой стиль прогресс-бара трафика
+    const totalBytes = window.sessionBytesDown + window.sessionBytesUp;
+    
+    // Вычисляем динамический лимит
+    let limitBytes = 100 * 1024 * 1024; // 100 MB default
+    let limitLabel = '100 MB';
+    
+    if (totalBytes > 100 * 1024 * 1024) {
+      if (totalBytes <= 1024 * 1024 * 1024) {
+        limitBytes = 1024 * 1024 * 1024; // 1 GB
+        limitLabel = '1 GB';
+      } else if (totalBytes <= 10 * 1024 * 1024 * 1024) {
+        limitBytes = 10 * 1024 * 1024 * 1024; // 10 GB
+        limitLabel = '10 GB';
+      } else if (totalBytes <= 100 * 1024 * 1024 * 1024) {
+        limitBytes = 100 * 1024 * 1024 * 1024; // 100 GB
+        limitLabel = '100 GB';
+      } else {
+        limitBytes = 1024 * 1024 * 1024 * 1024; // 1 TB
+        limitLabel = '1 TB';
+      }
+    }
+    
+    const percentage = Math.min(100, Math.round((totalBytes / limitBytes) * 100));
+    
+    const ratioEl = document.getElementById('trafficGameRatio');
+    const fillEl = document.getElementById('trafficGameProgressFill');
+    const totalLimitEl = document.getElementById('trafficGameTotalAndLimit');
+    
+    if (ratioEl) ratioEl.textContent = `${percentage}%`;
+    if (fillEl) fillEl.style.width = `${percentage}%`;
+    if (totalLimitEl) {
+      totalLimitEl.textContent = `${formatBytesLocal(totalBytes)} / ${limitLabel}`;
+    }
   }
 });
+
+// Локальный formatBytes (без зависимости от renderer.js)
+function formatBytesLocal(bytes) {
+  if (!bytes || bytes <= 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 2)) + ' ' + sizes[i];
+}
 
 // Reset speedometer when VPN engine stops
 EventsOn('xray-stopped', () => {
   const container = document.getElementById('speedometerContainer');
-  if (container) {
-    container.style.display = 'none';
-  }
+  if (container) container.style.display = 'none';
+  const totalContainer = document.getElementById('sessionTotalContainer');
+  if (totalContainer) totalContainer.style.display = 'none';
+  const speedTotalContainer = document.getElementById('speedometerTotalContainer');
+  if (speedTotalContainer) speedTotalContainer.style.display = 'none';
+  // Сбрасываем счётчик
+  window.sessionBytesDown = 0;
+  window.sessionBytesUp = 0;
 });
 

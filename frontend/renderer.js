@@ -39,6 +39,29 @@ let currentLanguage = 'RU';
 let isRestarting = false;
 let appState = 'off';
 
+// Сессионный счётчик трафика (привязаны к window для совместимости с wails-bridge.js)
+window.sessionBytesDown = 0;
+window.sessionBytesUp = 0;
+let sessionConnectedAt = null; // timestamp начала сессии
+let sessionTimerInterval = null;
+
+// Favorites
+let favoriteLinks = new Set();
+let customRules = [];
+
+// Search query for server filter
+let serverSearchQuery = '';
+
+function onToggleFavorite(link) {
+  if (favoriteLinks.has(link)) {
+    favoriteLinks.delete(link);
+  } else {
+    favoriteLinks.add(link);
+  }
+  updateCards();
+  collectAndSaveSettings();
+}
+
 // Навигация
 const navItems = document.querySelectorAll('.nav-item');
 const views = document.querySelectorAll('.view');
@@ -67,11 +90,12 @@ function updateCards() {
     let servers = [];
     if (currentActiveSubId === 'all') {
         allSubscriptions.forEach(s => servers.push(...s.links));
+    } else if (currentActiveSubId === 'favorites') {
+        servers = Array.from(favoriteLinks);
     } else {
         const sub = allSubscriptions.find(s => s.id === currentActiveSubId);
         if (sub) servers = sub.links;
     }
-    
     renderCards(serversGrid, servers, activeServerLink, pingData, currentSortMode, (link, name, type, address) => {
         const isNewServer = activeServerLink !== link;
         activeServerLink = link;
@@ -79,11 +103,10 @@ function updateCards() {
         activeServerDetails.textContent = `${type} • ${address}`;
         updateCards();
         collectAndSaveSettings();
-
         if (isNewServer && (appState === 'on' || appState === 'connecting')) {
             restartBtn.click();
         }
-    });
+    }, serverSearchQuery, favoriteLinks, onToggleFavorite);
 }
 
 async function loadSubscriptions() {
@@ -128,6 +151,19 @@ function applyLanguage() {
   document.getElementById('disconnectBtnText').textContent = t.disconnectBtn;
   document.getElementById('speedDownloadLabel').textContent = t.downloadLabel;
   document.getElementById('speedUploadLabel').textContent = t.uploadLabel;
+  const speedTotalLabel = document.getElementById('speedTotalLabel');
+  if (speedTotalLabel) speedTotalLabel.textContent = t.totalTrafficLabel;
+
+  // Переводы для игрового спидометра
+  const trafficGameTitle = document.getElementById('trafficGameTitle');
+  if (trafficGameTitle) trafficGameTitle.textContent = t.trafficGameTitle;
+  const trafficGameDownLabel = document.getElementById('trafficGameDownLabel');
+  if (trafficGameDownLabel) trafficGameDownLabel.textContent = t.trafficGameDownLabel;
+  const trafficGameUpLabel = document.getElementById('trafficGameUpLabel');
+  if (trafficGameUpLabel) trafficGameUpLabel.textContent = t.trafficGameUpLabel;
+  const trafficGameLimitLabel = document.getElementById('trafficGameLimitLabel');
+  if (trafficGameLimitLabel) trafficGameLimitLabel.textContent = t.trafficGameLimitLabel;
+
   document.getElementById('importQrBtn').textContent = t.importQrBtn;
   document.getElementById('qrModalTitle').textContent = t.qrModalTitle;
   document.getElementById('qrStartCameraBtn').textContent = t.qrStartCameraBtn;
@@ -162,6 +198,38 @@ function applyLanguage() {
   });
   document.getElementById('processListBlacklist').placeholder = t.blacklistPlaceholder;
   document.getElementById('processListWhitelist').placeholder = t.whitelistPlaceholder;
+
+  const customRoutesTitle = document.getElementById('customRoutesTitle');
+  if (customRoutesTitle) customRoutesTitle.textContent = t.customRoutesTitle;
+  const customRoutesDesc = document.getElementById('customRoutesDesc');
+  if (customRoutesDesc) customRoutesDesc.textContent = t.customRoutesDesc;
+  const addCustomRuleBtn = document.getElementById('addCustomRuleBtn');
+  if (addCustomRuleBtn) addCustomRuleBtn.textContent = t.addCustomRuleBtn;
+  const saveRoutesBtn2 = document.getElementById('saveRoutesBtn2');
+  if (saveRoutesBtn2) saveRoutesBtn2.textContent = t.saveRoutesBtn2;
+  const routesStatus2 = document.getElementById('routesStatus2');
+  if (routesStatus2) routesStatus2.textContent = t.statusDone;
+  
+  const optActionDirect = document.getElementById('optActionDirect');
+  if (optActionDirect) optActionDirect.textContent = t.actionDirectOption;
+  const optActionProxy = document.getElementById('optActionProxy');
+  if (optActionProxy) optActionProxy.textContent = t.actionProxyOption;
+  const optActionBlock = document.getElementById('optActionBlock');
+  if (optActionBlock) optActionBlock.textContent = t.actionBlockOption;
+  
+  const optTypeSuffix = document.getElementById('optTypeSuffix');
+  if (optTypeSuffix) optTypeSuffix.textContent = t.typeSuffixOption;
+  const optTypeDomain = document.getElementById('optTypeDomain');
+  if (optTypeDomain) optTypeDomain.textContent = t.typeDomainOption;
+  const optTypeKeyword = document.getElementById('optTypeKeyword');
+  if (optTypeKeyword) optTypeKeyword.textContent = t.typeKeywordOption;
+  const optTypeIp = document.getElementById('optTypeIp');
+  if (optTypeIp) optTypeIp.textContent = t.typeIpOption;
+  
+  const newRuleValue = document.getElementById('newRuleValue');
+  if (newRuleValue) newRuleValue.placeholder = t.ruleValuePlaceholder;
+  
+  renderCustomRules();
 
   document.getElementById('appSettingsTitle').textContent = t.appSettingsTitle;
   document.getElementById('dnsServerLabel').textContent = t.dnsServerLabel;
@@ -274,7 +342,9 @@ processTabs.forEach(tab => {
 function updateAppInterface(state) {
   appState = state;
   const t = translations[currentLanguage];
-  
+  const timerBadge = document.getElementById('sessionTimerBadge');
+  const timerText = document.getElementById('sessionTimerText');
+
   if (state === 'on') {
     powerBtn.classList.add('on', 'pulse-animation');
     statusDot.className = 'status-dot on';
@@ -284,6 +354,18 @@ function updateAppInterface(state) {
     disconnectBtn.style.display = 'flex';
     isRestarting = false;
     setTimeout(() => fetchIP(currentIp, t), 2000);
+    startSessionTracking();
+    // Start live connection timer
+    if (timerBadge) timerBadge.style.display = 'flex';
+    clearInterval(sessionTimerInterval);
+    const timerStart = Date.now();
+    sessionTimerInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - timerStart) / 1000);
+      const h = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+      const m = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+      const s = String(elapsed % 60).padStart(2, '0');
+      if (timerText) timerText.textContent = `${h}:${m}:${s}`;
+    }, 1000);
   } else if (state === 'connecting') {
     powerBtn.classList.add('on');
     powerBtn.classList.remove('pulse-animation');
@@ -301,6 +383,10 @@ function updateAppInterface(state) {
     restartBtn.style.display = 'none';
     disconnectBtn.style.display = 'none';
     currentIp.textContent = '—';
+    clearInterval(sessionTimerInterval);
+    sessionTimerInterval = null;
+    if (timerBadge) timerBadge.style.display = 'none';
+    if (timerText) timerText.textContent = '00:00:00';
   }
 }
 
@@ -325,6 +411,17 @@ document.querySelectorAll('.log-tab').forEach(tab => {
 
 function stripAnsi(str) {
   return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+}
+
+// Prevent XSS: escape HTML special chars before injecting into innerHTML.
+// Log messages contain domain names and server addresses from the network.
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function parseLogLine(rawString) {
@@ -387,12 +484,12 @@ function parseLogLine(rawString) {
 
   // 3. Context badge
   if (contextStr) {
-    const cleanedContext = contextStr.trim().replace(/\s+/, ' • ');
+    const cleanedContext = escapeHtml(contextStr.trim().replace(/\s+/, ' • '));
     html += `<span class="log-context">[${cleanedContext}]</span> `;
   }
 
-  // 4. Message formatting
-  let formattedMessage = messageStr;
+  // 4. Message formatting — escape HTML first, then apply safe highlight patterns
+  let formattedMessage = escapeHtml(messageStr);
   
   // Highlight elements
   if (formattedMessage.includes('dns: exchanged')) {
@@ -470,7 +567,10 @@ clearLogsBtn.onclick = () => {
 };
 
 window.api.onStopped(() => {
-  if (!isRestarting) updateAppInterface('off');
+  if (!isRestarting) {
+    finishSessionHistory(); // сохраняем сессию если VPN упал сам
+    updateAppInterface('off');
+  }
 });
 
 window.api.onPingResult((data) => {
@@ -537,9 +637,258 @@ powerBtn.onclick = () => {
 };
 
 disconnectBtn.onclick = () => {
+  finishSessionHistory(); // записываем сессию в историю
   updateAppInterface('off');
   window.api.stopXray();
 };
+
+// Сброс счётчика трафика и старт записи истории
+function startSessionTracking() {
+  window.sessionBytesDown = 0;
+  window.sessionBytesUp = 0;
+  sessionConnectedAt = Date.now();
+  document.getElementById('sessionTotalDown').textContent = '0 B';
+  document.getElementById('sessionTotalUp').textContent = '0 B';
+  const speedTotal = document.getElementById('speedTotal');
+  if (speedTotal) speedTotal.textContent = '0 B';
+  const speedometerTotalContainer = document.getElementById('speedometerTotalContainer');
+  if (speedometerTotalContainer) speedometerTotalContainer.style.display = 'none';
+  document.getElementById('sessionTotalContainer').style.display = 'none'; // покажем после первого обновления
+
+  // Сброс элементов игрового спидометра
+  const ratioEl = document.getElementById('trafficGameRatio');
+  const fillEl = document.getElementById('trafficGameProgressFill');
+  const totalLimitEl = document.getElementById('trafficGameTotalAndLimit');
+  if (ratioEl) ratioEl.textContent = '0%';
+  if (fillEl) fillEl.style.width = '0%';
+  if (totalLimitEl) totalLimitEl.textContent = '0 B / 100 MB';
+}
+
+// Форматирование байт в читаемый вид
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return (bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 2) + ' ' + sizes[i];
+}
+
+// Формат длительности сессии в человекоческий вид
+function formatDuration(seconds) {
+  if (seconds < 60) return `${seconds}с`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m < 60) return `${m}м ${s}с`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return `${h}ч ${rm}м`;
+}
+
+// Запись сессии в историю
+function finishSessionHistory() {
+  if (!sessionConnectedAt) return;
+  const now = Date.now();
+  const durationSec = Math.round((now - sessionConnectedAt) / 1000);
+  if (durationSec < 2) { sessionConnectedAt = null; return; } // игнорируем мгновенные сессии
+
+  const info = activeServerLink ? parseBasicInfo(activeServerLink) : { name: '?', type: '?', address: '?' };
+  const entry = {
+    id: now.toString(),
+    server: info.name,
+    protocol: info.type,
+    address: info.address,
+    connectedAt: sessionConnectedAt,
+    disconnectedAt: now,
+    durationSec,
+    bytesDown: window.sessionBytesDown,
+    bytesUp: window.sessionBytesUp
+  };
+
+  const history = loadHistory();
+  history.unshift(entry);
+  if (history.length > 100) history.pop(); // храним не более 100 записей
+  saveHistory(history);
+
+  sessionConnectedAt = null;
+  renderHistoryTab();
+}
+
+function loadHistory() {
+  try { return JSON.parse(localStorage.getItem('neobox-connection-history') || '[]'); }
+  catch { return []; }
+}
+
+function saveHistory(history) {
+  localStorage.setItem('neobox-connection-history', JSON.stringify(history));
+}
+
+// Рендер вкладки История
+function renderHistoryTab() {
+  const history = loadHistory();
+  const list = document.getElementById('historyList');
+  const empty = document.getElementById('historyEmpty');
+  const statsRow = document.getElementById('historyStatsRow');
+
+  if (!list) return;
+
+  if (history.length === 0) {
+    list.innerHTML = '';
+    empty.style.display = 'flex';
+    statsRow.style.display = 'none';
+    return;
+  }
+
+  empty.style.display = 'none';
+  statsRow.style.display = 'grid';
+
+  // Сводная статистика
+  const totalDuration = history.reduce((a, e) => a + e.durationSec, 0);
+  const totalDown = history.reduce((a, e) => a + (e.bytesDown || 0), 0);
+  const totalUp = history.reduce((a, e) => a + (e.bytesUp || 0), 0);
+  document.getElementById('historyStatSessions').textContent = history.length;
+  document.getElementById('historyStatTime').textContent = formatDuration(totalDuration);
+  document.getElementById('historyStatDown').textContent = formatBytes(totalDown);
+  document.getElementById('historyStatUp').textContent = formatBytes(totalUp);
+
+  // Карточки
+  const protocolEmoji = { vless: '🟢', vmess: '🟡', trojan: '🔷', ss: '💜', tuic: '🟤', hysteria2: '🔵', hy2: '🔵' };
+  list.innerHTML = history.map(entry => {
+    const emoji = protocolEmoji[entry.protocol?.toLowerCase()] || '🌐';
+    const date = new Date(entry.connectedAt);
+    const dateStr = date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+    const timeStr = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    const dur = formatDuration(entry.durationSec);
+    const down = formatBytes(entry.bytesDown || 0);
+    const up = formatBytes(entry.bytesUp || 0);
+    const proto = (entry.protocol || '?').toUpperCase();
+    return `
+      <div class="history-card">
+        <div class="history-card-icon">${emoji}</div>
+        <div class="history-card-body">
+          <div class="history-card-server" title="${entry.server}">${entry.server}</div>
+          <div class="history-card-meta">
+            <span class="history-meta-item">📡 ${proto}</span>
+            <span class="history-meta-item">⏱ ${dur}</span>
+            <span class="history-meta-item">📅 ${dateStr} ${timeStr}</span>
+          </div>
+        </div>
+        <div class="history-card-traffic">
+          <span class="history-traffic-down">↓ ${down}</span>
+          <span class="history-traffic-up">↑ ${up}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+document.getElementById('clearHistoryBtn').onclick = () => {
+  saveHistory([]);
+  renderHistoryTab();
+};
+
+// ── DNS Leak Test ────────────────────────────────────────────────────────────
+document.getElementById('dnsLeakBtn').onclick = () => runDnsLeakTest();
+document.getElementById('dnsLeakCloseBtn').onclick = () => {
+  document.getElementById('dnsLeakModalOverlay').style.display = 'none';
+};
+document.getElementById('dnsLeakRetryBtn').onclick = () => runDnsLeakTest();
+
+async function runDnsLeakTest() {
+  const overlay = document.getElementById('dnsLeakModalOverlay');
+  const loading = document.getElementById('dnsLeakLoading');
+  const result  = document.getElementById('dnsLeakResult');
+  const iconWrap = document.getElementById('dnsLeakIconWrap');
+  const banner   = document.getElementById('dnsLeakStatusBanner');
+  const statusTxt = document.getElementById('dnsLeakStatusText');
+  const statusIcon = document.getElementById('dnsLeakStatusIcon');
+  const ipEl     = document.getElementById('dnsLeakIp');
+  const dnsList  = document.getElementById('dnsLeakDnsList');
+  const retryBtn = document.getElementById('dnsLeakRetryBtn');
+
+  // Показываем модалку, сбрасываем состояние
+  overlay.style.display = 'flex';
+  loading.style.display = 'flex';
+  result.style.display  = 'none';
+  retryBtn.style.display = 'none';
+  iconWrap.className = 'dns-leak-icon-wrap';
+  banner.className = 'dns-leak-status-banner';
+
+  try {
+    // 1. Получаем внешний IP через ipify
+    const ipRes = await fetch('https://api.ipify.org?format=json').then(r => r.json());
+    const myIp = ipRes.ip || '?';
+
+    // 2. Запрашиваем DNS-сервер через DoH (Cloudflare) — whoami.cloudflare.com возвращает IP DNS-резолвера
+    const dohRes = await fetch(
+      'https://cloudflare-dns.com/dns-query?name=whoami.cloudflare.com&type=TXT',
+      { headers: { 'Accept': 'application/dns-json' } }
+    ).then(r => r.json());
+
+    const dnsServers = [];
+    if (dohRes.Answer) {
+      dohRes.Answer.forEach(ans => {
+        // Ответ в формате "1.2.3.4"
+        const ip = ans.data?.replace(/"/g, '').trim();
+        if (ip && !dnsServers.includes(ip)) dnsServers.push(ip);
+      });
+    }
+
+    // 3. Leak detection: if DNS is going through our VPN (which uses Cloudflare DoH 1.1.1.1),
+    //    then the whoami resolver IP should be a Cloudflare anycast address.
+    //    Known Cloudflare resolver prefixes: 1.1.1., 1.0.0., 162.159., 2606:4700:
+    //    If none of the detected resolvers are Cloudflare IPs, DNS is leaking through a different resolver.
+    const isCloudflareDns = (ip) =>
+      ip.startsWith('1.1.1.') ||
+      ip.startsWith('1.0.0.') ||
+      ip.startsWith('162.159.') ||
+      ip.startsWith('2606:4700');
+    
+    const isLeaking = dnsServers.length > 0 && !dnsServers.every(isCloudflareDns);
+
+    // Отображаем результат
+    loading.style.display = 'none';
+    result.style.display  = 'block';
+    retryBtn.style.display = 'flex';
+    ipEl.textContent = myIp;
+
+    // Use textContent to safely render IP addresses (avoid XSS from crafted DNS responses)
+    dnsList.innerHTML = '';
+    if (dnsServers.length > 0) {
+      dnsServers.forEach(ip => {
+        const div = document.createElement('div');
+        div.className = 'dns-leak-dns-entry';
+        div.textContent = ip;
+        dnsList.appendChild(div);
+      });
+    } else {
+      const div = document.createElement('div');
+      div.className = 'dns-leak-dns-entry';
+      div.style.color = 'var(--text-dim)';
+      div.textContent = 'Не удалось определить';
+      dnsList.appendChild(div);
+    }
+
+    if (isLeaking) {
+      iconWrap.className = 'dns-leak-icon-wrap leak';
+      banner.className   = 'dns-leak-status-banner leak';
+      statusIcon.textContent = '⚠️';
+      statusTxt.textContent  = 'Обнаружена утечка DNS';
+    } else {
+      iconWrap.className = 'dns-leak-icon-wrap safe';
+      banner.className   = 'dns-leak-status-banner';
+      statusIcon.textContent = '✅';
+      statusTxt.textContent  = 'Утечек не обнаружено';
+    }
+  } catch (err) {
+    loading.style.display = 'none';
+    result.style.display  = 'block';
+    retryBtn.style.display = 'flex';
+    banner.className = 'dns-leak-status-banner leak';
+    statusIcon.textContent = '❌';
+    statusTxt.textContent  = 'Ошибка проверки';
+    ipEl.textContent = '—';
+    dnsList.innerHTML = `<div class="dns-leak-dns-entry" style="color:var(--danger)">${err.message}</div>`;
+  }
+}
 
 restartBtn.onclick = () => {
   if (!activeServerLink) return;
@@ -579,7 +928,9 @@ function collectAndSaveSettings() {
     customDirect: document.getElementById('customDirect').value.split('\n').map(s => s.trim()).filter(s => s.length > 0),
     processMode: processModeHidden.value,
     processListBlacklist: processListBlacklistEl.value.split('\n').map(s => s.trim()).filter(s => s.length > 0),
-    processListWhitelist: processListWhitelistEl.value.split('\n').map(s => s.trim()).filter(s => s.length > 0)
+    processListWhitelist: processListWhitelistEl.value.split('\n').map(s => s.trim()).filter(s => s.length > 0),
+    favoriteLinks: Array.from(favoriteLinks),
+    customRules: customRules
   };
   return window.api.saveSettings(settings);
 }
@@ -767,10 +1118,19 @@ async function init() {
     }
     
     if (settings.autoConnect && activeServerLink) powerBtn.click();
+
+    if (settings.favoriteLinks) {
+      favoriteLinks = new Set(settings.favoriteLinks);
+    }
+    if (settings.customRules) {
+      customRules = settings.customRules;
+    }
+    renderCustomRules();
   } else {
     applyLanguage();
   }
   await loadSubscriptions();
+  renderHistoryTab(); // загрузить историю из localStorage при старте
 
   // Listen to background auto-update events to hot-reload the UI server cards
   window.api.onSubscriptionsUpdated(() => {
@@ -809,6 +1169,204 @@ async function init() {
     
     await window.api.saveSubscriptions(allSubscriptions);
     await loadSubscriptions();
+  });
+}
+
+// ── CUSTOM ROUTING RULES UI ──────────────────────────────────────────────────
+function renderCustomRules() {
+  const container = document.getElementById('customRulesList');
+  if (!container) return;
+  container.innerHTML = '';
+  
+  if (customRules.length === 0) {
+    const emptyDiv = document.createElement('div');
+    emptyDiv.style.cssText = 'color: var(--text-dim); font-size: 13px; font-style: italic; padding: 8px; text-align: center; border: 1px dashed var(--glass-border); border-radius: 8px;';
+    emptyDiv.textContent = currentLanguage === 'RU' ? 'Кастомные правила отсутствуют.' : 'No custom rules added yet.';
+    container.appendChild(emptyDiv);
+    return;
+  }
+  
+  customRules.forEach((rule, idx) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display: flex; justify-content: space-between; align-items: center; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: 8px; gap: 8px;';
+    
+    const infoSpan = document.createElement('span');
+    infoSpan.style.cssText = 'font-size: 13px; display: flex; align-items: center; gap: 6px;';
+    
+    let actionBadge = '';
+    if (rule.action === 'direct') actionBadge = '<span style="color:var(--success); font-weight:bold;">🟢 Direct</span>';
+    else if (rule.action === 'proxy') actionBadge = '<span style="color:var(--accent-color); font-weight:bold;">🔵 Proxy</span>';
+    else if (rule.action === 'block') actionBadge = '<span style="color:var(--danger); font-weight:bold;">🔴 Block</span>';
+    
+    let typeName = rule.type;
+    if (rule.type === 'domain_suffix') typeName = 'Suffix';
+    else if (rule.type === 'domain') typeName = 'Domain';
+    else if (rule.type === 'domain_keyword') typeName = 'Keyword';
+    else if (rule.type === 'ip_cidr') typeName = 'IP/CIDR';
+    
+    infoSpan.innerHTML = `${actionBadge} <span style="color:var(--text-dim); font-size:11px;">[${typeName}]</span> <strong>${escapeHtml(rule.value)}</strong>`;
+    
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn-glass';
+    delBtn.style.cssText = 'padding: 4px 8px; font-size: 11px; color: var(--danger); border-color: rgba(239, 68, 68, 0.2);';
+    delBtn.textContent = currentLanguage === 'RU' ? 'Удалить' : 'Delete';
+    
+    delBtn.onclick = () => {
+      customRules.splice(idx, 1);
+      renderCustomRules();
+      collectAndSaveSettings();
+    };
+    
+    row.appendChild(infoSpan);
+    row.appendChild(delBtn);
+    container.appendChild(row);
+  });
+}
+
+const addCustomRuleBtn = document.getElementById('addCustomRuleBtn');
+if (addCustomRuleBtn) {
+  addCustomRuleBtn.onclick = () => {
+    const action = document.getElementById('newRuleAction').value;
+    const type = document.getElementById('newRuleType').value;
+    const valInput = document.getElementById('newRuleValue');
+    const value = valInput.value.trim();
+    
+    if (!value) return;
+    
+    customRules.push({ action, type, value });
+    valInput.value = '';
+    renderCustomRules();
+    collectAndSaveSettings();
+  };
+}
+
+const saveRoutesBtn2 = document.getElementById('saveRoutesBtn2');
+if (saveRoutesBtn2) {
+  saveRoutesBtn2.onclick = async () => {
+    await collectAndSaveSettings();
+    const status = document.getElementById('routesStatus2');
+    if (status) {
+      status.style.display = 'inline';
+      setTimeout(() => status.style.display = 'none', 2000);
+    }
+  };
+}
+
+// ── SEARCH LIVE FILTER ───────────────────────────────────────────────────────
+const serverSearchInput = document.getElementById('serverSearchInput');
+if (serverSearchInput) {
+  serverSearchInput.addEventListener('input', (e) => {
+    serverSearchQuery = e.target.value;
+    updateCards();
+  });
+}
+
+// ── AUTO-BEST SERVER ──────────────────────────────────────────────────────────
+const bestServerBtn = document.getElementById('bestServerBtn');
+if (bestServerBtn) {
+  bestServerBtn.onclick = async () => {
+    let links = [];
+    allSubscriptions.forEach(s => links.push(...s.links));
+    const uniqueLinks = Array.from(new Set(links));
+    if (uniqueLinks.length === 0) return;
+    
+    // Show pinging status
+    uniqueLinks.forEach(l => {
+      setPingData(l, 'pinging');
+      window.api.pingServer(l);
+    });
+    updateCards();
+    
+    bestServerBtn.disabled = true;
+    const originalText = bestServerBtn.textContent;
+    bestServerBtn.textContent = currentLanguage === 'RU' ? 'Поиск...' : 'Finding...';
+    
+    setTimeout(async () => {
+      bestServerBtn.disabled = false;
+      bestServerBtn.textContent = originalText;
+      
+      let bestLink = null;
+      let minPing = Infinity;
+      uniqueLinks.forEach(l => {
+        const ping = pingData[l];
+        if (typeof ping === 'number' && ping > 0 && ping < minPing) {
+          minPing = ping;
+          bestLink = l;
+        }
+      });
+      
+      if (bestLink) {
+        activeServerLink = bestLink;
+        const info = parseBasicInfo(bestLink);
+        activeServerName.textContent = info.name;
+        activeServerDetails.textContent = `${info.type.toUpperCase()} • ${info.address}`;
+        updateCards();
+        collectAndSaveSettings();
+        
+        updateAppInterface('connecting');
+        try {
+          const freshSettings = await window.api.getSettings();
+          const useSystemProxy = freshSettings && freshSettings.systemProxy != null
+            ? !!freshSettings.systemProxy
+            : document.getElementById('systemProxyCheckbox').checked;
+          const res = await window.api.startXray(bestLink, useSystemProxy);
+          if (res && !res.success) {
+            showAlert(translations[currentLanguage].errorDialogTitle, res.error || 'Unknown error', true, translations[currentLanguage]);
+            updateAppInterface('off');
+          }
+        } catch (e) {
+          showAlert(translations[currentLanguage].errorDialogTitle, e.message, true, translations[currentLanguage]);
+          updateAppInterface('off');
+        }
+      } else {
+        showAlert(translations[currentLanguage].alertDialogTitle, currentLanguage === 'RU' ? 'Не удалось определить самый быстрый сервер!' : 'Could not determine the fastest server!', false, translations[currentLanguage]);
+      }
+    }, 2000);
+  };
+}
+
+// ── SAVE LOGS ────────────────────────────────────────────────────────────────
+const saveLogsBtn = document.getElementById('saveLogsBtn');
+if (saveLogsBtn) {
+  saveLogsBtn.onclick = async () => {
+    const rawLogs = logsArray.map(l => l.text).join('\n');
+    if (!rawLogs.trim()) {
+      showAlert(translations[currentLanguage].alertDialogTitle, currentLanguage === 'RU' ? 'Логи пусты!' : 'Logs are empty!', false, translations[currentLanguage]);
+      return;
+    }
+    const path = await window.api.saveLogs(rawLogs);
+    if (path) {
+      const confirmed = await showConfirm(currentLanguage === 'RU' ? `Логи успешно сохранены в:\n${path}\n\nОткрыть папку с логами в Проводнике?` : `Logs successfully saved to:\n${path}\n\nOpen logs folder in Explorer?`);
+      if (confirmed) {
+        window.api.openLogsFolder();
+      }
+    } else {
+      showAlert(translations[currentLanguage].errorDialogTitle, currentLanguage === 'RU' ? 'Не удалось сохранить файлы логов!' : 'Failed to save log files!', true, translations[currentLanguage]);
+    }
+  };
+}
+
+// ── WATCHDOG EVENT LISTENERS ──────────────────────────────────────────────────
+if (window.api.onWatchdogReconnecting) {
+  window.api.onWatchdogReconnecting(() => {
+    statusText.textContent = currentLanguage === 'RU' ? 'Авто-переподключение...' : 'Auto-reconnecting...';
+    statusText.style.color = 'var(--accent-color)';
+    statusDot.className = 'status-dot connecting';
+  });
+}
+if (window.api.onWatchdogReconnected) {
+  window.api.onWatchdogReconnected(() => {
+    statusText.textContent = currentLanguage === 'RU' ? 'Подключено' : 'Connected';
+    statusText.style.color = 'var(--success)';
+    statusDot.className = 'status-dot on';
+  });
+}
+if (window.api.onWatchdogFailed) {
+  window.api.onWatchdogFailed((err) => {
+    statusText.textContent = currentLanguage === 'RU' ? 'Сбой' : 'Watchdog failed';
+    statusText.style.color = 'var(--danger)';
+    statusDot.className = 'status-dot error';
+    showAlert(translations[currentLanguage].errorDialogTitle, err || 'Watchdog reconnect failed', true, translations[currentLanguage]);
   });
 }
 

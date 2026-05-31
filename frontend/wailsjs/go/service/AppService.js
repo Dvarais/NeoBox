@@ -42,6 +42,10 @@ export function NotifyWindowShown() {
   return window['go']['service']['AppService']['NotifyWindowShown']();
 }
 
+export function OpenLogsFolder() {
+  return window['go']['service']['AppService']['OpenLogsFolder']();
+}
+
 export function PingServer(arg1) {
   return window['go']['service']['AppService']['PingServer'](arg1);
 }
@@ -60,6 +64,10 @@ export function RestartXray(arg1, arg2, arg3) {
 
 export function RunDiagnostics() {
   return window['go']['service']['AppService']['RunDiagnostics']();
+}
+
+export function SaveLogs(arg1) {
+  return window['go']['service']['AppService']['SaveLogs'](arg1);
 }
 
 export function SaveSettings(arg1) {

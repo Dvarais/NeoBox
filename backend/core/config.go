@@ -26,12 +26,32 @@ type Settings struct {
 	ProcessListWhitelist []string `json:"processListWhitelist"`
 	BypassRu             bool     `json:"bypassRu"`
 	KillSwitch           bool     `json:"killSwitch"`
-	// DnsLeak: when true (default), all DNS is routed through VPN to prevent leaks.
+	// DnsLeakProtection: when true (default), all DNS is routed through VPN to prevent leaks.
 	// When false, the local DNS resolver is allowed as fallback.
-	DnsLeak              bool     `json:"dnsLeak"`
-	// Ipv6Leak: when true (default), IPv6 traffic is rejected to prevent leaks.
+	// Pointer so we can distinguish absent JSON key (nil → default true) from explicit false.
+	DnsLeakProtection  *bool `json:"dnsLeak"`
+	// Ipv6LeakProtection: when true (default), IPv6 traffic is rejected to prevent leaks.
 	// When false, IPv6 traffic is allowed to bypass the tunnel.
-	Ipv6Leak             bool     `json:"ipv6Leak"`
+	// Pointer so we can distinguish absent JSON key (nil → default true) from explicit false.
+	Ipv6LeakProtection *bool `json:"ipv6Leak"`
+	// CustomRules are user-defined routing rules added before geoip/geosite rules.
+	CustomRules []CustomRule `json:"customRules"`
+}
+
+// CustomRule represents a single user-defined routing rule.
+type CustomRule struct {
+	Action string `json:"action"` // "direct", "block", "proxy"
+	Type   string `json:"type"`   // "domain", "domain_suffix", "domain_keyword", "ip_cidr"
+	Value  string `json:"value"`
+}
+
+// boolDefault returns the dereferenced value of b, or def if b is nil.
+// Used to implement "true by default" for optional bool settings.
+func boolDefault(b *bool, def bool) bool {
+	if b == nil {
+		return def
+	}
+	return *b
 }
 
 // ParseProxyLink parses protocol-specific proxy URLs into a generic outbound map.
@@ -276,6 +296,10 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 				password := authParts[1]
 
 				serverParts := strings.SplitN(serverPart, ":", 2)
+				// FIX #11b: Guard against missing ":" in server part — same class of bug as authParts.
+				if len(serverParts) < 2 {
+					return nil, fmt.Errorf("invalid shadowsocks legacy server format: missing port in %q", serverPart)
+				}
 				outbound["server"] = serverParts[0]
 				portInt, _ = strconv.Atoi(serverParts[1])
 				outbound["server_port"] = portInt
@@ -480,10 +504,9 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		{"protocol": "dns", "action": "hijack-dns"},
 	}
 
-	// Block IPv6 to prevent leaks unless the user explicitly disabled Ipv6Leak protection.
-	// Default (Ipv6Leak=false in JSON means field is zero-value=false) — treat unset as true
-	// for backwards compat: only skip if user has explicitly set ipv6Leak=false.
-	if settings.Ipv6Leak {
+	// Block IPv6 to prevent leaks.
+	// Default: true (protected). Only skip if user explicitly set ipv6Leak=false.
+	if boolDefault(settings.Ipv6LeakProtection, true) {
 		routeRules = append(routeRules, map[string]interface{}{
 			"ip_version": 6, "action": "reject",
 		})
@@ -519,6 +542,41 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			"action":        "route",
 			"outbound":      "direct",
 		})
+	}
+
+	// Custom user-defined routing rules (take priority over geoip/geosite)
+	for _, rule := range settings.CustomRules {
+		if rule.Value == "" || rule.Type == "" || rule.Action == "" {
+			continue
+		}
+		var outbound string
+		switch rule.Action {
+		case "direct":
+			outbound = "direct"
+		case "block":
+			outbound = "block"
+		case "proxy":
+			outbound = outboundTag
+		default:
+			continue
+		}
+		ruleEntry := map[string]interface{}{
+			"action":   "route",
+			"outbound": outbound,
+		}
+		switch rule.Type {
+		case "domain":
+			ruleEntry["domain"] = []string{rule.Value}
+		case "domain_suffix":
+			ruleEntry["domain_suffix"] = []string{rule.Value}
+		case "domain_keyword":
+			ruleEntry["domain_keyword"] = []string{rule.Value}
+		case "ip_cidr":
+			ruleEntry["ip_cidr"] = []string{rule.Value}
+		default:
+			continue
+		}
+		routeRules = append(routeRules, ruleEntry)
 	}
 
 	// Process routing (split tunneling)
@@ -568,18 +626,35 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 	}
 
 	// 4. Final Config Structure
-	dnsRules := []map[string]interface{}{
-		{
-			"domain":        []string{serverIPStr, "localhost", "wails.localhost"},
-			"domain_suffix": []string{".local", ".localhost"},
-			"server":        "dns-direct",
-		},
+	// FIX: Use ip_cidr when serverIPStr is an IP address, domain otherwise.
+	// Placing an IP address in the "domain" field is logically incorrect for sing-box.
+	firstDNSRule := map[string]interface{}{
+		"domain_suffix": []string{".local", ".localhost"},
+		"domain":        []string{"localhost", "wails.localhost"},
+		"server":        "dns-direct",
 	}
+	if net.ParseIP(serverIPStr) != nil {
+		// Server was resolved to an IP — exclude it via ip_cidr, not domain.
+		firstDNSRule["ip_cidr"] = []string{serverIPStr + "/32"}
+	} else if serverIPStr != "" {
+		// Server is still a domain name — add it to the domain list.
+		domains := firstDNSRule["domain"].([]string)
+		firstDNSRule["domain"] = append(domains, serverIPStr)
+	}
+	dnsRules := []map[string]interface{}{firstDNSRule}
 	if settings.FakeDns && tunMode {
 		dnsRules = append(dnsRules, map[string]interface{}{
 			"query_type": []string{"A", "AAAA"},
 			"action":     "route",
 			"server":     "dns-fake",
+		})
+	} else if boolDefault(settings.Ipv6LeakProtection, true) {
+		// When IPv6 leak protection is on and fakeip is not used, reject AAAA queries
+		// via dns-remote to prevent out-of-tunnel IPv6 DNS leaks.
+		dnsRules = append(dnsRules, map[string]interface{}{
+			"query_type": []string{"AAAA"},
+			"action":     "route",
+			"server":     "dns-remote",
 		})
 	}
 
@@ -610,10 +685,17 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			map[string]interface{}{"type": "block", "tag": "block"},
 		},
 		"route": map[string]interface{}{
-			"rules":                   routeRules,
-			"auto_detect_interface":   true,
-			"default_domain_resolver": "dns-direct",
-			"final":                   outboundTag,
+			"rules":                 routeRules,
+			"auto_detect_interface": true,
+			// When DNS leak protection is on (default), resolve all domains via the VPN tunnel.
+			// When the user explicitly disables it, fall back to local system resolver.
+			"default_domain_resolver": func() string {
+				if boolDefault(settings.DnsLeakProtection, true) {
+					return "dns-remote"
+				}
+				return "dns-direct"
+			}(),
+			"final": outboundTag,
 		},
 		"experimental": map[string]interface{}{
 			"cache_file": map[string]interface{}{

@@ -32,7 +32,7 @@ import (
 // currentVersion is the application version. Update this before each release.
 // FIX #14: Extracted from CheckUpdates into a package-level constant so it
 // cannot be missed during release preparation.
-const currentVersion = "1.5.8"
+const currentVersion = "1.6.0"
 
 type TrayServerItem struct {
 	Item *systray.MenuItem
@@ -57,6 +57,12 @@ type AppService struct {
 	mStatusItem        *systray.MenuItem
 	trayServerItems    [50]*TrayServerItem
 	mu                 sync.Mutex
+
+	// Watchdog — auto-reconnect on VPN drop
+	cancelWatchdog  context.CancelFunc
+	watchdogMu      sync.Mutex
+	watchdogLink    string
+	watchdogProxy   bool
 }
 
 type wailsLogWriter struct {
@@ -89,39 +95,36 @@ func NewAppService(cm *core.CoreManager, userDataDir string) *AppService {
 	}
 }
 
-// GetSettings reads and decrypts settings.json.
+// GetSettings reads settings.json and returns its contents as a JSON string.
+// The file is plain JSON — users can edit it directly in a text editor.
 func (s *AppService) GetSettings() string {
 	filePath := filepath.Join(s.userDataDir, "settings.json")
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return "{}"
-	}
-
-	encryptedData, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return "{}"
+		}
+		fmt.Printf("[GetSettings] read error: %v\n", err)
 		return "{}"
 	}
-
-	decrypted, err := security.Decrypt(encryptedData)
-	if err != nil {
-		// Дешифровка не удалась — скорее всего DPAPI-ключ сессии изменился
-		// после «Завершения работы». Удаляем повреждённый файл, чтобы
-		// при следующем SaveSettings настройки записались корректно.
-		_ = os.Remove(filePath)
+	// Validate it is parseable JSON before returning
+	if !json.Valid(data) {
+		fmt.Println("[GetSettings] settings.json contains invalid JSON — returning defaults")
 		return "{}"
 	}
-
-	return string(decrypted)
+	return string(data)
 }
 
-// SaveSettings encrypts and saves settings.json.
-//
-// FIX #7: Removed the plaintext fallback on encryption failure. If Encrypt()
-// fails, the function now returns false without writing anything to disk.
-// Previously, a failed encryption silently stored settings in plaintext,
-// creating a discrepancy between what the user expects (encrypted) and what
-// is stored on disk (readable by anyone with filesystem access).
+// SaveSettings saves settings to settings.json as plain, human-readable JSON.
+// Users can open and edit this file directly in any text editor.
 func (s *AppService) SaveSettings(settingsJSON string) bool {
 	filePath := filepath.Join(s.userDataDir, "settings.json")
+
+	// Validate JSON before writing to avoid corrupting the file
+	if !json.Valid([]byte(settingsJSON)) {
+		fmt.Println("[SaveSettings] refusing to write invalid JSON")
+		return false
+	}
 
 	// Apply autostart update if needed based on settings changes
 	var settingsMap map[string]interface{}
@@ -138,15 +141,17 @@ func (s *AppService) SaveSettings(settingsJSON string) bool {
 		}
 	}
 
-	encrypted, err := security.Encrypt([]byte(settingsJSON))
-	if err != nil {
-		// Encryption failed — do NOT fall back to plaintext storage.
-		// Return false so the caller knows the save did not succeed.
-		fmt.Printf("[SaveSettings] encryption error: %v\n", err)
-		return false
+	// Pretty-print for human readability
+	var pretty map[string]interface{}
+	var out []byte
+	if err := json.Unmarshal([]byte(settingsJSON), &pretty); err == nil {
+		out, _ = json.MarshalIndent(pretty, "", "  ")
+	}
+	if out == nil {
+		out = []byte(settingsJSON)
 	}
 
-	err = os.WriteFile(filePath, encrypted, 0600)
+	err := os.WriteFile(filePath, out, 0644)
 	return err == nil
 }
 
@@ -158,40 +163,29 @@ type Subscription struct {
 	Loading bool     `json:"loading"`
 }
 
-// GetSubscriptions reads and decrypts subscriptions.json.
-//
-// FIX #8: GetSubscriptions is now a pure read — it no longer writes to disk.
-// Previously, every call that found a "bootstrap-free-subs" entry would
-// re-encrypt and overwrite subscriptions.json, creating an unintended
-// write-on-read side effect. The cleanup is now done once via a dedicated
-// helper purgeBootstrapSub() which is called only from SaveSubscriptions.
+// GetSubscriptions reads subscriptions.json and returns its contents as a JSON string.
+// The file is plain JSON — users can view and edit it directly.
+// NOTE: GetSubscriptions is a pure read — it never writes to disk.
 func (s *AppService) GetSubscriptions() string {
 	filePath := filepath.Join(s.userDataDir, "subscriptions.json")
-	var decryptedJSON string
-
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		decryptedJSON = "[]"
-	} else {
-		encryptedData, err := os.ReadFile(filePath)
-		if err != nil {
-			decryptedJSON = "[]"
-		} else {
-			decrypted, err := security.Decrypt(encryptedData)
-			if err != nil {
-				// Дешифровка не удалась — DPAPI-ключ сессии изменился
-				// после «Завершения работы». Удаляем повреждённый файл.
-				_ = os.Remove(filePath)
-				decryptedJSON = "[]"
-			} else {
-				decryptedJSON = string(decrypted)
-			}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "[]"
 		}
+		fmt.Printf("[GetSubscriptions] read error: %v\n", err)
+		return "[]"
 	}
+	if !json.Valid(data) {
+		fmt.Println("[GetSubscriptions] subscriptions.json contains invalid JSON — returning empty list")
+		return "[]"
+	}
+	rawJSON := string(data)
 
 	// Filter out the NeoBox Free bootstrap subscription in-memory only.
 	// NOTE: we do NOT write back to disk here — see purgeBootstrapSub().
 	var subs []Subscription
-	if err := json.Unmarshal([]byte(decryptedJSON), &subs); err == nil {
+	if err := json.Unmarshal(data, &subs); err == nil {
 		hasBootstrap := false
 		cleanedSubs := subs[:0]
 		for _, sub := range subs {
@@ -203,37 +197,43 @@ func (s *AppService) GetSubscriptions() string {
 		}
 		if hasBootstrap {
 			if merged, err := json.Marshal(cleanedSubs); err == nil {
-				decryptedJSON = string(merged)
+				rawJSON = string(merged)
 			}
 		}
 	}
 
-	return decryptedJSON
+	return rawJSON
 }
 
-// SaveSubscriptions encrypts and saves subscriptions.json.
+// SaveSubscriptions saves subscriptions.json as plain, human-readable JSON.
 // It also purges the bootstrap subscription from disk if present.
 func (s *AppService) SaveSubscriptions(subsJSON string) bool {
 	filePath := filepath.Join(s.userDataDir, "subscriptions.json")
 
-	// FIX #8: Purge bootstrap sub from the JSON being saved rather than doing it
-	// on every GetSubscriptions() read. This ensures the file is cleaned up
-	// exactly once and not re-written on every read call.
+	// Purge bootstrap sub from the JSON being saved.
 	subsJSON = purgeBootstrapSub(subsJSON)
 
-	encrypted, err := security.Encrypt([]byte(subsJSON))
-	var writeErr error
-	if err != nil {
-		writeErr = os.WriteFile(filePath, []byte(subsJSON), 0600)
-	} else {
-		writeErr = os.WriteFile(filePath, encrypted, 0600)
+	// Validate JSON before writing
+	if !json.Valid([]byte(subsJSON)) {
+		fmt.Println("[SaveSubscriptions] refusing to write invalid JSON")
+		return false
 	}
 
-	if writeErr == nil {
-		s.RebuildTrayServers()
-		return true
+	// Pretty-print for human readability
+	var pretty []interface{}
+	var out []byte
+	if err := json.Unmarshal([]byte(subsJSON), &pretty); err == nil {
+		out, _ = json.MarshalIndent(pretty, "", "  ")
 	}
-	return false
+	if out == nil {
+		out = []byte(subsJSON)
+	}
+
+	if err := os.WriteFile(filePath, out, 0644); err != nil {
+		return false
+	}
+	s.RebuildTrayServers()
+	return true
 }
 
 // purgeBootstrapSub removes the "bootstrap-free-subs" entry from a JSON subscription list.
@@ -322,7 +322,11 @@ func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[s
 	wCtx := s.wailsCtx
 	s.wailsCtxMu.RUnlock()
 	if wCtx != nil {
-		logWriter = &wailsLogWriter{ctx: wCtx}
+		lw := &wailsLogWriter{}
+		lw.mu.Lock()
+		lw.ctx = wCtx
+		lw.mu.Unlock()
+		logWriter = lw
 	}
 	if err := s.coreManager.Start(string(configBytes), logWriter); err != nil {
 		response["error"] = fmt.Sprintf("Failed to start sing-box: %v", err)
@@ -354,6 +358,9 @@ func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[s
 	// Notify user via Windows toast when connected (window may be hidden in tray)
 	go sendToast("✅ NeoBox VPN", "Подключено к серверу: "+parseServerNameFromLink(link))
 
+	// Start watchdog — auto-reconnect if tunnel drops
+	go s.startWatchdog(link, useSystemProxy)
+
 	response["success"] = true
 	return response
 }
@@ -361,7 +368,10 @@ func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[s
 // StopXray stops sing-box and disables system proxy settings.
 func (s *AppService) StopXray() map[string]interface{} {
 	response := map[string]interface{}{"success": false}
-	
+
+	// Stop watchdog first so it doesn't try to restart while we're stopping
+	s.stopWatchdog()
+
 	s.SetSystemProxy(false)
 	_ = security.DisableKillSwitch() // Disable firewall rules when disconnecting
 
@@ -394,6 +404,9 @@ func (s *AppService) StopXray() map[string]interface{} {
 // Unlike calling StopXray + StartXray separately, this preserves the proxy backup
 // state so the user's original proxy settings are correctly restored on final disconnect.
 func (s *AppService) RestartXray(link string, settingsJSON string, useSystemProxy bool) map[string]interface{} {
+	// Stop watchdog before restarting; StartXray will re-launch it.
+	s.stopWatchdog()
+
 	// Stop the core and traffic monitor only — do NOT touch system proxy or kill switch.
 	if s.cancelMonitor != nil {
 		s.cancelMonitor()
@@ -560,7 +573,7 @@ func (s *AppService) CheckUpdates() map[string]interface{} {
 		return response
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024)) // 1 MB limit
 	if err != nil {
 		return response
 	}
@@ -610,6 +623,19 @@ func (s *AppService) DownloadAndInstallUpdate(downloadURL string) error {
 
 	if wCtx == nil {
 		return fmt.Errorf("wails context is not initialized")
+	}
+
+	// Security: only allow downloads from GitHub domains.
+	// This prevents an attacker who can intercept/tamper the GitHub API response
+	// from redirecting the download to a malicious binary.
+	parsedURL, err := url.Parse(downloadURL)
+	if err != nil {
+		return fmt.Errorf("invalid download URL: %w", err)
+	}
+	host := strings.ToLower(parsedURL.Hostname())
+	if !strings.HasSuffix(host, ".github.com") && host != "github.com" &&
+		!strings.HasSuffix(host, ".githubusercontent.com") {
+		return fmt.Errorf("download URL must be from github.com or githubusercontent.com, got: %s", host)
 	}
 
 	// Extract filename from download URL
@@ -801,6 +827,110 @@ func (s *AppService) startTrafficMonitor(ctx context.Context) {
 	}
 }
 
+// emitSafe emits a Wails event thread-safely (wailsCtx may be nil during startup).
+func (s *AppService) emitSafe(event string, data ...interface{}) {
+	s.wailsCtxMu.RLock()
+	ctx := s.wailsCtx
+	s.wailsCtxMu.RUnlock()
+	if ctx != nil {
+		wailsruntime.EventsEmit(ctx, event, data...)
+	}
+}
+
+// startWatchdog probes the local SOCKS proxy port every 15 s.
+// After 3 consecutive failures it automatically restarts the VPN core.
+func (s *AppService) startWatchdog(link string, useSystemProxy bool) {
+	s.watchdogMu.Lock()
+	// Cancel any previous watchdog before starting a new one
+	if s.cancelWatchdog != nil {
+		s.cancelWatchdog()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancelWatchdog = cancel
+	s.watchdogLink = link
+	s.watchdogProxy = useSystemProxy
+	s.watchdogMu.Unlock()
+
+	// Give the VPN core time to fully initialise before probing
+	select {
+	case <-time.After(20 * time.Second):
+	case <-ctx.Done():
+		return
+	}
+
+	failCount := 0
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			conn, err := net.DialTimeout("tcp", "127.0.0.1:20809", 3*time.Second)
+			if err == nil {
+				_ = conn.Close()
+				failCount = 0
+				continue
+			}
+			failCount++
+			if failCount >= 3 {
+				failCount = 0
+				s.emitSafe("watchdog-reconnecting")
+				s.watchdogMu.Lock()
+				savedLink := s.watchdogLink
+				savedProxy := s.watchdogProxy
+				s.watchdogMu.Unlock()
+				// Restart without touching system proxy backup or kill switch
+				_ = s.coreManager.Stop()
+				if s.cancelMonitor != nil {
+					s.cancelMonitor()
+					s.cancelMonitor = nil
+				}
+				res := s.StartXray(savedLink, "", savedProxy)
+				if ok, _ := res["success"].(bool); ok {
+					s.emitSafe("watchdog-reconnected")
+				} else {
+					errMsg, _ := res["error"].(string)
+					s.emitSafe("watchdog-failed", errMsg)
+				}
+			}
+		}
+	}
+}
+
+// stopWatchdog cancels the running watchdog goroutine if any.
+func (s *AppService) stopWatchdog() {
+	s.watchdogMu.Lock()
+	defer s.watchdogMu.Unlock()
+	if s.cancelWatchdog != nil {
+		s.cancelWatchdog()
+		s.cancelWatchdog = nil
+	}
+}
+
+// SaveLogs writes the provided log text to a timestamped file in the logs directory.
+// Returns the absolute path of the saved file, or empty string on error.
+func (s *AppService) SaveLogs(content string) string {
+	logsDir := filepath.Join(s.userDataDir, "logs")
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		return ""
+	}
+	fileName := time.Now().Format("2006-01-02_15-04-05") + ".log"
+	filePath := filepath.Join(logsDir, fileName)
+	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		return ""
+	}
+	return filePath
+}
+
+// OpenLogsFolder opens the logs directory in Windows Explorer.
+func (s *AppService) OpenLogsFolder() {
+	logsDir := filepath.Join(s.userDataDir, "logs")
+	_ = os.MkdirAll(logsDir, 0755)
+	exec.Command("explorer", logsDir).Start()
+}
+
 // InitTray starts the system tray loop in a background goroutine.
 func (s *AppService) InitTray(iconBytes []byte) {
 	go func() {
@@ -862,32 +992,47 @@ func (s *AppService) InitTray(iconBytes []byte) {
 			for {
 				select {
 				case <-mToggle.ClickedCh:
+					// FIX #18: windowVisible is protected by mu; wailsCtx is protected by wailsCtxMu.
+					// Acquire them separately and snapshot wailsCtx before calling Wails runtime
+					// to avoid holding mu while making external calls (potential deadlock).
 					s.mu.Lock()
-					if s.windowVisible {
-						if s.wailsCtx != nil {
-							wailsruntime.WindowHide(s.wailsCtx)
-						}
+					visible := s.windowVisible
+					if visible {
 						mToggle.SetTitle("Открыть интерфейс")
 						s.windowVisible = false
 					} else {
-						if s.wailsCtx != nil {
-							wailsruntime.WindowShow(s.wailsCtx)
-							wailsruntime.WindowUnminimise(s.wailsCtx)
-							wailsruntime.EventsEmit(s.wailsCtx, "window-restored", nil)
-						}
 						mToggle.SetTitle("Скрыть интерфейс")
 						s.windowVisible = true
 					}
 					s.mu.Unlock()
 
+					s.wailsCtxMu.RLock()
+					wCtxToggle := s.wailsCtx
+					s.wailsCtxMu.RUnlock()
+					if wCtxToggle != nil {
+						if visible {
+							wailsruntime.WindowHide(wCtxToggle)
+						} else {
+							wailsruntime.WindowShow(wCtxToggle)
+							wailsruntime.WindowUnminimise(wCtxToggle)
+							wailsruntime.EventsEmit(wCtxToggle, "window-restored", nil)
+						}
+					}
+
 				case <-mRestart.ClickedCh:
-					if s.wailsCtx != nil {
-						wailsruntime.EventsEmit(s.wailsCtx, "tray-restart", nil)
+					s.wailsCtxMu.RLock()
+					wCtxRestart := s.wailsCtx
+					s.wailsCtxMu.RUnlock()
+					if wCtxRestart != nil {
+						wailsruntime.EventsEmit(wCtxRestart, "tray-restart", nil)
 					}
 
 				case <-mDisconnect.ClickedCh:
-					if s.wailsCtx != nil {
-						wailsruntime.EventsEmit(s.wailsCtx, "tray-toggle-connection", nil)
+					s.wailsCtxMu.RLock()
+					wCtxDisconnect := s.wailsCtx
+					s.wailsCtxMu.RUnlock()
+					if wCtxDisconnect != nil {
+						wailsruntime.EventsEmit(wCtxDisconnect, "tray-toggle-connection", nil)
 					}
 
 				case <-mQuit.ClickedCh:
@@ -895,8 +1040,11 @@ func (s *AppService) InitTray(iconBytes []byte) {
 					_ = s.coreManager.Stop()
 					s.SetSystemProxy(false)
 					systray.Quit()
-					if s.wailsCtx != nil {
-						wailsruntime.Quit(s.wailsCtx)
+					s.wailsCtxMu.RLock()
+					wCtxQuit := s.wailsCtx
+					s.wailsCtxMu.RUnlock()
+					if wCtxQuit != nil {
+						wailsruntime.Quit(wCtxQuit)
 					}
 					return
 				}
@@ -996,16 +1144,12 @@ func (s *AppService) RebuildTrayServers() {
 		return
 	}
 
-	encryptedData, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		hideAll()
 		return
 	}
-
-	decrypted, err := security.Decrypt(encryptedData)
-	if err != nil {
-		decrypted = encryptedData
-	}
+	decrypted := data
 
 	var subs []Subscription
 	if err := json.Unmarshal(decrypted, &subs); err != nil {

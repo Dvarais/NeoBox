@@ -819,8 +819,21 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   gap: 15px;
   width: 100%;
   max-width: 360px;
-  margin: 15px auto;
+  margin: 15px auto 10px auto;
   animation: fadeInSpeed 0.3s ease-out;
+}
+
+.speedometer-total-container {
+  display: flex;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto 15px auto;
+  animation: fadeInSpeed 0.35s ease-out;
+}
+
+.speedometer-total-container .speed-badge.total {
+  width: 100%;
+  justify-content: flex-start;
 }
 
 @keyframes fadeInSpeed {
@@ -863,6 +876,11 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 .speed-badge.upload .speed-icon,
 .speed-badge.upload .speed-value {
   color: #C084FC; /* Фиолетовый (Выгрузка) */
+}
+
+.speed-badge.total .speed-icon,
+.speed-badge.total .speed-value {
+  color: var(--accent-color); /* Голубой (Общий трафик) */
 }
 
 .speed-info {
@@ -1168,3 +1186,493 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 
+/* ── Session Total Traffic (chevron widget) ─────────────────────────────────── */
+.session-total-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+  animation: fadeInSpeed 0.35s ease-out;
+}
+
+.session-chevron {
+  color: var(--text-dim);
+  opacity: 0.45;
+  line-height: 1;
+  margin-bottom: -2px;
+}
+
+.session-total-badge {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 10px 18px;
+  backdrop-filter: blur(8px);
+  transition: all 0.25s ease;
+}
+
+.session-total-badge:hover {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.18);
+}
+
+.session-total-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+.session-total-values {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.session-down { color: #10B981; }
+.session-up   { color: #C084FC; }
+.session-sep  { color: var(--text-dim); opacity: 0.4; }
+
+/* ── History Tab ────────────────────────────────────────────────────────────── */
+.history-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.history-stat-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  padding: 16px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: all 0.2s ease;
+}
+
+.history-stat-card:hover {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.2);
+  transform: translateY(-2px);
+}
+
+.history-stat-icon {
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.history-stat-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.history-stat-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent-color);
+  line-height: 1.2;
+}
+
+.history-stat-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.history-card {
+  background: var(--card-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  transition: all 0.2s ease;
+  animation: fadeIn 0.3s ease forwards;
+}
+
+.history-card:hover {
+  border-color: rgba(56,189,248,0.3);
+  background: rgba(56,189,248,0.03);
+  transform: translateX(3px);
+}
+
+.history-card-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: rgba(56,189,248,0.1);
+  border: 1px solid rgba(56,189,248,0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.history-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.history-card-server {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.history-card-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.history-meta-item {
+  font-size: 11px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.history-card-traffic {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.history-traffic-down {
+  font-size: 11px;
+  font-weight: 600;
+  color: #10B981;
+}
+
+.history-traffic-up {
+  font-size: 11px;
+  font-weight: 600;
+  color: #C084FC;
+}
+
+.history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+  opacity: 0.6;
+}
+
+/* ── DNS Leak Modal ──────────────────────────────────────────────────────────── */
+.dns-leak-modal {
+  max-width: 460px !important;
+  background: radial-gradient(circle at top left, var(--card-bg), #0f1322) !important;
+  border: 1px solid rgba(56,189,248,0.2) !important;
+  animation: modalScaleUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+}
+
+.dns-leak-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.dns-leak-icon-wrap {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: rgba(56,189,248,0.1);
+  border: 1px solid rgba(56,189,248,0.25);
+  color: var(--accent-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.4s ease;
+  box-shadow: 0 0 20px rgba(56,189,248,0.1);
+}
+
+.dns-leak-icon-wrap.leak {
+  background: rgba(239,68,68,0.12);
+  border-color: rgba(239,68,68,0.3);
+  color: var(--danger);
+  box-shadow: 0 0 20px rgba(239,68,68,0.15);
+}
+
+.dns-leak-icon-wrap.safe {
+  background: rgba(34,197,94,0.12);
+  border-color: rgba(34,197,94,0.3);
+  color: var(--success);
+  box-shadow: 0 0 20px rgba(34,197,94,0.15);
+}
+
+.dns-leak-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 24px 0;
+}
+
+.dns-leak-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(56,189,248,0.15);
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: spinLoader 0.8s linear infinite;
+}
+
+@keyframes spinLoader {
+  to { transform: rotate(360deg); }
+}
+
+.dns-leak-status-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 20px;
+  background: rgba(34,197,94,0.1);
+  border: 1px solid rgba(34,197,94,0.25);
+  color: var(--success);
+  animation: fadeIn 0.3s ease;
+}
+
+.dns-leak-status-banner.leak {
+  background: rgba(239,68,68,0.1);
+  border-color: rgba(239,68,68,0.25);
+  color: var(--danger);
+}
+
+.dns-leak-info-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dns-leak-info-item {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+
+.dns-leak-info-label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.dns-leak-info-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-color);
+  font-family: 'Consolas', monospace;
+}
+
+.dns-leak-dns-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dns-leak-dns-entry {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  font-family: 'Consolas', monospace;
+  padding: 3px 0;
+}
+
+/* ── Игровой Спидометр Трафика (Traffic Game Launcher Style) ───────────────── */
+.traffic-game-container {
+  display: flex;
+  width: 100%;
+  max-width: 360px;
+  margin: 15px auto 5px auto;
+  animation: fadeInSpeed 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.traffic-game-card {
+  width: 100%;
+  background: rgba(10, 15, 30, 0.35);
+  border: 1px solid rgba(56, 189, 248, 0.15);
+  border-radius: 16px;
+  padding: 15px 18px;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4),
+              inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: all 0.3s ease;
+  overflow: hidden;
+  position: relative;
+}
+
+.traffic-game-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent-color), transparent);
+  opacity: 0.5;
+}
+
+.traffic-game-card:hover {
+  border-color: rgba(56, 189, 248, 0.3);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5),
+              0 0 15px rgba(56, 189, 248, 0.1),
+              inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transform: translateY(-2px);
+}
+
+.traffic-game-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.traffic-game-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-dim);
+  opacity: 0.85;
+}
+
+.traffic-game-ratio {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--accent-color);
+  font-family: 'Courier New', monospace;
+  text-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
+}
+
+.traffic-game-progress-bar {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  position: relative;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6);
+}
+
+.traffic-game-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #10B981, var(--accent-color), #C084FC);
+  border-radius: 3px;
+  position: relative;
+  transition: width 0.4s cubic-bezier(0.1, 0.8, 0.3, 1);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
+}
+
+.traffic-game-progress-glow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.4) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: progressShimmer 1.8s infinite linear;
+}
+
+@keyframes progressShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.traffic-game-stats {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.traffic-stat-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.traffic-stat-label {
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-dim);
+  opacity: 0.6;
+  margin-bottom: 3px;
+}
+
+.traffic-stat-val {
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.traffic-stat-val.down {
+  color: #10B981;
+}
+
+.traffic-stat-val.up {
+  color: #C084FC;
+}
+
+.traffic-stat-val.limit {
+  color: var(--text-main);
+  opacity: 0.9;
+}
+
+.traffic-stat-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.08);
+}

@@ -115,17 +115,22 @@ func (s *AppService) RunDiagnostics() string {
 	}
 
 	// ── 6. DNS resolution ────────────────────────────────────────────────────────
-	if _, err := net.LookupHost("cloudflare.com"); err != nil {
+	// NOTE: We intentionally check DNS *port connectivity* (TCP dial to 1.1.1.1:53)
+	// rather than calling net.LookupHost which goes through the OS resolver and
+	// would send a plaintext DNS query outside the VPN tunnel before it is even up.
+	dnsConn, err := net.DialTimeout("tcp", "1.1.1.1:53", 2*time.Second)
+	if err != nil {
 		items = append(items, DiagnosticItem{
 			Name:    "DNS резолвер",
 			Status:  DiagWarning,
-			Message: "DNS не работает. Возможны проблемы с подпиской и DNS-over-HTTPS.",
+			Message: "Порт DNS (1.1.1.1:53) недоступен. Возможны проблемы с подпиской и DNS-over-HTTPS.",
 		})
 	} else {
+		_ = dnsConn.Close()
 		items = append(items, DiagnosticItem{
 			Name:    "DNS резолвер",
 			Status:  DiagOK,
-			Message: "DNS работает корректно",
+			Message: "DNS порт доступен (1.1.1.1:53)",
 		})
 	}
 
@@ -144,30 +149,6 @@ func (s *AppService) RunDiagnostics() string {
 		})
 	}
 
-	// ── 8. Encryption key ────────────────────────────────────────────────────────
-	s.mu.Lock()
-	dataDir := s.userDataDir
-	s.mu.Unlock()
-	keyPath := filepath.Join(dataDir, "key.bin")
-	if info, err := os.Stat(keyPath); err != nil {
-		items = append(items, DiagnosticItem{
-			Name:    "Ключ шифрования",
-			Status:  DiagError,
-			Message: "key.bin не найден. Настройки и подписки не будут сохранены.",
-		})
-	} else if info.Size() != 32 {
-		items = append(items, DiagnosticItem{
-			Name:    "Ключ шифрования",
-			Status:  DiagError,
-			Message: "key.bin повреждён (неверный размер). Удалите его и перезапустите приложение.",
-		})
-	} else {
-		items = append(items, DiagnosticItem{
-			Name:    "Ключ шифрования",
-			Status:  DiagOK,
-			Message: "key.bin в порядке",
-		})
-	}
 
 	result, err := json.Marshal(items)
 	if err != nil {

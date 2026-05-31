@@ -12,7 +12,6 @@ import (
 	"unsafe"
 
 	"NeoBox/backend/core"
-	"NeoBox/backend/security"
 	"NeoBox/backend/service"
 
 	ps "github.com/mitchellh/go-ps"
@@ -50,13 +49,6 @@ func main() {
 	userDataDir := filepath.Join(homeDir, "AppData", "Roaming", "NeoBox")
 	// Ensure the directory exists before writing the encryption key
 	_ = os.MkdirAll(userDataDir, 0755)
-
-	// Initialize AES encryption key (must be before migration and service startup).
-	// This replaces the old DPAPI approach which was session-dependent and caused
-	// settings loss after shutdown/privilege changes.
-	if err := security.InitEncryption(userDataDir); err != nil {
-		fmt.Printf("Warning: failed to initialize encryption: %v\n", err)
-	}
 
 	// Run migration from old Electron version if present and new Go version folder doesn't exist
 	migrateOldSettings(userDataDir)
@@ -185,10 +177,8 @@ func migrateOldSettings(userDataDir string) {
 					if err := json.Unmarshal(decrypted, &settingsMap); err == nil {
 						// Prevent auto-connect loop on first run after migration
 						settingsMap["autoConnect"] = false
-						if newJSON, err := json.Marshal(settingsMap); err == nil {
-							if encryptedBytes, err := security.Encrypt(newJSON); err == nil {
-								_ = os.WriteFile(newSettings, encryptedBytes, 0600)
-							}
+						if newJSON, err := json.MarshalIndent(settingsMap, "", "  "); err == nil {
+							_ = os.WriteFile(newSettings, newJSON, 0644)
 						}
 					}
 				} else {

@@ -149,6 +149,7 @@ export function renderSubTabs(container, translations, currentLanguage, onTabCha
   };
 
   container.appendChild(createTab('all', t.allServersTab));
+  container.appendChild(createTab('favorites', t.favoritesTab));
   allSubscriptions.forEach(sub => {
     container.appendChild(createTab(sub.id, sub.name));
   });

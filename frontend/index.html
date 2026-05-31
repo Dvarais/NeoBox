@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.ipify.org https://raw.githubusercontent.com;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.ipify.org https://raw.githubusercontent.com https://cloudflare-dns.com;">
   <title>NeoBox Glass</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -14,10 +14,13 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
     </div>
     <div class="nav-item" data-target="view-servers" title="Серверы">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+    </div>
+    <div class="nav-item" data-target="view-history" title="История">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
     </div>
     <div class="nav-item" data-target="view-routes" title="Маршруты">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
     </div>
     <div class="nav-item" data-target="view-settings" title="Настройки">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -37,7 +40,7 @@
   <main>
     <!-- Верхняя полоса управления -->
     <div class="window-header">
-      <div class="window-title">NeoBox <span style="font-size: 10px; opacity: 0.5; margin-left: 6px; font-weight: normal; vertical-align: middle;">v1.5.8</span></div>
+      <div class="window-title">NeoBox <span style="font-size: 10px; opacity: 0.5; margin-left: 6px; font-weight: normal; vertical-align: middle;">v1.6.0</span></div>
       <div class="window-controls">
         <button id="minimizeBtn" class="control-btn" title="Свернуть">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -58,6 +61,11 @@
         <div class="status-badge" style="background: rgba(56, 189, 248, 0.1);">
           <span>IP: </span>
           <span id="currentIp" style="color: var(--accent-color);">Определяется...</span>
+        </div>
+        <!-- Connection timer -->
+        <div id="sessionTimerBadge" class="status-badge" style="display:none; background: rgba(74,222,128,0.1);">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span id="sessionTimerText" style="color: var(--success); font-variant-numeric: tabular-nums;">00:00:00</span>
         </div>
       </div>
 
@@ -88,6 +96,46 @@
             <div class="speed-info">
               <span class="speed-label" id="speedUploadLabel">Выгрузка</span>
               <span id="speedUpload" class="speed-value">0.0 KB/s</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dummies to ensure backward compatibility with renderer.js and avoid javascript errors -->
+        <div id="speedometerTotalContainer" style="display: none;">
+          <span id="speedTotal"></span>
+        </div>
+
+        <!-- Общий потраченный трафик (Игровой стиль) -->
+        <div class="traffic-game-container" id="sessionTotalContainer" style="display: none;">
+          <div class="traffic-game-card">
+            <div class="traffic-game-header">
+              <span class="traffic-game-title" id="trafficGameTitle">Передача данных</span>
+              <span class="traffic-game-ratio" id="trafficGameRatio">0%</span>
+            </div>
+            
+            <!-- Прогресс-бар в игровом стиле -->
+            <div class="traffic-game-progress-bar">
+              <div class="traffic-game-progress-fill" id="trafficGameProgressFill">
+                <div class="traffic-game-progress-glow"></div>
+              </div>
+            </div>
+            
+            <!-- Статистика снизу -->
+            <div class="traffic-game-stats">
+              <div class="traffic-stat-item">
+                <span class="traffic-stat-label" id="trafficGameDownLabel">Загружено</span>
+                <span class="traffic-stat-val down" id="sessionTotalDown">0 B</span>
+              </div>
+              <div class="traffic-stat-divider"></div>
+              <div class="traffic-stat-item">
+                <span class="traffic-stat-label" id="trafficGameLimitLabel">Прогресс</span>
+                <span class="traffic-stat-val limit" id="trafficGameTotalAndLimit">0 B / 100 MB</span>
+              </div>
+              <div class="traffic-stat-divider"></div>
+              <div class="traffic-stat-item">
+                <span class="traffic-stat-label" id="trafficGameUpLabel">Выгружено</span>
+                <span class="traffic-stat-val up" id="sessionTotalUp">0 B</span>
+              </div>
             </div>
           </div>
         </div>
@@ -136,15 +184,85 @@
             </div>
           </div>
         </div>
-        <button id="pingAllBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;">Проверить пинг всех</button>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button id="dnsLeakBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            DNS Leak
+          </button>
+          <button id="pingAllBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;">Проверить пинг всех</button>
+        </div>
       </div>
 
       <div id="subscription-tabs" style="display: flex; gap: 10px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 5px;">
         <!-- Динамические вкладки -->
       </div>
 
+      <!-- Search + Auto-best bar -->
+      <div style="display: flex; gap: 10px; margin-bottom: 16px; align-items: center;">
+        <div style="flex: 1; position: relative;">
+          <svg style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--text-dim); pointer-events:none;" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input id="serverSearchInput" type="text" placeholder="Поиск серверов..." style="padding-left: 34px; width: 100%; box-sizing: border-box;">
+        </div>
+        <button id="bestServerBtn" class="btn-glass" style="white-space:nowrap; padding: 6px 14px; font-size:12px;" title="Пинговать все и подключиться к самому быстрому">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          Лучший сервер
+        </button>
+      </div>
+
       <div id="serversGrid" class="server-grid">
         <!-- Динамические карточки серверов -->
+      </div>
+    </section>
+
+    <!-- Вкладка ИСТОРИЯ -->
+    <section id="view-history" class="view">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+        <h2 id="historyTitle">История подключений</h2>
+        <button id="clearHistoryBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px; border-color: rgba(239,68,68,0.3); color: var(--danger);">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+          <span id="clearHistoryBtnText">Очистить</span>
+        </button>
+      </div>
+
+      <!-- Сводная статистика -->
+      <div class="history-stats-row" id="historyStatsRow" style="display: none;">
+        <div class="history-stat-card">
+          <div class="history-stat-icon">🔗</div>
+          <div class="history-stat-info">
+            <span class="history-stat-value" id="historyStatSessions">0</span>
+            <span class="history-stat-label" id="historyStatSessionsLabel">сессий</span>
+          </div>
+        </div>
+        <div class="history-stat-card">
+          <div class="history-stat-icon">⏱️</div>
+          <div class="history-stat-info">
+            <span class="history-stat-value" id="historyStatTime">0ч 0м</span>
+            <span class="history-stat-label" id="historyStatTimeLabel">общее время</span>
+          </div>
+        </div>
+        <div class="history-stat-card">
+          <div class="history-stat-icon">⬇️</div>
+          <div class="history-stat-info">
+            <span class="history-stat-value" id="historyStatDown">0 B</span>
+            <span class="history-stat-label" id="historyStatDownLabel">скачано</span>
+          </div>
+        </div>
+        <div class="history-stat-card">
+          <div class="history-stat-icon">⬆️</div>
+          <div class="history-stat-info">
+            <span class="history-stat-value" id="historyStatUp">0 B</span>
+            <span class="history-stat-label" id="historyStatUpLabel">отправлено</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="historyList" class="history-list">
+        <!-- Динамический список записей -->
+      </div>
+
+      <div id="historyEmpty" class="history-empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48" style="color: var(--text-dim); margin-bottom: 16px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <p id="historyEmptyText" style="color: var(--text-dim);">История подключений пуста</p>
       </div>
     </section>
 
@@ -178,6 +296,30 @@
       <div style="margin-top: 15px; display: flex; align-items: center;">
         <button id="saveAppsBtn" class="btn-glass" style="background: var(--accent-color); color: #000; width: 220px; justify-content: center;">Сохранить приложения</button>
         <span id="appsStatus" style="margin-left: 15px; color: var(--success); display: none;">Готово!</span>
+      </div>
+
+      <!-- Custom routing rules -->
+      <h3 id="customRoutesTitle" style="margin-top: 30px; color: var(--accent-color);">Кастомные правила маршрутизации</h3>
+      <p id="customRoutesDesc" style="color: var(--text-dim); font-size: 13px; margin-bottom: 12px;">Добавьте точные правила для конкретных доменов или IP-адресов. Эти правила имеют приоритет над гео-правилами.</p>
+      <div id="customRulesList" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;"></div>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+        <select id="newRuleAction" style="width: 110px;">
+          <option id="optActionDirect" value="direct">🟢 Напрямую</option>
+          <option id="optActionProxy" value="proxy">🔵 Через VPN</option>
+          <option id="optActionBlock" value="block">🔴 Заблокировать</option>
+        </select>
+        <select id="newRuleType" style="width: 140px;">
+          <option id="optTypeSuffix" value="domain_suffix">.суффикс домена</option>
+          <option id="optTypeDomain" value="domain">Точный домен</option>
+          <option id="optTypeKeyword" value="domain_keyword">Ключевое слово</option>
+          <option id="optTypeIp" value="ip_cidr">IP / CIDR</option>
+        </select>
+        <input type="text" id="newRuleValue" placeholder="example.com или 1.2.3.0/24" style="flex:1; min-width:160px;">
+        <button id="addCustomRuleBtn" class="btn-glass" style="background: var(--accent-color); color:#000; font-weight:bold; white-space:nowrap;">+ Добавить</button>
+      </div>
+      <div style="margin-top: 15px; display: flex; align-items: center;">
+        <button id="saveRoutesBtn2" class="btn-glass" style="background: var(--accent-color); color: #000; width: 200px; justify-content: center;">Сохранить маршруты</button>
+        <span id="routesStatus2" style="margin-left: 15px; color: var(--success); display: none;">Готово!</span>
       </div>
     </section>
 
@@ -245,7 +387,13 @@
     <section id="view-logs" class="view">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
         <h2 id="logsTitle">Системный журнал</h2>
-        <button id="clearLogsBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;">Очистить</button>
+        <div style="display: flex; gap: 8px;">
+          <button id="saveLogsBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;" title="Сохранить логи в файл">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Сохранить
+          </button>
+          <button id="clearLogsBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;">Очистить</button>
+        </div>
       </div>
       <div class="log-viewer" style="height: calc(100vh - 160px); min-height: 400px; display: flex; flex-direction: column;">
         <div class="log-tabs">
@@ -287,7 +435,7 @@
         </div>
         <div class="update-title-area">
           <h3 id="updateModalTitle">Доступно обновление</h3>
-          <span id="updateModalVersion" class="update-badge">v1.5.8</span>
+          <span id="updateModalVersion" class="update-badge">v1.6.0</span>
         </div>
       </div>
       
@@ -383,8 +531,56 @@
     </div>
   </div>
 
+  <!-- Модалка DNS Leak Test -->
+  <div id="dnsLeakModalOverlay" class="modal-overlay">
+    <div class="modal-content dns-leak-modal">
+      <div class="dns-leak-header">
+        <div class="dns-leak-icon-wrap" id="dnsLeakIconWrap">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div>
+          <h3 id="dnsLeakModalTitle" style="margin:0; font-size:18px; font-weight:700;">DNS Leak Test</h3>
+          <p id="dnsLeakModalSubtitle" style="margin:4px 0 0; font-size:12px; color:var(--text-dim);">Проверка утечки DNS-запросов</p>
+        </div>
+      </div>
+
+      <!-- Индикатор загрузки -->
+      <div id="dnsLeakLoading" class="dns-leak-loading">
+        <div class="dns-leak-spinner"></div>
+        <span id="dnsLeakLoadingText" style="font-size:13px; color:var(--text-dim);">Выполняется проверка...</span>
+      </div>
+
+      <!-- Результат -->
+      <div id="dnsLeakResult" style="display:none;">
+        <div id="dnsLeakStatusBanner" class="dns-leak-status-banner">
+          <span id="dnsLeakStatusIcon">✅</span>
+          <span id="dnsLeakStatusText">Утечек не обнаружено</span>
+        </div>
+        <div class="dns-leak-info-grid">
+          <div class="dns-leak-info-item">
+            <span class="dns-leak-info-label" id="dnsLeakIpLabel">Ваш IP</span>
+            <span class="dns-leak-info-value" id="dnsLeakIp">—</span>
+          </div>
+          <div class="dns-leak-info-item">
+            <span class="dns-leak-info-label" id="dnsLeakDnsLabel">DNS-серверы</span>
+            <div id="dnsLeakDnsList" class="dns-leak-dns-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top:20px; border-top:1px solid var(--glass-border); padding-top:15px;">
+        <button id="dnsLeakRetryBtn" class="btn-glass" style="display:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+          Повторить
+        </button>
+        <button id="dnsLeakCloseBtn" class="btn-glass" style="background:var(--accent-color);color:#000;font-weight:bold;border:none;padding-left:24px;padding-right:24px;">OK</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://unpkg.com/jsqr@1.4.0/dist/jsQR.js"></script>
   <script type="module" src="wails-bridge.js"></script>
   <script type="module" src="renderer.js"></script>
 </body>
 </html>
+

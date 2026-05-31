@@ -22,6 +22,8 @@ export function NotifyWindowHidden():Promise<void>;
 
 export function NotifyWindowShown():Promise<void>;
 
+export function OpenLogsFolder():Promise<void>;
+
 export function PingServer(arg1:string):Promise<number>;
 
 export function RebuildTrayServers():Promise<void>;
@@ -31,6 +33,8 @@ export function RequestAdmin():Promise<void>;
 export function RestartXray(arg1:string,arg2:string,arg3:boolean):Promise<Record<string, any>>;
 
 export function RunDiagnostics():Promise<string>;
+
+export function SaveLogs(arg1:string):Promise<string>;
 
 export function SaveSettings(arg1:string):Promise<boolean>;
 

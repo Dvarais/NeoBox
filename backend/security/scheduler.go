@@ -1,6 +1,7 @@
 package security
 
 import (
+	"net"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -23,10 +24,13 @@ func SetupAutostart(taskName string, appPath string) error {
 	safeName := strings.ReplaceAll(taskName, `"`, `'`)
 
 	// schtasks requires administrative rights to create a task with highest privileges (/rl highest).
-	// appPath is passed as a separate argument — Go's exec correctly wraps it in quotes if needed.
+	// FIX #4b: appPath is passed as a plain argument without manual quote-wrapping.
+	// exec.Command passes each argument separately through Windows CreateProcess, so Go
+	// handles quoting automatically. Manual `"` + appPath + `"` causes double-quoting
+	// which breaks schtasks when the path contains spaces or special characters.
 	cmd := exec.Command("schtasks", "/create",
 		"/tn", safeName,
-		"/tr", `"`+appPath+`"`,
+		"/tr", appPath,
 		"/sc", "onlogon",
 		"/rl", "highest",
 		"/f",
@@ -104,17 +108,37 @@ func EnableKillSwitch(serverIP string) error {
 	hideWindow(cmd4)
 	_ = cmd4.Run()
 
-	// 5. Allow traffic to the specific VPN server IP (if available and is an IPv4)
+	// 5. Allow traffic to the specific VPN server IP.
+	// FIX: Validate that serverIP is a parseable IP before passing to netsh.
+	// netsh "remoteip=" only accepts valid IPv4 CIDR or address; an IPv6 address
+	// or domain name would silently fail, leaving the server unreachable.
 	if serverIP != "" && serverIP != "127.0.0.1" {
-		cmd5 := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
-			"name=NeoBox-KillSwitch-Allow",
-			"dir=out",
-			"action=allow",
-			"remoteip="+serverIP,
-			"profile=any",
-		)
-		hideWindow(cmd5)
-		_ = cmd5.Run()
+		parsed := net.ParseIP(serverIP)
+		if parsed != nil && parsed.To4() != nil {
+			// IPv4 VPN server — add an explicit allow rule so VPN traffic can pass
+			cmd5 := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
+				"name=NeoBox-KillSwitch-Allow",
+				"dir=out",
+				"action=allow",
+				"remoteip="+serverIP,
+				"profile=any",
+			)
+			hideWindow(cmd5)
+			_ = cmd5.Run()
+		} else if parsed != nil {
+			// IPv6 VPN server — add an explicit IPv6 allow rule
+			cmd5 := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
+				"name=NeoBox-KillSwitch-Allow",
+				"dir=out",
+				"action=allow",
+				"remoteip="+serverIP,
+				"profile=any",
+				"protocol=any",
+			)
+			hideWindow(cmd5)
+			_ = cmd5.Run()
+		}
+		// If serverIP is not a valid IP (e.g. domain name), skip — netsh cannot use it.
 	}
 
 	return nil
