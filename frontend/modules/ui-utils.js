@@ -68,15 +68,32 @@ export function showPrompt(overlayId, titleId, inputId, cancelBtnId, confirmBtnI
 }
 
 export function showConfirm(overlayId, titleId, inputId, cancelBtnId, confirmBtnId, title) {
-  return new Promise((resolve) => {
-    const overlay = document.getElementById(overlayId);
-    const titleEl = document.getElementById(titleId);
-    const inputEl = document.getElementById(inputId);
-    const cancelBtn = document.getElementById(cancelBtnId);
-    const confirmBtn = document.getElementById(confirmBtnId);
+  let actualOverlayId = overlayId;
+  let actualTitleId = titleId;
+  let actualInputId = inputId;
+  let actualCancelBtnId = cancelBtnId;
+  let actualConfirmBtnId = confirmBtnId;
+  let actualTitle = title;
 
-    titleEl.innerText = title;
-    inputEl.style.display = 'none';
+  if (titleId === undefined && inputId === undefined && cancelBtnId === undefined && confirmBtnId === undefined && title === undefined) {
+    // Only one argument was passed: the title/message
+    actualOverlayId = 'modalOverlay';
+    actualTitleId = 'modalTitle';
+    actualInputId = 'modalInput';
+    actualCancelBtnId = 'modalCancel';
+    actualConfirmBtnId = 'modalConfirm';
+    actualTitle = overlayId;
+  }
+
+  return new Promise((resolve) => {
+    const overlay = document.getElementById(actualOverlayId);
+    const titleEl = document.getElementById(actualTitleId);
+    const inputEl = document.getElementById(actualInputId);
+    const cancelBtn = document.getElementById(actualCancelBtnId);
+    const confirmBtn = document.getElementById(actualConfirmBtnId);
+
+    titleEl.innerText = actualTitle;
+    if (inputEl) inputEl.style.display = 'none';
     
     overlay.style.display = 'flex';
     

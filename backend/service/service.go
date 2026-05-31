@@ -1087,6 +1087,20 @@ func (s *AppService) NotifyWindowShown() {
 	}
 }
 
+// BringToFront forces the application window to the foreground and focuses it.
+func (s *AppService) BringToFront() {
+	s.wailsCtxMu.RLock()
+	wCtx := s.wailsCtx
+	s.wailsCtxMu.RUnlock()
+	if wCtx != nil {
+		wailsruntime.WindowShow(wCtx)
+		wailsruntime.WindowUnminimise(wCtx)
+		// Toggle AlwaysOnTop briefly to force window focus on Windows
+		wailsruntime.WindowSetAlwaysOnTop(wCtx, true)
+		wailsruntime.WindowSetAlwaysOnTop(wCtx, false)
+	}
+}
+
 // UpdateTrayStatus updates the status header menu item in the system tray.
 func (s *AppService) UpdateTrayStatus(status string) {
 	s.mu.Lock()

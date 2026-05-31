@@ -586,6 +586,7 @@ window.api.onTrayServerSelected((link) => {
   const info = parseBasicInfo(link);
   activeServerName.textContent = info.name;
   updateCards();
+  collectAndSaveSettings();
 });
 
 window.api.onTrayStartReconnect((data) => {
@@ -593,6 +594,7 @@ window.api.onTrayStartReconnect((data) => {
   const info = parseBasicInfo(data.link);
   activeServerName.textContent = info.name;
   updateCards();
+  collectAndSaveSettings();
   updateAppInterface('connecting');
   (async () => {
     try {
@@ -824,23 +826,50 @@ async function runDnsLeakTest() {
     ).then(r => r.json());
 
     const dnsServers = [];
+    let remoteIp = '';
+    let asn = '';
+    let country = '';
+
     if (dohRes.Answer) {
       dohRes.Answer.forEach(ans => {
-        // Ответ в формате "1.2.3.4"
-        const ip = ans.data?.replace(/"/g, '').trim();
-        if (ip && !dnsServers.includes(ip)) dnsServers.push(ip);
+        const val = ans.data?.replace(/"/g, '').trim();
+        if (!val) return;
+
+        if (val.includes(':')) {
+          const parts = val.split(':');
+          const key = parts[0].trim().toLowerCase();
+          const value = parts.slice(1).join(':').trim();
+          if (key === 'ip' || key === 'remote_ip') {
+            remoteIp = value;
+          } else if (key === 'asn') {
+            asn = value;
+          } else if (key === 'country' || key === 'country_code') {
+            country = value;
+          }
+        } else {
+          if (!dnsServers.includes(val)) {
+            dnsServers.push(val);
+          }
+        }
       });
     }
 
+    if (remoteIp && !dnsServers.includes(remoteIp)) {
+      dnsServers.push(remoteIp);
+    }
+
     // 3. Leak detection: if DNS is going through our VPN (which uses Cloudflare DoH 1.1.1.1),
-    //    then the whoami resolver IP should be a Cloudflare anycast address.
-    //    Known Cloudflare resolver prefixes: 1.1.1., 1.0.0., 162.159., 2606:4700:
-    //    If none of the detected resolvers are Cloudflare IPs, DNS is leaking through a different resolver.
+    //    then the whoami resolver IP should be a Cloudflare anycast address, or the ASN should belong to Cloudflare.
+    //    Known Cloudflare resolver prefixes: 1.1.1., 1.0.0., 162.159., 172.64., 108.162., 2606:4700:
+    //    If none of the detected resolvers are Cloudflare IPs and the ASN is not Cloudflare's, DNS is leaking.
     const isCloudflareDns = (ip) =>
       ip.startsWith('1.1.1.') ||
       ip.startsWith('1.0.0.') ||
       ip.startsWith('162.159.') ||
-      ip.startsWith('2606:4700');
+      ip.startsWith('172.64.') ||
+      ip.startsWith('108.162.') ||
+      ip.startsWith('2606:4700') ||
+      (asn && (asn === '13335' || asn.includes('13335')));
     
     const isLeaking = dnsServers.length > 0 && !dnsServers.every(isCloudflareDns);
 
@@ -856,7 +885,17 @@ async function runDnsLeakTest() {
       dnsServers.forEach(ip => {
         const div = document.createElement('div');
         div.className = 'dns-leak-dns-entry';
-        div.textContent = ip;
+        
+        let displayVal = ip;
+        if (ip === remoteIp) {
+          const meta = [];
+          if (asn) meta.push(`asn: ${asn}`);
+          if (country) meta.push(`country_code: ${country}`);
+          if (meta.length > 0) {
+            displayVal += ` (${meta.join(', ')})`;
+          }
+        }
+        div.textContent = displayVal;
         dnsList.appendChild(div);
       });
     } else {
@@ -1088,7 +1127,8 @@ async function init() {
     if (settings.language) currentLanguage = settings.language;
     applyLanguage();
 
-    if (settings.rememberServer && settings.lastSelectedServer) {
+    const rememberServer = settings.rememberServer !== undefined ? !!settings.rememberServer : true;
+    if (rememberServer && settings.lastSelectedServer) {
        activeServerLink = settings.lastSelectedServer;
        const info = parseBasicInfo(activeServerLink);
        activeServerName.textContent = info.name;
@@ -1099,7 +1139,7 @@ async function init() {
     document.getElementById('tunModeCheckbox').checked = !!settings.tunMode;
     document.getElementById('autoConnectCheckbox').checked = !!settings.autoConnect;
     document.getElementById('autoUpdateSubsCheckbox').checked = !!settings.autoUpdateSubs;
-    document.getElementById('rememberServerCheckbox').checked = !!settings.rememberServer;
+    document.getElementById('rememberServerCheckbox').checked = rememberServer;
     document.getElementById('openAtLoginCheckbox').checked = !!settings.openAtLogin;
     document.getElementById('startMinimizedCheckbox').checked = !!settings.startMinimized;
     document.getElementById('killSwitchCheckbox').checked = !!settings.killSwitch;
@@ -1296,6 +1336,31 @@ if (bestServerBtn) {
       });
       
       if (bestLink) {
+        const isNewServer = activeServerLink !== bestLink;
+        const wasActive = (appState === 'on' || appState === 'connecting');
+
+        if (wasActive && isNewServer) {
+          const info = parseBasicInfo(bestLink);
+          const confirmMsg = currentLanguage === 'RU'
+            ? `Найден более быстрый сервер: ${info.name}.\nХотите переключиться на него?`
+            : `A faster server was found: ${info.name}.\nDo you want to switch to it?`;
+          
+          const confirmed = await showConfirm(confirmMsg);
+          if (!confirmed) {
+            return;
+          }
+        } else if (wasActive && !isNewServer) {
+          showAlert(
+            translations[currentLanguage].alertDialogTitle,
+            currentLanguage === 'RU' 
+              ? 'Вы уже подключены к самому быстрому серверу!' 
+              : 'You are already connected to the fastest server!',
+            false,
+            translations[currentLanguage]
+          );
+          return;
+        }
+
         activeServerLink = bestLink;
         const info = parseBasicInfo(bestLink);
         activeServerName.textContent = info.name;
@@ -1309,7 +1374,14 @@ if (bestServerBtn) {
           const useSystemProxy = freshSettings && freshSettings.systemProxy != null
             ? !!freshSettings.systemProxy
             : document.getElementById('systemProxyCheckbox').checked;
-          const res = await window.api.startXray(bestLink, useSystemProxy);
+          
+          let res;
+          if (wasActive) {
+            res = await window.api.restartXray(bestLink, useSystemProxy);
+          } else {
+            res = await window.api.startXray(bestLink, useSystemProxy);
+          }
+
           if (res && !res.success) {
             showAlert(translations[currentLanguage].errorDialogTitle, res.error || 'Unknown error', true, translations[currentLanguage]);
             updateAppInterface('off');
@@ -1369,6 +1441,13 @@ if (window.api.onWatchdogFailed) {
     showAlert(translations[currentLanguage].errorDialogTitle, err || 'Watchdog reconnect failed', true, translations[currentLanguage]);
   });
 }
+
+// Bring the window to the front when the user clicks anywhere in the application
+document.addEventListener('mousedown', () => {
+  if (window.api && window.api.bringToFront) {
+    window.api.bringToFront();
+  }
+});
 
 init();
 

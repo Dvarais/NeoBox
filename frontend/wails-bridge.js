@@ -1,5 +1,6 @@
 // Import Wails bindings
 import { 
+  BringToFront,
   CheckAdmin, 
   CheckUpdates, 
   DownloadAndInstallUpdate,
@@ -29,6 +30,7 @@ window.sessionBytesUp = 0;
 // Expose them as window.api to maintain total compatibility with original renderer.js!
 window.api = {
   // Commands
+  bringToFront: () => BringToFront(),
   startXray: async (link, useSystemProxy) => {
     const settings = await window.api.getSettings();
     const res = await StartXray(link, JSON.stringify(settings), useSystemProxy);
