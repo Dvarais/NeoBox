@@ -63,6 +63,7 @@ type AppService struct {
 	watchdogMu      sync.Mutex
 	watchdogLink    string
 	watchdogProxy   bool
+	quitOnce        sync.Once
 }
 
 type wailsLogWriter struct {
@@ -1036,10 +1037,7 @@ func (s *AppService) InitTray(iconBytes []byte) {
 					}
 
 				case <-mQuit.ClickedCh:
-					// Safe shutdown of VPN processes and proxy cleanup on exit
-					_ = s.coreManager.Stop()
-					s.SetSystemProxy(false)
-					systray.Quit()
+					s.Quit()
 					s.wailsCtxMu.RLock()
 					wCtxQuit := s.wailsCtx
 					s.wailsCtxMu.RUnlock()
@@ -1342,5 +1340,22 @@ func generateClashSecret() string {
 		return "neobox-secure-fallback-clash-secret"
 	}
 	return hex.EncodeToString(bytes)
+}
+
+// Quit performs clean and safe application shutdown.
+// It is guaranteed to run only once using sync.Once.
+func (s *AppService) Quit() {
+	s.quitOnce.Do(func() {
+		// Stop the auto-update scheduler
+		s.StopAutoUpdateScheduler()
+		// Safe shutdown of VPN processes
+		if s.coreManager != nil {
+			_ = s.coreManager.Stop()
+		}
+		// Clean up system proxy settings
+		s.SetSystemProxy(false)
+		// Quit the system tray message loop and remove the tray icon
+		systray.Quit()
+	})
 }
 

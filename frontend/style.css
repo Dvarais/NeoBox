@@ -1330,6 +1330,51 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   justify-content: center;
   font-size: 18px;
   flex-shrink: 0;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.history-card-icon:hover {
+  cursor: pointer;
+  background: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: var(--accent-color);
+  transform: scale(1.05);
+}
+
+.history-card-icon.youtube-easter-egg:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.history-icon-emoji {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.history-card-icon:hover .history-icon-emoji {
+  display: none;
+}
+
+.history-icon-play {
+  display: none;
+}
+
+.history-card-icon:hover .history-icon-play.generic {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.history-card-icon.youtube-easter-egg:hover .history-icon-play.generic {
+  display: none;
+}
+
+.history-card-icon.youtube-easter-egg:hover .history-icon-play.youtube {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .history-card-body {

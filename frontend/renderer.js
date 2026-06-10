@@ -699,6 +699,7 @@ function finishSessionHistory() {
     server: info.name,
     protocol: info.type,
     address: info.address,
+    link: activeServerLink, // Сохраняем ссылку для быстрого переподключения
     connectedAt: sessionConnectedAt,
     disconnectedAt: now,
     durationSec,
@@ -722,6 +723,60 @@ function loadHistory() {
 
 function saveHistory(history) {
   localStorage.setItem('neobox-connection-history', JSON.stringify(history));
+}
+
+// Поиск ссылки сервера в подписках по метаданным (для обратной совместимости)
+function findServerLink(name, address, protocol) {
+  if (!allSubscriptions) return null;
+  for (const sub of allSubscriptions) {
+    if (sub.links) {
+      for (const link of sub.links) {
+        const info = parseBasicInfo(link);
+        if (info && info.address === address && info.type.toLowerCase() === protocol.toLowerCase()) {
+          return link;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// Установка активного сервера и запуск подключения
+async function selectAndConnectServer(link) {
+  if (!link) return;
+  const info = parseBasicInfo(link);
+  if (!info) return;
+
+  const isNewServer = activeServerLink !== link;
+  activeServerLink = link;
+  activeServerName.textContent = info.name;
+  activeServerDetails.textContent = `${info.type} • ${info.address}`;
+
+  updateCards();
+  collectAndSaveSettings();
+
+  // Если VPN выключен — подключаемся, если включен/подключается — перезапускаем
+  if (appState === 'off') {
+    updateAppInterface('connecting');
+    try {
+      const res = await window.api.startXray(activeServerLink, document.getElementById('systemProxyCheckbox').checked);
+      if (res && !res.success) {
+        showAlert(translations[currentLanguage].errorDialogTitle, res.error || 'Unknown error', true, translations[currentLanguage]);
+        updateAppInterface('off');
+      }
+    } catch (e) {
+      showAlert(translations[currentLanguage].errorDialogTitle, e.message, true, translations[currentLanguage]);
+      updateAppInterface('off');
+    }
+  } else {
+    restartBtn.click();
+  }
+
+  // Переключаем вкладку на Главную
+  const homeTab = document.querySelector('.nav-item[data-target="view-home"]');
+  if (homeTab) {
+    homeTab.click();
+  }
 }
 
 // Рендер вкладки История
@@ -763,9 +818,31 @@ function renderHistoryTab() {
     const down = formatBytes(entry.bytesDown || 0);
     const up = formatBytes(entry.bytesUp || 0);
     const proto = (entry.protocol || '?').toUpperCase();
+    
+    // Пасхалка: YouTube иконка для серверов с youtube/yt/goog/dpi или случайно ~10% записей
+    const isStableEgg = entry.server?.toLowerCase().includes('youtube') || 
+                        entry.server?.toLowerCase().includes('yt') || 
+                        entry.server?.toLowerCase().includes('goog') || 
+                        entry.server?.toLowerCase().includes('dpi') ||
+                        (entry.id && entry.id.charCodeAt(0) % 10 === 0);
+    const eggClass = isStableEgg ? ' youtube-easter-egg' : '';
+
     return `
       <div class="history-card">
-        <div class="history-card-icon">${emoji}</div>
+        <div class="history-card-icon${eggClass}" data-id="${entry.id}" title="Подключиться к этому серверу">
+          <span class="history-icon-emoji">${emoji}</span>
+          <span class="history-icon-play generic">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="6 3 20 12 6 21 6 3" fill="currentColor"/>
+            </svg>
+          </span>
+          <span class="history-icon-play youtube">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M21.58 7.18a3.001 3.001 0 0 0-2.12-2.12C17.59 4.5 12 4.5 12 4.5s-5.59 0-7.46.56A3.001 3.001 0 0 0 2.42 7.18 31.248 31.248 0 0 0 1.8 12c0 1.6.2 3.22.62 4.82a3.001 3.001 0 0 0 2.12 2.12c1.87.56 7.46.56 7.46.56s5.59 0 7.46-.56a3.001 3.001 0 0 0 2.12-2.12c.42-1.6.62-3.22.62-4.82a31.248 31.248 0 0 0-.62-4.82z" fill="#FF0000"/>
+              <polygon points="10 9 10 15 15 12" fill="#FFFFFF"/>
+            </svg>
+          </span>
+        </div>
         <div class="history-card-body">
           <div class="history-card-server" title="${entry.server}">${entry.server}</div>
           <div class="history-card-meta">
@@ -780,6 +857,46 @@ function renderHistoryTab() {
         </div>
       </div>`;
   }).join('');
+
+  // Обработчик клика по иконке запуска (через делегирование)
+  list.onclick = (e) => {
+    const iconBtn = e.target.closest('.history-card-icon');
+    if (iconBtn) {
+      const entryId = iconBtn.getAttribute('data-id');
+      const hist = loadHistory();
+      const entry = hist.find(item => item.id === entryId);
+      if (entry) {
+        const link = entry.link || findServerLink(entry.server, entry.address, entry.protocol);
+        if (link) {
+          selectAndConnectServer(link);
+        } else {
+          showAlert(translations[currentLanguage].alertDialogTitle, "Не удалось найти сервер в текущих подписках", false, translations[currentLanguage]);
+        }
+      }
+    }
+  };
+
+  // Динамический Shift-пасхалка при движении мыши (для мгновенной реакции на зажатый Shift)
+  list.onmousemove = (e) => {
+    const iconBtn = e.target.closest('.history-card-icon');
+    if (iconBtn) {
+      const entryId = iconBtn.getAttribute('data-id');
+      const hist = loadHistory();
+      const entry = hist.find(item => item.id === entryId);
+      if (entry) {
+        const isStableEgg = entry.server?.toLowerCase().includes('youtube') || 
+                            entry.server?.toLowerCase().includes('yt') || 
+                            entry.server?.toLowerCase().includes('goog') || 
+                            entry.server?.toLowerCase().includes('dpi') ||
+                            (entry.id && entry.id.charCodeAt(0) % 10 === 0);
+        if (e.shiftKey) {
+          iconBtn.classList.add('youtube-easter-egg');
+        } else if (!isStableEgg) {
+          iconBtn.classList.remove('youtube-easter-egg');
+        }
+      }
+    }
+  };
 }
 
 document.getElementById('clearHistoryBtn').onclick = () => {

@@ -90,11 +90,11 @@ func main() {
 			appService.StartAutoUpdateScheduler()
 		},
 		OnShutdown: func(ctx context.Context) {
-			// FIX #9: Stop the auto-update background goroutine before cleaning up VPN.
-			appService.StopAutoUpdateScheduler()
-			// Safe shutdown of VPN processes and proxy cleanup on close
-			_ = coreManager.Stop()
-			appService.SetSystemProxy(false)
+			// Trigger a clean, unified service shutdown.
+			appService.Quit()
+			// Force terminate the process immediately to prevent any background hangs
+			// (e.g. from stuck WebView2, system tray, or blocked runtime threads).
+			os.Exit(0)
 		},
 		Bind: []interface{}{
 			appService,

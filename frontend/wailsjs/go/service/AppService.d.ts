@@ -28,6 +28,8 @@ export function OpenLogsFolder():Promise<void>;
 
 export function PingServer(arg1:string):Promise<number>;
 
+export function Quit():Promise<void>;
+
 export function RebuildTrayServers():Promise<void>;
 
 export function RequestAdmin():Promise<void>;

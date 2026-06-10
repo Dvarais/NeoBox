@@ -54,6 +54,10 @@ export function PingServer(arg1) {
   return window['go']['service']['AppService']['PingServer'](arg1);
 }
 
+export function Quit() {
+  return window['go']['service']['AppService']['Quit']();
+}
+
 export function RebuildTrayServers() {
   return window['go']['service']['AppService']['RebuildTrayServers']();
 }
