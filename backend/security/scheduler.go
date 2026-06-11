@@ -1,10 +1,12 @@
 package security
 
 import (
+	"context"
 	"net"
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // hideWindow sets the SysProcAttr on Windows exec.Cmd to prevent flashing console windows.
@@ -58,7 +60,7 @@ func IsAutostartEnabled(taskName string) bool {
 //
 // FIX #5: Added explicit IPv6 block rules to prevent IPv6 traffic from bypassing the VPN tunnel.
 // Previously, only IPv4 outbound was blocked, allowing IPv6 to leak outside the tunnel.
-func EnableKillSwitch(serverIP string) error {
+func EnableKillSwitch(serverHost string) error {
 	// First disable any pre-existing rules to avoid duplication
 	_ = DisableKillSwitch()
 
@@ -108,37 +110,53 @@ func EnableKillSwitch(serverIP string) error {
 	hideWindow(cmd4)
 	_ = cmd4.Run()
 
-	// 5. Allow traffic to the specific VPN server IP.
-	// FIX: Validate that serverIP is a parseable IP before passing to netsh.
-	// netsh "remoteip=" only accepts valid IPv4 CIDR or address; an IPv6 address
-	// or domain name would silently fail, leaving the server unreachable.
-	if serverIP != "" && serverIP != "127.0.0.1" {
-		parsed := net.ParseIP(serverIP)
-		if parsed != nil && parsed.To4() != nil {
-			// IPv4 VPN server — add an explicit allow rule so VPN traffic can pass
-			cmd5 := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
-				"name=NeoBox-KillSwitch-Allow",
-				"dir=out",
-				"action=allow",
-				"remoteip="+serverIP,
-				"profile=any",
-			)
-			hideWindow(cmd5)
-			_ = cmd5.Run()
-		} else if parsed != nil {
-			// IPv6 VPN server — add an explicit IPv6 allow rule
-			cmd5 := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
-				"name=NeoBox-KillSwitch-Allow",
-				"dir=out",
-				"action=allow",
-				"remoteip="+serverIP,
-				"profile=any",
-				"protocol=any",
-			)
-			hideWindow(cmd5)
-			_ = cmd5.Run()
+	// 5. Allow traffic to the specific VPN server IP(s).
+	// If serverHost is a domain name, we resolve it to IP addresses.
+	if serverHost != "" && serverHost != "127.0.0.1" && serverHost != "localhost" {
+		var ips []net.IP
+		if parsed := net.ParseIP(serverHost); parsed != nil {
+			ips = append(ips, parsed)
+		} else {
+			// It is a domain name — resolve it with a timeout to prevent hanging.
+			// Since we just ran DisableKillSwitch(), direct DNS resolution works fine.
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			resolved, err := net.DefaultResolver.LookupIP(ctx, "ip", serverHost)
+			cancel()
+			if err == nil {
+				ips = resolved
+			}
 		}
-		// If serverIP is not a valid IP (e.g. domain name), skip — netsh cannot use it.
+
+		for _, ip := range ips {
+			if ip == nil {
+				continue
+			}
+			ipStr := ip.String()
+			if ip.To4() != nil {
+				// IPv4 VPN server — add an explicit allow rule so VPN traffic can pass
+				cmd5 := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
+					"name=NeoBox-KillSwitch-Allow",
+					"dir=out",
+					"action=allow",
+					"remoteip="+ipStr,
+					"profile=any",
+				)
+				hideWindow(cmd5)
+				_ = cmd5.Run()
+			} else {
+				// IPv6 VPN server — add an explicit IPv6 allow rule
+				cmd5 := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
+					"name=NeoBox-KillSwitch-Allow",
+					"dir=out",
+					"action=allow",
+					"remoteip="+ipStr,
+					"profile=any",
+					"protocol=any",
+				)
+				hideWindow(cmd5)
+				_ = cmd5.Run()
+			}
+		}
 	}
 
 	return nil

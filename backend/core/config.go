@@ -901,6 +901,8 @@ func FetchSubscription(subURL string) ([]string, error) {
 							switch p := vnext["port"].(type) {
 							case float64:
 								portVal = int(p)
+							case string:
+								portVal, _ = strconv.Atoi(p)
 							}
 							users, _ := vnext["users"].([]interface{})
 							if len(users) > 0 {
@@ -987,6 +989,8 @@ func FetchSubscription(subURL string) ([]string, error) {
 							switch p := server["port"].(type) {
 							case float64:
 								portVal = int(p)
+							case string:
+								portVal, _ = strconv.Atoi(p)
 							}
 							passwordVal, _ := server["password"].(string)
 

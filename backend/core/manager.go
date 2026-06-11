@@ -58,6 +58,7 @@ func (m *CoreManager) Start(configJSON string, logWriter sclog.PlatformWriter) e
 
 	// Start the sing-box service.
 	if err := instance.Start(); err != nil {
+		_ = instance.Close()
 		cancel()
 		return fmt.Errorf("failed to start sing-box: %w", err)
 	}

@@ -66,7 +66,13 @@ func (s *AppService) RunDiagnostics() string {
 	}
 
 	// ── 3. Proxy port 20809 ──────────────────────────────────────────────────────
-	if ln, err := net.Listen("tcp", "127.0.0.1:20809"); err != nil {
+	if s.coreManager.IsRunning() {
+		items = append(items, DiagnosticItem{
+			Name:    "Порт прокси (20809)",
+			Status:  DiagOK,
+			Message: "Порт занят текущим активным подключением VPN",
+		})
+	} else if ln, err := net.Listen("tcp", "127.0.0.1:20809"); err != nil {
 		items = append(items, DiagnosticItem{
 			Name:    "Порт прокси (20809)",
 			Status:  DiagError,
@@ -82,7 +88,13 @@ func (s *AppService) RunDiagnostics() string {
 	}
 
 	// ── 4. Clash API port 9097 ───────────────────────────────────────────────────
-	if ln, err := net.Listen("tcp", "127.0.0.1:9097"); err != nil {
+	if s.coreManager.IsRunning() {
+		items = append(items, DiagnosticItem{
+			Name:    "Порт Clash API (9097)",
+			Status:  DiagOK,
+			Message: "Порт занят текущим активным подключением VPN (статистика работает)",
+		})
+	} else if ln, err := net.Listen("tcp", "127.0.0.1:9097"); err != nil {
 		items = append(items, DiagnosticItem{
 			Name:    "Порт Clash API (9097)",
 			Status:  DiagWarning,
@@ -98,39 +110,61 @@ func (s *AppService) RunDiagnostics() string {
 	}
 
 	// ── 5. Internet connectivity ─────────────────────────────────────────────────
-	conn, err := net.DialTimeout("tcp", "1.1.1.1:80", 3*time.Second)
-	if err != nil {
+	// Check multiple hosts (Google, Cloudflare, Yandex) to prevent false warnings in regions
+	// where certain IP addresses (like 1.1.1.1) are blocked by local ISPs.
+	internetOk := false
+	internetTargets := []string{"8.8.8.8:80", "1.1.1.1:80", "yandex.ru:80"}
+	var activeTarget string
+	for _, target := range internetTargets {
+		conn, err := net.DialTimeout("tcp", target, 2*time.Second)
+		if err == nil {
+			_ = conn.Close()
+			internetOk = true
+			activeTarget = target
+			break
+		}
+	}
+
+	if !internetOk {
 		items = append(items, DiagnosticItem{
 			Name:    "Интернет",
 			Status:  DiagError,
-			Message: "Нет доступа к интернету (1.1.1.1:80 недоступен). Проверьте сетевое соединение.",
+			Message: "Нет доступа к интернету (проверенные хосты недоступны). Проверьте сетевое соединение.",
 		})
 	} else {
-		_ = conn.Close()
 		items = append(items, DiagnosticItem{
 			Name:    "Интернет",
 			Status:  DiagOK,
-			Message: "Интернет доступен",
+			Message: "Интернет доступен (успешное подключение к " + activeTarget + ")",
 		})
 	}
 
 	// ── 6. DNS resolution ────────────────────────────────────────────────────────
-	// NOTE: We intentionally check DNS *port connectivity* (TCP dial to 1.1.1.1:53)
-	// rather than calling net.LookupHost which goes through the OS resolver and
-	// would send a plaintext DNS query outside the VPN tunnel before it is even up.
-	dnsConn, err := net.DialTimeout("tcp", "1.1.1.1:53", 2*time.Second)
-	if err != nil {
+	// Check DNS port connectivity over TCP for multiple reliable DNS servers.
+	dnsOk := false
+	dnsTargets := []string{"8.8.8.8:53", "1.1.1.1:53", "77.88.8.8:53"}
+	var activeDnsTarget string
+	for _, target := range dnsTargets {
+		dnsConn, err := net.DialTimeout("tcp", target, 2*time.Second)
+		if err == nil {
+			_ = dnsConn.Close()
+			dnsOk = true
+			activeDnsTarget = target
+			break
+		}
+	}
+
+	if !dnsOk {
 		items = append(items, DiagnosticItem{
 			Name:    "DNS резолвер",
 			Status:  DiagWarning,
-			Message: "Порт DNS (1.1.1.1:53) недоступен. Возможны проблемы с подпиской и DNS-over-HTTPS.",
+			Message: "Порты DNS недоступны. Возможны проблемы с подпиской и DNS-over-HTTPS.",
 		})
 	} else {
-		_ = dnsConn.Close()
 		items = append(items, DiagnosticItem{
 			Name:    "DNS резолвер",
 			Status:  DiagOK,
-			Message: "DNS порт доступен (1.1.1.1:53)",
+			Message: "DNS порт доступен (успешное подключение к " + activeDnsTarget + ")",
 		})
 	}
 

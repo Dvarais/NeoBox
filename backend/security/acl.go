@@ -2,8 +2,8 @@ package security
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
+	"os/user"
 	"syscall"
 )
 
@@ -15,19 +15,14 @@ import (
 // full control (:F), preventing other local users and most malware from reading
 // sensitive files like key.bin.
 func ProtectFile(path string) error {
-	username := os.Getenv("USERNAME")
-	if username == "" {
-		return fmt.Errorf("cannot determine current username (USERNAME env not set)")
+	u, err := user.Current()
+	if err != nil {
+		return fmt.Errorf("failed to get current user: %w", err)
 	}
 
-	// Build the principal in DOMAIN\User format if USERDOMAIN is set and differs from username.
-	domain := os.Getenv("USERDOMAIN")
-	var principal string
-	if domain != "" && domain != username {
-		principal = domain + `\` + username
-	} else {
-		principal = username
-	}
+	// u.Uid contains the Windows Security Identifier (SID) of the current user, e.g. "S-1-5-21-..."
+	// Prefixing with "*" tells icacls to treat it as a SID rather than a username.
+	principal := "*" + u.Uid
 
 	// /inheritance:r — disable inherited ACEs from parent directory
 	// /grant:r       — replace (not add) an explicit ACE with Full Control (F)

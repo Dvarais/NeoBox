@@ -34,7 +34,8 @@ func main() {
 	mutexHandle, alreadyRunning := acquireSingleInstanceMutex()
 	if alreadyRunning {
 		// Another instance is already running — bring it to foreground and exit.
-		fmt.Println("Another NeoBox instance is already running.")
+		fmt.Println("Another NeoBox instance is already running. Focusing existing window...")
+		bringExistingInstanceToForeground()
 		os.Exit(0)
 	}
 	if mutexHandle != 0 {
@@ -58,6 +59,9 @@ func main() {
 
 	// 3. Initialize AppService containing Wails bindings
 	appService := service.NewAppService(coreManager, userDataDir)
+
+	// Clean up any stale system proxy settings from a previous crashed run
+	appService.SetSystemProxy(false)
 
 	// Read settings to check if we should start minimized (hidden) in tray
 	startHidden := false
@@ -121,6 +125,9 @@ func acquireSingleInstanceMutex() (syswindows.Handle, bool) {
 	handle, err := syswindows.CreateMutex(nil, false, mutexName)
 	if err != nil {
 		if err == syswindows.ERROR_ALREADY_EXISTS {
+			if handle != 0 {
+				_ = syswindows.CloseHandle(handle)
+			}
 			return 0, true // Another instance holds the mutex
 		}
 		// CreateMutex failed for another reason — allow startup anyway
@@ -330,4 +337,27 @@ func getProcessFullPath(pid int) (string, error) {
 		return "", err
 	}
 	return syswindows.UTF16ToString(buf[:size]), nil
+}
+
+// bringExistingInstanceToForeground finds the window of the running instance of NeoBox by its title,
+// restores it if minimized, and brings it to the foreground.
+func bringExistingInstanceToForeground() {
+	user32 := syswindows.NewLazySystemDLL("user32.dll")
+	procFindWindowW := user32.NewProc("FindWindowW")
+	procShowWindow := user32.NewProc("ShowWindow")
+	procSetForegroundWindow := user32.NewProc("SetForegroundWindow")
+	procIsIconic := user32.NewProc("IsIconic")
+
+	titlePtr, _ := syswindows.UTF16PtrFromString("NeoBox")
+	hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(titlePtr)))
+	if hwnd != 0 {
+		// SW_RESTORE = 9, SW_SHOW = 5
+		isMinimized, _, _ := procIsIconic.Call(hwnd)
+		if isMinimized != 0 {
+			_, _, _ = procShowWindow.Call(hwnd, 9) // SW_RESTORE
+		} else {
+			_, _, _ = procShowWindow.Call(hwnd, 5) // SW_SHOW
+		}
+		_, _, _ = procSetForegroundWindow.Call(hwnd)
+	}
 }

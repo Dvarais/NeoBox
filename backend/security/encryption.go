@@ -12,10 +12,9 @@ import (
 )
 
 var (
+	keyMu       sync.RWMutex
 	keyFilePath string
-	keyOnce     sync.Once
 	cachedKey   []byte
-	cachedKeyErr error
 )
 
 // InitEncryption must be called once at startup with the user data directory.
@@ -23,49 +22,62 @@ var (
 // Using a file-based key instead of Windows DPAPI makes encryption session-independent:
 // settings survive full shutdowns, privilege changes (admin vs user), and Windows updates.
 //
-// FIX #13 / NOTE: This function uses sync.Once internally, so only the first call takes
-// effect. Calling InitEncryption a second time with a different path will be silently
-// ignored. This is intentional — the key must not change during a single process run.
+// NOTE: Calling InitEncryption a second time with a different path will be ignored
+// if the key is already successfully loaded/generated. The key must not change during a single process run.
 // Ensure this is called exactly once at application startup before any Encrypt/Decrypt calls.
 func InitEncryption(dataDir string) error {
-	// keyFilePath must be set before keyOnce.Do() is called; it is read within the Once body.
-	keyFilePath = filepath.Join(dataDir, "key.bin")
+	keyMu.Lock()
+	if keyFilePath == "" {
+		keyFilePath = filepath.Join(dataDir, "key.bin")
+	}
+	keyMu.Unlock()
 	_, err := loadOrCreateKey()
 	return err
 }
 
 // loadOrCreateKey returns the cached key, loading from disk or generating it on first call.
 func loadOrCreateKey() ([]byte, error) {
-	keyOnce.Do(func() {
-		if keyFilePath == "" {
-			cachedKeyErr = fmt.Errorf("encryption not initialized: call InitEncryption first")
-			return
-		}
+	keyMu.RLock()
+	if len(cachedKey) == 32 {
+		k := cachedKey
+		keyMu.RUnlock()
+		return k, nil
+	}
+	keyMu.RUnlock()
 
-		data, err := os.ReadFile(keyFilePath)
-		if err == nil && len(data) == 32 {
-			cachedKey = data
-			return
-		}
+	keyMu.Lock()
+	defer keyMu.Unlock()
 
-		// Generate a new random 32-byte AES-256 key
-		newKey := make([]byte, 32)
-		if _, err := io.ReadFull(rand.Reader, newKey); err != nil {
-			cachedKeyErr = fmt.Errorf("failed to generate encryption key: %w", err)
-			return
-		}
-		if err := os.WriteFile(keyFilePath, newKey, 0600); err != nil {
-			cachedKeyErr = fmt.Errorf("failed to save encryption key: %w", err)
-			return
-		}
-		// Best-effort: apply Windows ACL so only the current user can access the key.
-		// os.WriteFile with mode 0600 is a no-op on Windows — icacls provides real protection.
-		if err := ProtectFile(keyFilePath); err != nil {
-			fmt.Printf("[encryption] warning: failed to protect key file with ACL: %v\n", err)
-		}
-		cachedKey = newKey
-	})
-	return cachedKey, cachedKeyErr
+	// Double-check after acquiring write lock
+	if len(cachedKey) == 32 {
+		return cachedKey, nil
+	}
+
+	if keyFilePath == "" {
+		return nil, fmt.Errorf("encryption not initialized: call InitEncryption first")
+	}
+
+	data, err := os.ReadFile(keyFilePath)
+	if err == nil && len(data) == 32 {
+		cachedKey = data
+		return cachedKey, nil
+	}
+
+	// Generate a new random 32-byte AES-256 key
+	newKey := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, newKey); err != nil {
+		return nil, fmt.Errorf("failed to generate encryption key: %w", err)
+	}
+	if err := os.WriteFile(keyFilePath, newKey, 0600); err != nil {
+		return nil, fmt.Errorf("failed to save encryption key: %w", err)
+	}
+	// Best-effort: apply Windows ACL so only the current user can access the key.
+	// os.WriteFile with mode 0600 is a no-op on Windows — icacls provides real protection.
+	if err := ProtectFile(keyFilePath); err != nil {
+		fmt.Printf("[encryption] warning: failed to protect key file with ACL: %v\n", err)
+	}
+	cachedKey = newKey
+	return cachedKey, nil
 }
 
 // Encrypt encrypts data using AES-256-GCM with a random nonce.

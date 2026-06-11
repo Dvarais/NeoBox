@@ -32,7 +32,7 @@ import (
 // currentVersion is the application version. Update this before each release.
 // FIX #14: Extracted from CheckUpdates into a package-level constant so it
 // cannot be missed during release preparation.
-const currentVersion = "1.6.1"
+const currentVersion = "1.6.3"
 
 type TrayServerItem struct {
 	Item *systray.MenuItem
@@ -99,6 +99,8 @@ func NewAppService(cm *core.CoreManager, userDataDir string) *AppService {
 // GetSettings reads settings.json and returns its contents as a JSON string.
 // The file is plain JSON — users can edit it directly in a text editor.
 func (s *AppService) GetSettings() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	filePath := filepath.Join(s.userDataDir, "settings.json")
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -119,6 +121,8 @@ func (s *AppService) GetSettings() string {
 // SaveSettings saves settings to settings.json as plain, human-readable JSON.
 // Users can open and edit this file directly in any text editor.
 func (s *AppService) SaveSettings(settingsJSON string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	filePath := filepath.Join(s.userDataDir, "settings.json")
 
 	// Validate JSON before writing to avoid corrupting the file
@@ -168,6 +172,8 @@ type Subscription struct {
 // The file is plain JSON — users can view and edit it directly.
 // NOTE: GetSubscriptions is a pure read — it never writes to disk.
 func (s *AppService) GetSubscriptions() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	filePath := filepath.Join(s.userDataDir, "subscriptions.json")
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -209,6 +215,8 @@ func (s *AppService) GetSubscriptions() string {
 // SaveSubscriptions saves subscriptions.json as plain, human-readable JSON.
 // It also purges the bootstrap subscription from disk if present.
 func (s *AppService) SaveSubscriptions(subsJSON string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	filePath := filepath.Join(s.userDataDir, "subscriptions.json")
 
 	// Purge bootstrap sub from the JSON being saved.
@@ -233,7 +241,7 @@ func (s *AppService) SaveSubscriptions(subsJSON string) bool {
 	if err := os.WriteFile(filePath, out, 0644); err != nil {
 		return false
 	}
-	s.RebuildTrayServers()
+	s.rebuildTrayServersLocked()
 	return true
 }
 
@@ -348,11 +356,13 @@ func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[s
 	}
 
 	// Start background traffic monitoring
+	s.mu.Lock()
 	if s.cancelMonitor != nil {
 		s.cancelMonitor()
 	}
 	monitorCtx, cancel := context.WithCancel(context.Background())
 	s.cancelMonitor = cancel
+	s.mu.Unlock()
 	go s.startTrafficMonitor(monitorCtx)
 
 	s.UpdateTrayStatus(fmt.Sprintf("Статус: Подключено (%s)", parseServerNameFromLink(link)))
@@ -376,10 +386,12 @@ func (s *AppService) StopXray() map[string]interface{} {
 	s.SetSystemProxy(false)
 	_ = security.DisableKillSwitch() // Disable firewall rules when disconnecting
 
+	s.mu.Lock()
 	if s.cancelMonitor != nil {
 		s.cancelMonitor()
 		s.cancelMonitor = nil
 	}
+	s.mu.Unlock()
 
 	if err := s.coreManager.Stop(); err != nil {
 		response["error"] = err.Error()
@@ -409,10 +421,12 @@ func (s *AppService) RestartXray(link string, settingsJSON string, useSystemProx
 	s.stopWatchdog()
 
 	// Stop the core and traffic monitor only — do NOT touch system proxy or kill switch.
+	s.mu.Lock()
 	if s.cancelMonitor != nil {
 		s.cancelMonitor()
 		s.cancelMonitor = nil
 	}
+	s.mu.Unlock()
 	_ = s.coreManager.Stop()
 
 	// Emit stopped event so UI knows the old session ended
@@ -468,9 +482,11 @@ func (s *AppService) SetSystemProxy(enable bool) {
 		if err == nil && currentServer != "127.0.0.1:20809" && currentServer != "" {
 			currentEnable, _, err := k.GetIntegerValue("ProxyEnable")
 			if err == nil {
+				s.mu.Lock()
 				s.backupProxyServer = currentServer
 				s.backupProxyEnable = uint32(currentEnable)
 				s.hasProxyBackup = true
+				s.mu.Unlock()
 			}
 		}
 
@@ -478,12 +494,18 @@ func (s *AppService) SetSystemProxy(enable bool) {
 		_ = k.SetStringValue("ProxyServer", "127.0.0.1:20809")
 	} else {
 		_ = k.SetDWordValue("ProxyEnable", 0)
-		if s.hasProxyBackup {
-			_ = k.SetStringValue("ProxyServer", s.backupProxyServer)
-			_ = k.SetDWordValue("ProxyEnable", s.backupProxyEnable)
-			s.hasProxyBackup = false
-			s.backupProxyServer = ""
-			s.backupProxyEnable = 0
+		s.mu.Lock()
+		hasBackup := s.hasProxyBackup
+		backupServer := s.backupProxyServer
+		backupEnable := s.backupProxyEnable
+		s.hasProxyBackup = false
+		s.backupProxyServer = ""
+		s.backupProxyEnable = 0
+		s.mu.Unlock()
+
+		if hasBackup {
+			_ = k.SetStringValue("ProxyServer", backupServer)
+			_ = k.SetDWordValue("ProxyEnable", backupEnable)
 		}
 	}
 
@@ -652,15 +674,8 @@ func (s *AppService) DownloadAndInstallUpdate(downloadURL string) error {
 		return fmt.Errorf("download URL must be from github.com or githubusercontent.com, got: %s", host)
 	}
 
-	// Extract filename from download URL
-	parts := strings.Split(downloadURL, "/")
-	filename := "neobox_update.exe"
-	if len(parts) > 0 {
-		filename = parts[len(parts)-1]
-	}
-
 	tempDir := os.TempDir()
-	installerPath := filepath.Join(tempDir, filename)
+	installerPath := filepath.Join(tempDir, "neobox_update.exe")
 
 	// Start downloading in a background goroutine so we return immediately to the frontend,
 	// allowing it to show the progress bar.
@@ -901,10 +916,20 @@ func (s *AppService) startWatchdog(link string, useSystemProxy bool) {
 				s.watchdogMu.Unlock()
 				// Restart without touching system proxy backup or kill switch
 				_ = s.coreManager.Stop()
+				s.mu.Lock()
 				if s.cancelMonitor != nil {
 					s.cancelMonitor()
 					s.cancelMonitor = nil
 				}
+				s.mu.Unlock()
+
+				// Verify we haven't been cancelled (disconnected by user) while stopping the core
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
 				res := s.StartXray(savedLink, "", savedProxy)
 				if ok, _ := res["success"].(bool); ok {
 					s.emitSafe("watchdog-reconnected")
@@ -951,6 +976,14 @@ func (s *AppService) OpenLogsFolder() {
 
 // InitTray starts the system tray loop in a background goroutine.
 func (s *AppService) InitTray(iconBytes []byte) {
+	// Save the icon to disk next to the executable if missing, so Windows toast notifications can load it.
+	if exePath, err := os.Executable(); err == nil {
+		iconPath := filepath.Join(filepath.Dir(exePath), "icon.ico")
+		if _, err := os.Stat(iconPath); os.IsNotExist(err) {
+			_ = os.WriteFile(iconPath, iconBytes, 0644)
+		}
+	}
+
 	go func() {
 		runtime.LockOSThread()
 		systray.Run(func() {
@@ -1154,10 +1187,13 @@ func (s *AppService) SelectAndConnectServer(link string) {
 
 // RebuildTrayServers updates the system tray servers list from saved subscriptions.
 func (s *AppService) RebuildTrayServers() {
-	filePath := filepath.Join(s.userDataDir, "subscriptions.json")
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.rebuildTrayServersLocked()
+}
+
+func (s *AppService) rebuildTrayServersLocked() {
+	filePath := filepath.Join(s.userDataDir, "subscriptions.json")
 
 	hideAll := func() {
 		for i := 0; i < 50; i++ {
@@ -1363,6 +1399,8 @@ func generateClashSecret() string {
 // It is guaranteed to run only once using sync.Once.
 func (s *AppService) Quit() {
 	s.quitOnce.Do(func() {
+		// Stop the watchdog first
+		s.stopWatchdog()
 		// Stop the auto-update scheduler
 		s.StopAutoUpdateScheduler()
 		// Safe shutdown of VPN processes

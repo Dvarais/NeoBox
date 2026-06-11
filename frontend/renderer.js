@@ -1253,6 +1253,29 @@ async function init() {
     }
     
     document.getElementById('bypassRuCheckbox').checked = !!settings.bypassRu;
+    
+    // Load and select the correct DNS server option on startup
+    if (settings.dns) {
+      const select = document.getElementById('dnsSelect');
+      if (select) {
+        let found = false;
+        for (let i = 0; i < select.options.length; i++) {
+          if (select.options[i].value === settings.dns) {
+            select.value = settings.dns;
+            found = true;
+            break;
+          }
+        }
+        if (!found && settings.dns !== "") {
+          select.value = 'custom';
+          const customDnsInput = document.getElementById('customDnsInput');
+          if (customDnsInput) {
+            customDnsInput.value = settings.dns;
+            customDnsInput.style.display = 'block';
+          }
+        }
+      }
+    }
     document.getElementById('tunModeCheckbox').checked = !!settings.tunMode;
     document.getElementById('autoConnectCheckbox').checked = !!settings.autoConnect;
     document.getElementById('autoUpdateSubsCheckbox').checked = !!settings.autoUpdateSubs;
@@ -1327,6 +1350,11 @@ async function init() {
     await window.api.saveSubscriptions(allSubscriptions);
     await loadSubscriptions();
   });
+
+  // Convert standard select dropdowns to custom glassmorphic dropdowns to prevent WebView2 transparency rendering bugs.
+  makeSelectCustom('dnsSelect');
+  makeSelectCustom('newRuleAction');
+  makeSelectCustom('newRuleType');
 }
 
 // ── CUSTOM ROUTING RULES UI ──────────────────────────────────────────────────
@@ -1995,4 +2023,97 @@ if (serversGrid) {
     setTimeout(updateCustomScroll, 50);
   });
   observer.observe(serversGrid, { childList: true, subtree: true });
+}
+
+// Function to convert native <select> elements to custom glassmorphic dropdowns
+function makeSelectCustom(selectId) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+
+  // If already customized, skip but update trigger text
+  if (select.nextElementSibling && select.nextElementSibling.classList.contains('custom-select-wrapper')) {
+    const wrapper = select.nextElementSibling;
+    const trigger = wrapper.querySelector('.custom-select-trigger');
+    const selectedOption = select.options[select.selectedIndex];
+    if (trigger && selectedOption) {
+      trigger.textContent = selectedOption.textContent;
+    }
+    return;
+  }
+
+  // Create wrapper
+  const wrapper = document.createElement('div');
+  wrapper.className = 'custom-select-wrapper';
+
+  // Hide the original select
+  select.style.display = 'none';
+  select.parentNode.insertBefore(wrapper, select.nextSibling);
+
+  // Create trigger
+  const trigger = document.createElement('div');
+  trigger.className = 'custom-select-trigger';
+  const selectedOption = select.options[select.selectedIndex];
+  trigger.textContent = selectedOption ? selectedOption.textContent : '';
+  wrapper.appendChild(trigger);
+
+  // Create options container
+  const optionsContainer = document.createElement('div');
+  optionsContainer.className = 'custom-select-options';
+  wrapper.appendChild(optionsContainer);
+
+  // Function to build options list dynamically
+  const buildOptions = () => {
+    optionsContainer.innerHTML = '';
+    Array.from(select.options).forEach((opt, idx) => {
+      const optDiv = document.createElement('div');
+      optDiv.className = 'custom-select-option';
+      if (opt.value === select.value) {
+        optDiv.classList.add('selected');
+      }
+      optDiv.textContent = opt.textContent;
+      optDiv.onclick = (e) => {
+        e.stopPropagation();
+        select.value = opt.value;
+        trigger.textContent = opt.textContent;
+        // Trigger native change event
+        select.dispatchEvent(new Event('change'));
+        wrapper.classList.remove('open');
+        buildOptions(); // Rebuild to update selected class styling
+      };
+      optionsContainer.appendChild(optDiv);
+    });
+  };
+
+  buildOptions();
+
+  // Toggle dropdown visibility
+  trigger.onclick = (e) => {
+    e.stopPropagation();
+    // Close all other custom selects first to prevent overlapping menus
+    document.querySelectorAll('.custom-select-wrapper').forEach(w => {
+      if (w !== wrapper) w.classList.remove('open');
+    });
+    wrapper.classList.toggle('open');
+  };
+
+  // Close dropdown if user clicks anywhere else in the document
+  document.addEventListener('click', () => {
+    wrapper.classList.remove('open');
+  });
+
+  // Re-sync values when the original select is changed externally (e.g. settings loaded)
+  select.addEventListener('change', () => {
+    const selected = select.options[select.selectedIndex];
+    if (selected) {
+      trigger.textContent = selected.textContent;
+    }
+    // Update selected class styling
+    Array.from(optionsContainer.children).forEach((child, idx) => {
+      if (select.options[idx] && select.options[idx].value === select.value) {
+        child.classList.add('selected');
+      } else {
+        child.classList.remove('selected');
+      }
+    });
+  });
 }
