@@ -596,18 +596,31 @@ func (s *AppService) CheckUpdates() map[string]interface{} {
 		response["url"] = htmlURL
 		response["body"] = body
 
-		// Extract download URL for the Windows .exe installer
+		// Extract download URL for the Windows .exe installer, prioritizing the setup/installer package
 		if assets, ok := releaseInfo["assets"].([]interface{}); ok {
+			var fallbackURL string
+			var fallbackName string
 			for _, assetVal := range assets {
 				if asset, ok := assetVal.(map[string]interface{}); ok {
 					name, _ := asset["name"].(string)
 					url, _ := asset["browser_download_url"].(string)
-					if strings.HasSuffix(strings.ToLower(name), ".exe") {
-						response["downloadUrl"] = url
-						response["assetName"] = name
-						break
+					nameLower := strings.ToLower(name)
+					if strings.HasSuffix(nameLower, ".exe") {
+						if strings.Contains(nameLower, "setup") || strings.Contains(nameLower, "installer") {
+							response["downloadUrl"] = url
+							response["assetName"] = name
+							fallbackURL = "" // Found the preferred setup installer
+							break
+						} else if fallbackURL == "" {
+							fallbackURL = url
+							fallbackName = name
+						}
 					}
 				}
+			}
+			if fallbackURL != "" {
+				response["downloadUrl"] = fallbackURL
+				response["assetName"] = fallbackName
 			}
 		}
 	}
@@ -664,9 +677,13 @@ func (s *AppService) DownloadAndInstallUpdate(downloadURL string) error {
 		// Wait a split second for frontend to process before starting installer
 		time.Sleep(1 * time.Second)
 
-		// Start installer asynchronously
-		cmd := exec.Command(installerPath)
-		err = cmd.Start()
+		// Start installer asynchronously using ShellExecute so that it can request UAC elevation
+		verbPtr, _ := windows.UTF16PtrFromString("runas") // "runas" triggers Windows UAC prompt
+		exePtr, _ := windows.UTF16PtrFromString(installerPath)
+		dirPtr, _ := windows.UTF16PtrFromString(filepath.Dir(installerPath))
+		argsPtr, _ := windows.UTF16PtrFromString("")
+
+		err = windows.ShellExecute(0, verbPtr, exePtr, argsPtr, dirPtr, windows.SW_SHOWNORMAL)
 		if err != nil {
 			wailsruntime.EventsEmit(wCtx, "update-error", "Failed to start installer: "+err.Error())
 			return
