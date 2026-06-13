@@ -64,6 +64,7 @@ type AppService struct {
 	watchdogLink    string
 	watchdogProxy   bool
 	quitOnce        sync.Once
+	quitting        bool
 }
 
 type wailsLogWriter struct {
@@ -705,6 +706,7 @@ func (s *AppService) DownloadAndInstallUpdate(downloadURL string) error {
 		}
 
 		// Quit our application immediately so the installer can overwrite NeoBox.exe
+		s.Quit()
 		wailsruntime.Quit(wCtx)
 	}()
 
@@ -1064,8 +1066,7 @@ func (s *AppService) InitTray(iconBytes []byte) {
 						if visible {
 							wailsruntime.WindowHide(wCtxToggle)
 						} else {
-							wailsruntime.WindowShow(wCtxToggle)
-							wailsruntime.WindowUnminimise(wCtxToggle)
+							s.BringToFront()
 							wailsruntime.EventsEmit(wCtxToggle, "window-restored", nil)
 						}
 					}
@@ -1168,8 +1169,7 @@ func (s *AppService) SelectAndConnectServer(link string) {
 	}
 
 	// Show the window so they can see the connection progress
-	wailsruntime.WindowShow(wCtx)
-	wailsruntime.WindowUnminimise(wCtx)
+	s.BringToFront()
 	wailsruntime.EventsEmit(wCtx, "window-restored", nil)
 	s.NotifyWindowShown()
 
@@ -1395,10 +1395,25 @@ func generateClashSecret() string {
 	return hex.EncodeToString(bytes)
 }
 
+// SetQuitting sets the quitting flag.
+func (s *AppService) SetQuitting(quitting bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.quitting = quitting
+}
+
+// IsQuitting returns whether the application is shutting down.
+func (s *AppService) IsQuitting() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.quitting
+}
+
 // Quit performs clean and safe application shutdown.
 // It is guaranteed to run only once using sync.Once.
 func (s *AppService) Quit() {
 	s.quitOnce.Do(func() {
+		s.SetQuitting(true)
 		// Stop the watchdog first
 		s.stopWatchdog()
 		// Stop the auto-update scheduler

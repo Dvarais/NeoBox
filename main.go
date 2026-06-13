@@ -19,6 +19,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	syswindows "golang.org/x/sys/windows"
 )
 
@@ -92,6 +93,15 @@ func main() {
 			appService.SetContext(ctx)
 			appService.InitTray(trayIcon)
 			appService.StartAutoUpdateScheduler()
+		},
+		OnBeforeClose: func(ctx context.Context) bool {
+			if appService.IsQuitting() {
+				return false // Allow closing/quitting
+			}
+			// Hide window instead of closing it, and update tray state
+			wailsruntime.WindowHide(ctx)
+			appService.NotifyWindowHidden()
+			return true // Prevent actual close
 		},
 		OnShutdown: func(ctx context.Context) {
 			// Trigger a clean, unified service shutdown.

@@ -25,14 +25,15 @@ func SetupAutostart(taskName string, appPath string) error {
 	// Sanitize only the task name to prevent argument injection via /tn
 	safeName := strings.ReplaceAll(taskName, `"`, `'`)
 
+	// Wrap appPath in double quotes so that schtasks does not split it on spaces.
+	// In Go, passing a string starting and ending with double quotes escapes the quotes
+	// in the command line argument, allowing schtasks to receive it with literal quotes.
+	quotedPath := `"` + appPath + `"`
+
 	// schtasks requires administrative rights to create a task with highest privileges (/rl highest).
-	// FIX #4b: appPath is passed as a plain argument without manual quote-wrapping.
-	// exec.Command passes each argument separately through Windows CreateProcess, so Go
-	// handles quoting automatically. Manual `"` + appPath + `"` causes double-quoting
-	// which breaks schtasks when the path contains spaces or special characters.
 	cmd := exec.Command("schtasks", "/create",
 		"/tn", safeName,
-		"/tr", appPath,
+		"/tr", quotedPath,
 		"/sc", "onlogon",
 		"/rl", "highest",
 		"/f",
