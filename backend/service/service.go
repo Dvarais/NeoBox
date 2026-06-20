@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	"NeoBox/backend/core"
 	"NeoBox/backend/security"
@@ -32,7 +33,7 @@ import (
 // currentVersion is the application version. Update this before each release.
 // FIX #14: Extracted from CheckUpdates into a package-level constant so it
 // cannot be missed during release preparation.
-const currentVersion = "1.6.3"
+const currentVersion = "1.6.3.2"
 
 type TrayServerItem struct {
 	Item *systray.MenuItem
@@ -65,6 +66,7 @@ type AppService struct {
 	watchdogProxy   bool
 	quitOnce        sync.Once
 	quitting        bool
+	trayStarted     bool // true once systray.Run has been entered; guards systray.Quit()
 }
 
 type wailsLogWriter struct {
@@ -464,7 +466,16 @@ func (s *AppService) RequestAdmin() {
 	dirPtr, _ := windows.UTF16PtrFromString(filepath.Dir(exePath))
 	argsPtr, _ := windows.UTF16PtrFromString("")
 
-	_ = windows.ShellExecute(0, verbPtr, exePtr, argsPtr, dirPtr, windows.SW_SHOWNORMAL)
+	if err := windows.ShellExecute(0, verbPtr, exePtr, argsPtr, dirPtr, windows.SW_SHOWNORMAL); err != nil {
+		// ShellExecute failed (e.g. user declined UAC) — keep the current
+		// process running with its state intact. Do NOT exit.
+		return
+	}
+
+	// The elevated instance is launching. Clean up the current session so we
+	// don't leave the system proxy, Kill Switch rules, or sing-box running with
+	// no UI to control them. Quit() also tears down the tray icon.
+	s.Quit()
 	os.Exit(0)
 }
 
@@ -715,7 +726,7 @@ func (s *AppService) DownloadAndInstallUpdate(downloadURL string) error {
 
 func (s *AppService) performDownload(ctx context.Context, url, destPath string) error {
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return err
 	}
@@ -976,6 +987,29 @@ func (s *AppService) OpenLogsFolder() {
 	exec.Command("explorer", logsDir).Start()
 }
 
+// waitForShellTrayReady blocks until the Explorer shell tray window exists or a
+// timeout elapses. It is used before starting the systray loop so that the very
+// first Shell_NotifyIcon(NIM_ADD) lands on a ready notification area — this is
+// what makes the tray icon appear reliably during early autostart at logon
+// (previously it silently failed and the icon only showed up on later redraws).
+//
+// If the shell is already running (normal interactive launch) this returns
+// immediately. It only waits during cold autostart right after logon.
+func waitForShellTrayReady() {
+	user32 := windows.NewLazySystemDLL("user32.dll")
+	procFindWindowW := user32.NewProc("FindWindowW")
+
+	shellTrayPtr, _ := windows.UTF16PtrFromString("Shell_TrayWnd")
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(shellTrayPtr)))
+		if hwnd != 0 {
+			return
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
 // InitTray starts the system tray loop in a background goroutine.
 func (s *AppService) InitTray(iconBytes []byte) {
 	// Save the icon to disk next to the executable if missing, so Windows toast notifications can load it.
@@ -988,6 +1022,15 @@ func (s *AppService) InitTray(iconBytes []byte) {
 
 	go func() {
 		runtime.LockOSThread()
+		// Wait for the Explorer shell (notification area) to be ready before
+		// entering the systray loop. If Shell_NotifyIcon(NIM_ADD) runs before
+		// the tray window exists — common during early autostart at logon —
+		// the call silently fails and the icon never appears until the area is
+		// redrawn later. waitForShellTray polls FindWindowW("Shell_TrayWnd").
+		waitForShellTrayReady()
+		s.mu.Lock()
+		s.trayStarted = true
+		s.mu.Unlock()
 		systray.Run(func() {
 			systray.SetIcon(iconBytes)
 			systray.SetTitle("NeoBox")
@@ -1424,8 +1467,20 @@ func (s *AppService) Quit() {
 		}
 		// Clean up system proxy settings
 		s.SetSystemProxy(false)
-		// Quit the system tray message loop and remove the tray icon
-		systray.Quit()
+		// Disable the firewall Kill Switch — otherwise the block-all rules would
+		// remain in Windows Firewall and the user would lose ALL internet access
+		// after quitting the app (rules persist across app restarts/reboots).
+		_ = security.DisableKillSwitch()
+		// Quit the system tray message loop and remove the tray icon.
+		// Only call systray.Quit() if systray.Run() was actually entered — calling
+		// it before Run() starts (e.g. when wails.Run failed during early startup
+		// before the tray goroutine ran) can panic or hang inside the systray lib.
+		s.mu.Lock()
+		started := s.trayStarted
+		s.mu.Unlock()
+		if started {
+			systray.Quit()
+		}
 	})
 }
 

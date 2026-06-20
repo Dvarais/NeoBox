@@ -38,6 +38,10 @@ export function InitTray(arg1) {
   return window['go']['service']['AppService']['InitTray'](arg1);
 }
 
+export function IsQuitting() {
+  return window['go']['service']['AppService']['IsQuitting']();
+}
+
 export function NotifyWindowHidden() {
   return window['go']['service']['AppService']['NotifyWindowHidden']();
 }
@@ -92,6 +96,10 @@ export function SelectAndConnectServer(arg1) {
 
 export function SetContext(arg1) {
   return window['go']['service']['AppService']['SetContext'](arg1);
+}
+
+export function SetQuitting(arg1) {
+  return window['go']['service']['AppService']['SetQuitting'](arg1);
 }
 
 export function SetSystemProxy(arg1) {

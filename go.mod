@@ -5,7 +5,6 @@ go 1.24.7
 require (
 	fyne.io/systray v1.11.1-0.20250812065214-4856ac3adc3c
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3
-	github.com/mitchellh/go-ps v1.0.0
 	github.com/sagernet/sing v0.8.10
 	github.com/sagernet/sing-box v1.13.12
 	github.com/wailsapp/wails/v2 v2.12.0
@@ -74,6 +73,7 @@ require (
 	github.com/metacubex/utls v1.8.4 // indirect
 	github.com/mholt/acmez/v3 v3.1.6 // indirect
 	github.com/miekg/dns v1.1.72 // indirect
+	github.com/mitchellh/go-ps v1.0.0 // indirect
 	github.com/openai/openai-go/v3 v3.26.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/pires/go-proxyproto v0.8.1 // indirect

@@ -20,6 +20,8 @@ export function ImportClipboard(arg1:string):Promise<Array<string>>;
 
 export function InitTray(arg1:Array<number>):Promise<void>;
 
+export function IsQuitting():Promise<boolean>;
+
 export function NotifyWindowHidden():Promise<void>;
 
 export function NotifyWindowShown():Promise<void>;
@@ -47,6 +49,8 @@ export function SaveSubscriptions(arg1:string):Promise<boolean>;
 export function SelectAndConnectServer(arg1:string):Promise<void>;
 
 export function SetContext(arg1:context.Context):Promise<void>;
+
+export function SetQuitting(arg1:boolean):Promise<void>;
 
 export function SetSystemProxy(arg1:boolean):Promise<void>;
 
