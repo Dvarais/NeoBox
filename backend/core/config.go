@@ -203,10 +203,15 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 			if httpHost == "" {
 				httpHost = u.Hostname()
 			}
+			httpMethod := params.Get("method")
+			if httpMethod == "" {
+				httpMethod = "GET"
+			}
 			outbound["transport"] = map[string]interface{}{
-				"type": "http",
-				"host": []string{httpHost},
-				"path": httpPath,
+				"type":   "http",
+				"host":   []string{httpHost},
+				"path":   httpPath,
+				"method": httpMethod,
 			}
 		}
 		return outbound, nil
@@ -324,10 +329,15 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 			if hostVal == "" {
 				hostVal = server
 			}
+			methodVal, _ := vmessData["method"].(string)
+			if methodVal == "" {
+				methodVal = "GET"
+			}
 			outbound["transport"] = map[string]interface{}{
-				"type": "http",
-				"host": []string{hostVal},
-				"path": pathVal,
+				"type":   "http",
+				"host":   []string{hostVal},
+				"path":   pathVal,
+				"method": methodVal,
 			}
 		}
 		return outbound, nil
@@ -490,12 +500,12 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 		}
 		tlsMap["server_name"] = sni
 
-		// ALPN. Hysteria2 runs over HTTP/3 (QUIC); default h3 if not provided.
+		// ALPN. Hysteria2 runs over HTTP/3 (QUIC); default hy2 if not provided.
 		alpnStr := params.Get("alpn")
 		if alpnStr != "" {
 			tlsMap["alpn"] = strings.Split(alpnStr, ",")
 		} else {
-			tlsMap["alpn"] = []string{"h3"}
+			tlsMap["alpn"] = []string{"hy2"}
 		}
 
 		insecure := params.Get("insecure")
