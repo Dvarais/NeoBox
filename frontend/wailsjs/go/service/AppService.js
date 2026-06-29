@@ -98,6 +98,10 @@ export function SetContext(arg1) {
   return window['go']['service']['AppService']['SetContext'](arg1);
 }
 
+export function SetMutexHandle(arg1) {
+  return window['go']['service']['AppService']['SetMutexHandle'](arg1);
+}
+
 export function SetQuitting(arg1) {
   return window['go']['service']['AppService']['SetQuitting'](arg1);
 }

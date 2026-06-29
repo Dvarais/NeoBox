@@ -33,7 +33,7 @@ import (
 // currentVersion is the application version. Update this before each release.
 // FIX #14: Extracted from CheckUpdates into a package-level constant so it
 // cannot be missed during release preparation.
-const currentVersion = "1.6.3.2"
+const currentVersion = "1.6.3.6"
 
 type TrayServerItem struct {
 	Item *systray.MenuItem
@@ -67,6 +67,7 @@ type AppService struct {
 	quitOnce        sync.Once
 	quitting        bool
 	trayStarted     bool // true once systray.Run has been entered; guards systray.Quit()
+	mutexHandle     windows.Handle
 }
 
 type wailsLogWriter struct {
@@ -466,17 +467,76 @@ func (s *AppService) RequestAdmin() {
 	dirPtr, _ := windows.UTF16PtrFromString(filepath.Dir(exePath))
 	argsPtr, _ := windows.UTF16PtrFromString("")
 
+	// Release single-instance mutex BEFORE launching the elevated process.
+	// This prevents a race condition where the elevated process starts up,
+	// finds the mutex is still held by this process, and immediately exits.
+	s.mu.Lock()
+	hasMutex := s.mutexHandle != 0
+	oldMutex := s.mutexHandle
+	if hasMutex {
+		_ = windows.CloseHandle(oldMutex)
+		s.mutexHandle = 0
+	}
+	s.mu.Unlock()
+
 	if err := windows.ShellExecute(0, verbPtr, exePtr, argsPtr, dirPtr, windows.SW_SHOWNORMAL); err != nil {
-		// ShellExecute failed (e.g. user declined UAC) — keep the current
-		// process running with its state intact. Do NOT exit.
+		// ShellExecute failed (e.g. user declined UAC). Since we already closed the mutex,
+		// we must re-acquire it so this instance remains protected as the single instance.
+		if hasMutex {
+			s.mu.Lock()
+			s.mutexHandle, _ = AcquireSingleInstanceMutex()
+			s.mu.Unlock()
+		}
 		return
 	}
 
-	// The elevated instance is launching. Clean up the current session so we
-	// don't leave the system proxy, Kill Switch rules, or sing-box running with
-	// no UI to control them. Quit() also tears down the tray icon.
-	s.Quit()
+	// The elevated instance is launching. We must release the single-instance
+	// mutex IMMEDIATELY so the elevated process can acquire it, and we cannot
+	// afford to block: systray.Quit() / full Quit() enter message-loop teardown
+	// that can hang (and previously left a zombie process holding the mutex,
+	// which blocked the elevated relaunch entirely). So we do only the fast,
+	// synchronous cleanup of persistent OS state here, then exit at once.
+	s.SetQuitting(true)
+	s.stopWatchdog()
+	if s.coreManager != nil {
+		_ = s.coreManager.Stop()
+	}
+	s.SetSystemProxy(false)
+	_ = security.DisableKillSwitch()
 	os.Exit(0)
+}
+
+// SetMutexHandle sets the single instance mutex handle so it can be released on relaunch.
+func (s *AppService) SetMutexHandle(handle windows.Handle) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mutexHandle = handle
+}
+
+// AcquireSingleInstanceMutex creates a Windows named mutex to ensure only one
+// instance of NeoBox runs at a time.
+func AcquireSingleInstanceMutex() (windows.Handle, bool) {
+	if handle, already := createSingleInstanceMutex("Global\\NeoBox-SingleInstance-Mutex"); handle != 0 || already {
+		return handle, already
+	}
+	// Global\ failed (e.g. access denied) — fall back to Local\.
+	handle, already := createSingleInstanceMutex("Local\\NeoBox-SingleInstance-Mutex")
+	return handle, already
+}
+
+func createSingleInstanceMutex(name string) (windows.Handle, bool) {
+	mutexName, _ := windows.UTF16PtrFromString(name)
+	handle, err := windows.CreateMutex(nil, false, mutexName)
+	if err != nil {
+		if err == windows.ERROR_ALREADY_EXISTS {
+			if handle != 0 {
+				_ = windows.CloseHandle(handle)
+			}
+			return 0, true // Another instance holds the mutex
+		}
+		return 0, false
+	}
+	return handle, false
 }
 
 // SetSystemProxy modifies system registry to enable/disable system-wide proxy settings.
@@ -580,7 +640,7 @@ func (s *AppService) ImportClipboard(text string) []string {
 		if strings.HasPrefix(trimmed, "vless://") || strings.HasPrefix(trimmed, "vmess://") ||
 			strings.HasPrefix(trimmed, "ss://") || strings.HasPrefix(trimmed, "trojan://") ||
 			strings.HasPrefix(trimmed, "tuic://") || strings.HasPrefix(trimmed, "hysteria2://") ||
-			strings.HasPrefix(trimmed, "hy2://") {
+			strings.HasPrefix(trimmed, "hy2://") || strings.HasPrefix(trimmed, "hysteria://") {
 			links = append(links, trimmed)
 		}
 	}
@@ -1306,6 +1366,8 @@ func (s *AppService) rebuildTrayServersLocked() {
 				protocol = "tuic:"
 			} else if strings.HasPrefix(servers[i].Link, "hysteria2://") || strings.HasPrefix(servers[i].Link, "hy2://") {
 				protocol = "hy2:"
+			} else if strings.HasPrefix(servers[i].Link, "hysteria://") {
+				protocol = "hy1:"
 			}
 
 			s.trayServerItems[i].Item.SetTitle(fmt.Sprintf("%s %s", protocol, servers[i].Name))

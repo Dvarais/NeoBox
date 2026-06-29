@@ -101,6 +101,17 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 			security = "none"
 		}
 
+		// VLESS flow control (e.g. xtls-rprx-vision). Required by VLESS+Reality
+		// and XTLS-Vision servers — without it the connection hangs/refused
+		// because most Reality servers only accept the vision flow.
+		// Flow is only valid for VLESS over raw TCP or gRPC with TLS/Reality.
+		if protocol == "vless" {
+			flow := params.Get("flow")
+			if flow != "" {
+				outbound["flow"] = flow
+			}
+		}
+
 		if security == "tls" || security == "reality" {
 			tlsMap := make(map[string]interface{})
 			tlsMap["enabled"] = true
@@ -382,6 +393,34 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 		}
 
 		params := u.Query()
+
+		// Obfuscation (Salamander). Format in share links:
+		//   obfs=salamander&obfs-password=SECRET
+		obfsType := params.Get("obfs")
+		if obfsType != "" {
+			outbound["obfs"] = map[string]interface{}{
+				"type":     obfsType,
+				"password": params.Get("obfs-password"),
+			}
+		}
+
+		// Bandwidth hints (optional). Hysteria2 share links use upmbps/downmbps.
+		if up := params.Get("upmbps"); up != "" {
+			if v, err := strconv.Atoi(up); err == nil {
+				outbound["up_mbps"] = v
+			}
+		}
+		if down := params.Get("downmbps"); down != "" {
+			if v, err := strconv.Atoi(down); err == nil {
+				outbound["down_mbps"] = v
+			}
+		}
+
+		// Optional port hopping range, e.g. "mport=20000-40000".
+		if mport := params.Get("mport"); mport != "" {
+			outbound["server_ports"] = mport
+		}
+
 		tlsMap := make(map[string]interface{})
 		tlsMap["enabled"] = true
 		sni := params.Get("sni")
@@ -392,6 +431,77 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 			sni = u.Hostname()
 		}
 		tlsMap["server_name"] = sni
+
+		// ALPN. Hysteria2 runs over HTTP/3 (QUIC); default h3 if not provided.
+		alpnStr := params.Get("alpn")
+		if alpnStr != "" {
+			tlsMap["alpn"] = strings.Split(alpnStr, ",")
+		}
+
+		insecure := params.Get("insecure")
+		if insecure == "1" || insecure == "true" {
+			tlsMap["insecure"] = true
+		}
+		outbound["tls"] = tlsMap
+		return outbound, nil
+
+	case "hysteria":
+		// Hysteria v1 (QUIC-based). Share link format:
+		//   hysteria://host:port?protocol=udp&auth=SECRET&peer=sni&insecure=1&up=50&down=200&alpn=h3#name
+		portInt, _ := strconv.Atoi(u.Port())
+		if portInt == 0 {
+			portInt = 443
+		}
+		outbound["type"] = "hysteria"
+		outbound["server"] = u.Hostname()
+		outbound["server_port"] = portInt
+
+		params := u.Query()
+
+		// Authentication. Hysteria v1 uses auth_str (string) by convention.
+		auth := params.Get("auth")
+		if auth == "" {
+			auth = params.Get("authStr")
+		}
+		if auth != "" {
+			outbound["auth_str"] = auth
+		}
+
+		// Obfuscation string (salamander-style, v1).
+		if obfs := params.Get("obfsParam"); obfs != "" {
+			outbound["obfs"] = obfs
+		}
+
+		// Bandwidth. v1 uses "up"/"down" as e.g. "50 Mbps" or "100 Mbps".
+		if up := params.Get("up"); up != "" {
+			outbound["up"] = up
+		}
+		if down := params.Get("down"); down != "" {
+			outbound["down"] = down
+		}
+
+		// Optional port hopping range, e.g. "mport=20000-40000".
+		if mport := params.Get("mport"); mport != "" {
+			outbound["server_ports"] = mport
+		}
+
+		tlsMap := make(map[string]interface{})
+		tlsMap["enabled"] = true
+		sni := params.Get("peer")
+		if sni == "" {
+			sni = params.Get("sni")
+		}
+		if sni == "" {
+			sni = u.Hostname()
+		}
+		tlsMap["server_name"] = sni
+
+		alpnStr := params.Get("alpn")
+		if alpnStr != "" {
+			tlsMap["alpn"] = strings.Split(alpnStr, ",")
+		} else {
+			tlsMap["alpn"] = []string{"h3"}
+		}
 
 		insecure := params.Get("insecure")
 		if insecure == "1" || insecure == "true" {
@@ -769,7 +879,7 @@ func FetchSubscription(subURL string) ([]string, error) {
 	if strings.HasPrefix(lowerURL, "vless://") || strings.HasPrefix(lowerURL, "vmess://") ||
 		strings.HasPrefix(lowerURL, "ss://") || strings.HasPrefix(lowerURL, "trojan://") ||
 		strings.HasPrefix(lowerURL, "tuic://") || strings.HasPrefix(lowerURL, "hysteria2://") ||
-		strings.HasPrefix(lowerURL, "hy2://") {
+		strings.HasPrefix(lowerURL, "hy2://") || strings.HasPrefix(lowerURL, "hysteria://") {
 		return []string{trimmedURL}, nil
 	}
 
@@ -1086,9 +1196,9 @@ func FetchSubscription(subURL string) ([]string, error) {
 		// If it is already a plain text link
 		trimmedLower := strings.ToLower(trimmed)
 		if strings.HasPrefix(trimmedLower, "vless://") || strings.HasPrefix(trimmedLower, "vmess://") ||
-			strings.HasPrefix(trimmedLower, "ss://") || strings.HasPrefix(trimmedLower, "trojan://") ||
-			strings.HasPrefix(trimmedLower, "tuic://") || strings.HasPrefix(trimmedLower, "hysteria2://") ||
-			strings.HasPrefix(trimmedLower, "hy2://") {
+		strings.HasPrefix(trimmedLower, "ss://") || strings.HasPrefix(trimmedLower, "trojan://") ||
+		strings.HasPrefix(trimmedLower, "tuic://") || strings.HasPrefix(trimmedLower, "hysteria2://") ||
+		strings.HasPrefix(trimmedLower, "hy2://") || strings.HasPrefix(trimmedLower, "hysteria://") {
 			parsedLinks = append(parsedLinks, trimmed)
 			continue
 		}

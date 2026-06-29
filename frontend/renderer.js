@@ -1729,7 +1729,7 @@ async function handleQrImport(link) {
   if (trimmed.startsWith('vless://') || trimmed.startsWith('vmess://') ||
       trimmed.startsWith('ss://') || trimmed.startsWith('trojan://') ||
       trimmed.startsWith('tuic://') || trimmed.startsWith('hysteria2://') ||
-      trimmed.startsWith('hy2://')) {
+      trimmed.startsWith('hy2://') || trimmed.startsWith('hysteria://')) {
     
     let qrSub = allSubscriptions.find(s => s.url === 'qrcode');
     if (qrSub) {
