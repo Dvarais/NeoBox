@@ -1072,15 +1072,16 @@ func waitForShellTrayReady() {
 
 // InitTray starts the system tray loop in a background goroutine.
 func (s *AppService) InitTray(iconBytes []byte) {
-	// Save the icon to disk next to the executable if missing, so Windows toast notifications can load it.
-	if exePath, err := os.Executable(); err == nil {
-		iconPath := filepath.Join(filepath.Dir(exePath), "icon.ico")
-		if _, err := os.Stat(iconPath); os.IsNotExist(err) {
-			_ = os.WriteFile(iconPath, iconBytes, 0644)
-		}
-	}
-
 	go func() {
+		// Save the icon to disk next to the executable if missing, so Windows toast notifications can load it.
+		// Run inside the background goroutine to prevent blocking the main app startup thread.
+		if exePath, err := os.Executable(); err == nil {
+			iconPath := filepath.Join(filepath.Dir(exePath), "icon.ico")
+			if _, err := os.Stat(iconPath); os.IsNotExist(err) {
+				_ = os.WriteFile(iconPath, iconBytes, 0644)
+			}
+		}
+
 		runtime.LockOSThread()
 		// Wait for the Explorer shell (notification area) to be ready before
 		// entering the systray loop. If Shell_NotifyIcon(NIM_ADD) runs before
@@ -1111,17 +1112,7 @@ func (s *AppService) InitTray(iconBytes []byte) {
 			s.mToggleItem = mToggle
 
 			mServers := systray.AddMenuItem("Выбрать сервер", "Выбрать сервер из подписок")
-
-			// Initialize the 50 hidden items pool
-			for i := 0; i < 50; i++ {
-				subItem := mServers.AddSubMenuItem("", "")
-				subItem.Hide()
-				s.trayServerItems[i] = &TrayServerItem{Item: subItem}
-			}
 			s.mu.Unlock()
-
-			// Initial servers list build
-			s.RebuildTrayServers()
 
 			systray.AddSeparator()
 
@@ -1131,19 +1122,35 @@ func (s *AppService) InitTray(iconBytes []byte) {
 			systray.AddSeparator()
 			mQuit := systray.AddMenuItem("Выход", "Закрыть NeoBox")
 
-			// Start click listener goroutines for the 50 server items
-			for i := 0; i < 50; i++ {
-				go func(idx int) {
-					for range s.trayServerItems[idx].Item.ClickedCh {
-						s.mu.Lock()
-						link := s.trayServerItems[idx].Link
-						s.mu.Unlock()
-						if link != "" {
-							s.SelectAndConnectServer(link)
+			// Initialize the 50 hidden items pool, load subscriptions, and setup click listeners
+			// in a separate background goroutine. This allows the tray icon and basic options
+			// to load instantly without waiting for 50 Win32 native calls and disk reads.
+			go func() {
+				s.mu.Lock()
+				for i := 0; i < 50; i++ {
+					subItem := mServers.AddSubMenuItem("", "")
+					subItem.Hide()
+					s.trayServerItems[i] = &TrayServerItem{Item: subItem}
+				}
+				s.mu.Unlock()
+
+				// Initial servers list build
+				s.RebuildTrayServers()
+
+				// Start click listener goroutines for the 50 server items
+				for i := 0; i < 50; i++ {
+					go func(idx int) {
+						for range s.trayServerItems[idx].Item.ClickedCh {
+							s.mu.Lock()
+							link := s.trayServerItems[idx].Link
+							s.mu.Unlock()
+							if link != "" {
+								s.SelectAndConnectServer(link)
+							}
 						}
-					}
-				}(i)
-			}
+					}(i)
+				}
+			}()
 
 			for {
 				select {
