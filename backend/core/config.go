@@ -134,7 +134,7 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 				"fingerprint": fingerprint,
 			}
 
-			if transportType == "grpc" {
+			if transportType == "grpc" || transportType == "http" || transportType == "h2" || transportType == "xhttp" || transportType == "splithttp" {
 				tlsMap["alpn"] = []string{"h2"}
 			}
 
@@ -177,6 +177,36 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 			outbound["transport"] = map[string]interface{}{
 				"type":         "grpc",
 				"service_name": svcName,
+			}
+		} else if transportType == "httpupgrade" {
+			hupPath := params.Get("path")
+			if hupPath == "" {
+				hupPath = "/"
+			}
+			hupHost := params.Get("host")
+			if hupHost == "" {
+				hupHost = u.Hostname()
+			}
+			outbound["transport"] = map[string]interface{}{
+				"type": "httpupgrade",
+				"host": hupHost,
+				"path": hupPath,
+			}
+		} else if transportType == "http" || transportType == "h2" || transportType == "xhttp" || transportType == "splithttp" {
+			// XHTTP/SplitHTTP is an Xray-core transport not natively supported by sing-box.
+			// We map it to the "http" (HTTP/2) transport as the closest compatible alternative.
+			httpPath := params.Get("path")
+			if httpPath == "" {
+				httpPath = "/"
+			}
+			httpHost := params.Get("host")
+			if httpHost == "" {
+				httpHost = u.Hostname()
+			}
+			outbound["transport"] = map[string]interface{}{
+				"type": "http",
+				"host": []string{httpHost},
+				"path": httpPath,
 			}
 		}
 		return outbound, nil
@@ -270,6 +300,34 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 			outbound["transport"] = map[string]interface{}{
 				"type":         "grpc",
 				"service_name": pathVal,
+			}
+		} else if netVal == "httpupgrade" {
+			pathVal, _ := vmessData["path"].(string)
+			if pathVal == "" {
+				pathVal = "/"
+			}
+			hostVal, _ := vmessData["host"].(string)
+			if hostVal == "" {
+				hostVal = server
+			}
+			outbound["transport"] = map[string]interface{}{
+				"type": "httpupgrade",
+				"host": hostVal,
+				"path": pathVal,
+			}
+		} else if netVal == "http" || netVal == "h2" || netVal == "xhttp" || netVal == "splithttp" {
+			pathVal, _ := vmessData["path"].(string)
+			if pathVal == "" {
+				pathVal = "/"
+			}
+			hostVal, _ := vmessData["host"].(string)
+			if hostVal == "" {
+				hostVal = server
+			}
+			outbound["transport"] = map[string]interface{}{
+				"type": "http",
+				"host": []string{hostVal},
+				"path": pathVal,
 			}
 		}
 		return outbound, nil
