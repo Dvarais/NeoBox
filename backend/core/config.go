@@ -436,6 +436,8 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 		alpnStr := params.Get("alpn")
 		if alpnStr != "" {
 			tlsMap["alpn"] = strings.Split(alpnStr, ",")
+		} else {
+			tlsMap["alpn"] = []string{"h3"}
 		}
 
 		insecure := params.Get("insecure")
