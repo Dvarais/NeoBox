@@ -3,7 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.ipify.org https://raw.githubusercontent.com https://cloudflare-dns.com;">
+  <!-- SECURITY FIX #8: Removed unpkg.com external script dependency.
+       jsQR is now served locally with SRI integrity check.
+       Restored 'unsafe-inline' to style-src as it is required for inline styles and layout control.
+       This prevents XSS via compromised CDN. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-vEDIoVGWI2sjFNsIVvcsoLSZgM1UE7jIUqc0n1/uCFk='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.ipify.org https://raw.githubusercontent.com https://cloudflare-dns.com;">
   <title>NeoBox Glass</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -137,6 +141,20 @@
                 <span class="traffic-stat-val up" id="sessionTotalUp">0 B</span>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Блок TUN статуса -->
+        <div id="tunStatusContainer" class="current-server-card" style="display: none; margin-top: 20px; max-width: 400px; padding: 15px 20px;">
+          <div class="server-icon" style="background: rgba(14, 165, 233, 0.1);" id="tunStatusIcon">🛡️</div>
+          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <div class="server-info">
+              <h3 id="tunStatusTitle" style="font-size: 14px; margin: 0;">TUN-интерфейс</h3>
+              <p id="tunStatusText" style="font-size: 11px; margin-top: 3px; color: var(--text-dim);">Проверка...</p>
+            </div>
+            <button id="restoreTunBtn" class="btn-glass" style="padding: 6px 12px; font-size: 11px; border-radius: 8px;">
+              <span id="restoreTunBtnText">Восстановить</span>
+            </button>
           </div>
         </div>
 
@@ -578,7 +596,8 @@
     </div>
   </div>
 
-  <script src="https://unpkg.com/jsqr@1.4.0/dist/jsQR.js"></script>
+  <!-- SECURITY FIX #8: jsQR loaded locally with SRI integrity check instead of unpkg.com CDN -->
+  <script src="lib/jsQR.js" integrity="sha256-vEDIoVGWI2sjFNsIVvcsoLSZgM1UE7jIUqc0n1/uCFk=" crossorigin="anonymous"></script>
   <script type="module" src="wails-bridge.js"></script>
   <script type="module" src="renderer.js"></script>
 </body>
