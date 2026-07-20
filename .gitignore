@@ -21,3 +21,9 @@ Thumbs.db
 # Go Build and Test Artifacts
 *.test
 *.out
+
+# Cryptographic Keys and Signatures (Never commit secrets or temporary release signatures)
+*.sig
+*.key
+*.pem
+private_key*
