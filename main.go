@@ -11,6 +11,7 @@ import (
 	"unsafe"
 
 	"NeoBox/backend/core"
+	"NeoBox/backend/security"
 	"NeoBox/backend/service"
 
 	"github.com/wailsapp/wails/v2"
@@ -28,6 +29,16 @@ var assets embed.FS
 var trayIcon []byte
 
 func main() {
+	// Hide the console window immediately if running in standalone mode (e.g. from registry startup)
+	security.HideConsoleIfNeeded()
+
+	// SECURITY: Run anti-tampering and anti-debugging checks at startup.
+	// This detects debuggers, sandboxes, and binary modification before any sensitive operations.
+	if err := security.SecureStartup(); err != nil {
+		fmt.Fprintf(os.Stderr, "Security check failed: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Ensure only one instance of NeoBox runs at a time via a Windows named
 	// kernel mutex. Windows automatically releases the mutex when the owning
 	// process exits (even on a crash), so the mutex alone is sufficient and no
@@ -102,6 +113,9 @@ func main() {
 			return true // Prevent actual close
 		},
 		OnShutdown: func(ctx context.Context) {
+			// Securely wipe encryption keys from memory before shutdown
+			security.SecureWipe()
+
 			// Run clean shutdown in a goroutine so it doesn't block OnShutdown.
 			go appService.Quit()
 
