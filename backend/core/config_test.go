@@ -9,7 +9,7 @@ import (
 func TestParseProxyLink_HTTPTransport_VLESS(t *testing.T) {
 	// A VLESS link with http transport and method parameter
 	link := "vless://96c4d7b2-d3cf-4279-b1d5-2244249a5629@example.com:443?type=http&host=example.com&path=%2Ftesting&method=POST&security=tls#vless-http-test"
-	
+
 	outbound, err := ParseProxyLink(link)
 	if err != nil {
 		t.Fatalf("failed to parse VLESS proxy link: %v", err)

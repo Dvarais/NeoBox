@@ -14,7 +14,7 @@
     !define INFO_PRODUCTNAME "NeoBox"
 !endif
 !ifndef INFO_PRODUCTVERSION
-    !define INFO_PRODUCTVERSION "1.6.3.6"
+    !define INFO_PRODUCTVERSION "1.7.5"
 !endif
 !ifndef INFO_COPYRIGHT
     !define INFO_COPYRIGHT "Copyright © 2026 Dvarais. All rights reserved."

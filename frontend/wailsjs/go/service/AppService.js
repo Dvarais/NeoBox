@@ -10,12 +10,16 @@ export function CheckAdmin() {
   return window['go']['service']['AppService']['CheckAdmin']();
 }
 
+export function CheckTunStatus() {
+  return window['go']['service']['AppService']['CheckTunStatus']();
+}
+
 export function CheckUpdates() {
   return window['go']['service']['AppService']['CheckUpdates']();
 }
 
-export function DownloadAndInstallUpdate(arg1) {
-  return window['go']['service']['AppService']['DownloadAndInstallUpdate'](arg1);
+export function DownloadAndInstallUpdate(arg1, arg2) {
+  return window['go']['service']['AppService']['DownloadAndInstallUpdate'](arg1, arg2);
 }
 
 export function FetchSubscription(arg1) {

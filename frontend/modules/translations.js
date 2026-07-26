@@ -111,7 +111,11 @@ export const translations = {
     typeSuffixOption: '.суффикс домена',
     typeDomainOption: 'Точный домен',
     typeKeywordOption: 'Ключевое слово',
-    typeIpOption: 'IP / CIDR'
+    typeIpOption: 'IP / CIDR',
+    tunStatusTitle: 'TUN-интерфейс',
+    tunStatusActive: 'Активен (трафик защищен)',
+    tunStatusError: 'Сбой соединения (нажмите Восстановить)',
+    tunStatusRestoreBtn: 'Восстановить'
   },
   EN: {
     statusOff: 'Disconnected',
@@ -225,6 +229,10 @@ export const translations = {
     typeSuffixOption: '.domain suffix',
     typeDomainOption: 'Exact domain',
     typeKeywordOption: 'Domain keyword',
-    typeIpOption: 'IP / CIDR'
+    typeIpOption: 'IP / CIDR',
+    tunStatusTitle: 'TUN Interface',
+    tunStatusActive: 'Active (traffic secured)',
+    tunStatusError: 'Connection drop (click Restore)',
+    tunStatusRestoreBtn: 'Restore'
   }
 };

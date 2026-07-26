@@ -7,9 +7,11 @@ export function BringToFront():Promise<void>;
 
 export function CheckAdmin():Promise<boolean>;
 
+export function CheckTunStatus():Promise<boolean>;
+
 export function CheckUpdates():Promise<Record<string, any>>;
 
-export function DownloadAndInstallUpdate(arg1:string):Promise<void>;
+export function DownloadAndInstallUpdate(arg1:string,arg2:string):Promise<void>;
 
 export function FetchSubscription(arg1:string):Promise<Array<string>>;
 

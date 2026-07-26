@@ -1,0 +1,13 @@
+This placeholder keeps frontend/dist/ present in a fresh clone.
+
+main.go embeds this directory with //go:embed all:frontend/dist, and Go fails
+the build when an embed pattern matches no files at all. Without a tracked file
+here, `go build ./...` and `go test ./...` could not run on a clean checkout —
+only `wails build`, which generates the real assets first.
+
+The source of truth is frontend/public/.gitkeep: vite empties dist/ on every
+build and then copies public/ into it, so the placeholder is restored rather
+than lost. Do not delete either copy.
+
+The built assets themselves are NOT tracked: they are output, they change on
+every frontend edit, and the bundle name carries a content hash.

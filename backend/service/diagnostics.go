@@ -6,6 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"NeoBox/backend/core"
+	"NeoBox/backend/i18n"
+	"NeoBox/backend/security"
 )
 
 // DiagnosticStatus is the outcome level of a single diagnostic check.
@@ -33,79 +37,84 @@ type DiagnosticItem struct {
 func (s *AppService) RunDiagnostics() string {
 	var items []DiagnosticItem
 
+	// Port numbers appear in the labels the user reads, so they are formatted from
+	// the same constants the sockets bind rather than typed out a second time.
+	proxyPortName := i18n.T(i18n.DiagProxyPortName, core.ProxyListenPort)
+	clashPortName := i18n.T(i18n.DiagClashPortName, core.ClashAPIPort)
+
 	// ── 1. Wintun driver ────────────────────────────────────────────────────────
 	exePath, _ := os.Executable()
 	wintunPath := filepath.Join(filepath.Dir(exePath), "wintun.dll")
 	if _, err := os.Stat(wintunPath); err == nil {
 		items = append(items, DiagnosticItem{
-			Name:    "Wintun драйвер",
+			Name:    i18n.T(i18n.DiagWintunName),
 			Status:  DiagOK,
-			Message: "Найден (" + wintunPath + ")",
+			Message: i18n.T(i18n.DiagWintunFound, wintunPath),
 		})
 	} else {
 		items = append(items, DiagnosticItem{
-			Name:    "Wintun драйвер",
+			Name:    i18n.T(i18n.DiagWintunName),
 			Status:  DiagError,
-			Message: "wintun.dll не найден рядом с исполняемым файлом. TUN режим будет недоступен.",
+			Message: i18n.T(i18n.DiagWintunMissing),
 		})
 	}
 
 	// ── 2. Administrator privileges ─────────────────────────────────────────────
 	if s.CheckAdmin() {
 		items = append(items, DiagnosticItem{
-			Name:    "Права администратора",
+			Name:    i18n.T(i18n.DiagAdminName),
 			Status:  DiagOK,
-			Message: "Запущен с правами администратора — TUN режим доступен",
+			Message: i18n.T(i18n.DiagAdminYes),
 		})
 	} else {
 		items = append(items, DiagnosticItem{
-			Name:    "Права администратора",
+			Name:    i18n.T(i18n.DiagAdminName),
 			Status:  DiagWarning,
-			Message: "Нет прав администратора. Системный прокси работает, TUN режим — нет.",
+			Message: i18n.T(i18n.DiagAdminNo),
 		})
 	}
 
-	// ── 3. Proxy port 20809 ──────────────────────────────────────────────────────
+	// ── 3. Proxy port ────────────────────────────────────────────────────────────
 	if s.coreManager.IsRunning() {
 		items = append(items, DiagnosticItem{
-			Name:    "Порт прокси (20809)",
+			Name:    proxyPortName,
 			Status:  DiagOK,
-			Message: "Порт занят текущим активным подключением VPN",
+			Message: i18n.T(i18n.DiagPortInUseByVPN),
 		})
-	} else if ln, err := net.Listen("tcp", "127.0.0.1:20809"); err != nil {
+	} else if ln, err := net.Listen("tcp", core.ProxyListenAddr); err != nil {
 		items = append(items, DiagnosticItem{
-			Name:    "Порт прокси (20809)",
+			Name:    proxyPortName,
 			Status:  DiagError,
-			Message: "Порт 20809 занят другим процессом. VPN не запустится пока порт не освобождён.",
+			Message: i18n.T(i18n.DiagPortBusy, core.ProxyListenPort),
 		})
 	} else {
 		_ = ln.Close()
 		items = append(items, DiagnosticItem{
-			Name:    "Порт прокси (20809)",
+			Name:    proxyPortName,
 			Status:  DiagOK,
-			Message: "Порт свободен",
+			Message: i18n.T(i18n.DiagPortFree),
 		})
 	}
 
-	// ── 4. Clash API port 9097 ───────────────────────────────────────────────────
+	// ── 4. Clash API port ────────────────────────────────────────────────────────
 	if s.coreManager.IsRunning() {
 		items = append(items, DiagnosticItem{
-			Name:    "Порт Clash API (9097)",
+			Name:    clashPortName,
 			Status:  DiagOK,
-			Message: "Порт занят текущим активным подключением VPN (статистика работает)",
+			Message: i18n.T(i18n.DiagPortInUseByVPNAPI),
 		})
-	} else if ln, err := net.Listen("tcp", "127.0.0.1:9097"); err != nil {
+	} else if ln, err := net.Listen("tcp", core.ClashAPIAddr); err != nil {
 		items = append(items, DiagnosticItem{
-			Name:    "Порт Clash API (9097)",
+			Name:    clashPortName,
 			Status:  DiagWarning,
-			Message: "Порт 9097 занят. Статистика трафика в реальном времени может не работать.",
+			Message: i18n.T(i18n.DiagClashPortBusy, core.ClashAPIPort),
 		})
 	} else {
 		_ = ln.Close()
 		items = append(items, DiagnosticItem{
-			Name:    "Порт Clash API (9097)",
+			Name:    clashPortName,
 			Status:  DiagOK,
-			Message: "Порт свободен",
+			Message: i18n.T(i18n.DiagPortFree),
 		})
 	}
 
@@ -127,15 +136,15 @@ func (s *AppService) RunDiagnostics() string {
 
 	if !internetOk {
 		items = append(items, DiagnosticItem{
-			Name:    "Интернет",
+			Name:    i18n.T(i18n.DiagInternetName),
 			Status:  DiagError,
-			Message: "Нет доступа к интернету (проверенные хосты недоступны). Проверьте сетевое соединение.",
+			Message: i18n.T(i18n.DiagInternetFail),
 		})
 	} else {
 		items = append(items, DiagnosticItem{
-			Name:    "Интернет",
+			Name:    i18n.T(i18n.DiagInternetName),
 			Status:  DiagOK,
-			Message: "Интернет доступен (успешное подключение к " + activeTarget + ")",
+			Message: i18n.T(i18n.DiagInternetOK, activeTarget),
 		})
 	}
 
@@ -156,33 +165,44 @@ func (s *AppService) RunDiagnostics() string {
 
 	if !dnsOk {
 		items = append(items, DiagnosticItem{
-			Name:    "DNS резолвер",
+			Name:    i18n.T(i18n.DiagDNSName),
 			Status:  DiagWarning,
-			Message: "Порты DNS недоступны. Возможны проблемы с подпиской и DNS-over-HTTPS.",
+			Message: i18n.T(i18n.DiagDNSFail),
 		})
 	} else {
 		items = append(items, DiagnosticItem{
-			Name:    "DNS резолвер",
+			Name:    i18n.T(i18n.DiagDNSName),
 			Status:  DiagOK,
-			Message: "DNS порт доступен (успешное подключение к " + activeDnsTarget + ")",
+			Message: i18n.T(i18n.DiagDNSOK, activeDnsTarget),
 		})
 	}
 
-	// ── 7. VPN core status ───────────────────────────────────────────────────────
+	// ── 7. Leftover Kill Switch rules ────────────────────────────────────────────
+	// Firewall rules outlive the process. If a previous session crashed while the
+	// Kill Switch was armed and the rules could not be removed at startup (which
+	// needs elevation), the machine has no internet and the cause is invisible.
+	if security.KillSwitchRulesPresent() && !s.coreManager.IsRunning() {
+		items = append(items, DiagnosticItem{
+			Name:    i18n.T(i18n.DiagKillSwitchName),
+			Status:  DiagError,
+			Message: i18n.T(i18n.DiagKillSwitchLeftover),
+		})
+	}
+
+	// ── 8. VPN core status ───────────────────────────────────────────────────────
 	if s.coreManager.IsRunning() {
 		items = append(items, DiagnosticItem{
-			Name:    "VPN ядро (sing-box)",
+			Name:    i18n.T(i18n.DiagCoreName),
 			Status:  DiagOK,
-			Message: "Запущено и работает",
+			Message: i18n.T(i18n.DiagCoreRunning),
 		})
 	} else {
 		items = append(items, DiagnosticItem{
-			Name:    "VPN ядро (sing-box)",
+			Name:    i18n.T(i18n.DiagCoreName),
 			Status:  DiagWarning,
-			Message: "VPN не подключён",
+			Message: i18n.T(i18n.DiagCoreStopped),
 		})
 	}
-
 
 	result, err := json.Marshal(items)
 	if err != nil {

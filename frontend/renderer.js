@@ -38,6 +38,7 @@ let activeServerLink = null;
 let currentLanguage = 'RU';
 let isRestarting = false;
 let appState = 'off';
+let tunStatusInterval = null;
 
 // Сессионный счётчик трафика (привязаны к window для совместимости с wails-bridge.js)
 window.sessionBytesDown = 0;
@@ -275,6 +276,12 @@ function applyLanguage() {
   const updateModalConfirmEl = document.getElementById('updateModalConfirm');
   if (updateModalConfirmEl) updateModalConfirmEl.textContent = t.updateModalConfirm;
 
+  const tunStatusTitle = document.getElementById('tunStatusTitle');
+  if (tunStatusTitle) tunStatusTitle.textContent = t.tunStatusTitle;
+  const restoreTunBtnText = document.getElementById('restoreTunBtnText');
+  if (restoreTunBtnText) restoreTunBtnText.textContent = t.tunStatusRestoreBtn;
+  checkAndUpdateTunStatus();
+
   renderSubTabs(subTabsContainer, translations, currentLanguage, updateCards, (title, def) => showPrompt('modalOverlay', 'modalTitle', 'modalInput', 'modalCancel', 'modalConfirm', title, def), (title) => showConfirm('modalOverlay', 'modalTitle', 'modalInput', 'modalCancel', 'modalConfirm', title), loadSubscriptions);
   updateCards();
 }
@@ -366,6 +373,11 @@ function updateAppInterface(state) {
       const s = String(elapsed % 60).padStart(2, '0');
       if (timerText) timerText.textContent = `${h}:${m}:${s}`;
     }, 1000);
+
+    // Start periodic TUN check if TUN mode is enabled
+    clearInterval(tunStatusInterval);
+    checkAndUpdateTunStatus();
+    tunStatusInterval = setInterval(checkAndUpdateTunStatus, 3000);
   } else if (state === 'connecting') {
     powerBtn.classList.add('on');
     powerBtn.classList.remove('pulse-animation');
@@ -375,6 +387,11 @@ function updateAppInterface(state) {
     currentIp.textContent = t.ipDetermining;
     restartBtn.style.display = 'none';
     disconnectBtn.style.display = 'flex';
+
+    clearInterval(tunStatusInterval);
+    tunStatusInterval = null;
+    const tunStatusContainer = document.getElementById('tunStatusContainer');
+    if (tunStatusContainer) tunStatusContainer.style.display = 'none';
   } else {
     powerBtn.classList.remove('on', 'pulse-animation');
     statusDot.className = 'status-dot';
@@ -387,7 +404,53 @@ function updateAppInterface(state) {
     sessionTimerInterval = null;
     if (timerBadge) timerBadge.style.display = 'none';
     if (timerText) timerText.textContent = '00:00:00';
+
+    clearInterval(tunStatusInterval);
+    tunStatusInterval = null;
+    const tunStatusContainer = document.getElementById('tunStatusContainer');
+    if (tunStatusContainer) tunStatusContainer.style.display = 'none';
   }
+}
+
+async function checkAndUpdateTunStatus() {
+  const isTunChecked = document.getElementById('tunModeCheckbox').checked;
+  const tunStatusContainer = document.getElementById('tunStatusContainer');
+  if (!tunStatusContainer) return;
+  
+  if (appState === 'on' && isTunChecked) {
+    tunStatusContainer.style.display = 'flex';
+    try {
+      const isActive = await window.api.checkTunStatus();
+      const t = translations[currentLanguage];
+      const statusTextEl = document.getElementById('tunStatusText');
+      const statusIconEl = document.getElementById('tunStatusIcon');
+      
+      if (statusTextEl && statusIconEl) {
+        if (isActive) {
+          statusTextEl.textContent = t.tunStatusActive;
+          statusTextEl.style.color = 'var(--success)';
+          statusIconEl.style.background = 'rgba(74, 222, 128, 0.1)';
+        } else {
+          statusTextEl.textContent = t.tunStatusError;
+          statusTextEl.style.color = 'var(--danger)';
+          statusIconEl.style.background = 'rgba(239, 68, 68, 0.1)';
+        }
+      }
+    } catch (e) {
+      console.error('Failed to check TUN status:', e);
+    }
+  } else {
+    tunStatusContainer.style.display = 'none';
+  }
+}
+
+const restoreTunBtn = document.getElementById('restoreTunBtn');
+if (restoreTunBtn) {
+  restoreTunBtn.onclick = () => {
+    if (restartBtn && restartBtn.style.display !== 'none') {
+      restartBtn.click();
+    }
+  };
 }
 
 // Логгер
@@ -415,8 +478,12 @@ function stripAnsi(str) {
 
 // Prevent XSS: escape HTML special chars before injecting into innerHTML.
 // Log messages contain domain names and server addresses from the network.
+//
+// Non-string input is coerced rather than allowed to throw: callers pass values
+// parsed out of proxy links and stored history, where a field can legitimately
+// be undefined, and a TypeError here would take out the whole render.
 function escapeHtml(str) {
-  return str
+  return String(str ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -779,6 +846,19 @@ async function selectAndConnectServer(link) {
   }
 }
 
+// Статичная разметка иконок. Это константы без интерполяции, поэтому их можно
+// безопасно присваивать через innerHTML, в отличие от данных из подписок.
+const PLAY_ICON_SVG = `
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <polygon points="6 3 20 12 6 21 6 3" fill="currentColor"/>
+  </svg>`;
+
+const YOUTUBE_ICON_SVG = `
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M21.58 7.18a3.001 3.001 0 0 0-2.12-2.12C17.59 4.5 12 4.5 12 4.5s-5.59 0-7.46.56A3.001 3.001 0 0 0 2.42 7.18 31.248 31.248 0 0 0 1.8 12c0 1.6.2 3.22.62 4.82a3.001 3.001 0 0 0 2.12 2.12c1.87.56 7.46.56 7.46.56s5.59 0 7.46-.56a3.001 3.001 0 0 0 2.12-2.12c.42-1.6.62-3.22.62-4.82a31.248 31.248 0 0 0-.62-4.82z" fill="#FF0000"/>
+    <polygon points="10 9 10 15 15 12" fill="#FFFFFF"/>
+  </svg>`;
+
 // Рендер вкладки История
 function renderHistoryTab() {
   const history = loadHistory();
@@ -807,10 +887,25 @@ function renderHistoryTab() {
   document.getElementById('historyStatDown').textContent = formatBytes(totalDown);
   document.getElementById('historyStatUp').textContent = formatBytes(totalUp);
 
-  // Карточки
+  // Карточки.
+  //
+  // БЕЗОПАСНОСТЬ: имя сервера, протокол и адрес приходят из ссылки подписки
+  // (fragment после #), то есть полностью подконтрольны тому, кто эту подписку
+  // раздаёт. Карточки собираются через DOM API с textContent, а не шаблонной
+  // строкой в innerHTML: раньше имя вставлялось сырым и в тело, и в атрибут
+  // title, где кавычка в имени позволяла дописать произвольные атрибуты.
   const protocolEmoji = { vless: '🟢', vmess: '🟡', trojan: '🔷', ss: '💜', tuic: '🟤', hysteria2: '🔵', hy2: '🔵' };
-  list.innerHTML = history.map(entry => {
-    const emoji = protocolEmoji[entry.protocol?.toLowerCase()] || '🌐';
+  // Ключ ищем через hasOwnProperty: он тоже из ссылки, и protocolEmoji['constructor']
+  // иначе вернул бы функцию из прототипа Object вместо эмодзи.
+  const emojiFor = (protocol) => {
+    const key = (protocol || '').toLowerCase();
+    return Object.prototype.hasOwnProperty.call(protocolEmoji, key) ? protocolEmoji[key] : '🌐';
+  };
+
+  list.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+
+  history.forEach(entry => {
     const date = new Date(entry.connectedAt);
     const dateStr = date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
     const timeStr = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
@@ -818,45 +913,84 @@ function renderHistoryTab() {
     const down = formatBytes(entry.bytesDown || 0);
     const up = formatBytes(entry.bytesUp || 0);
     const proto = (entry.protocol || '?').toUpperCase();
-    
+    const serverName = entry.server || '';
+
     // Пасхалка: YouTube иконка для серверов с youtube/yt/goog/dpi или случайно ~10% записей
-    const isStableEgg = entry.server?.toLowerCase().includes('youtube') || 
-                        entry.server?.toLowerCase().includes('yt') || 
-                        entry.server?.toLowerCase().includes('goog') || 
+    const isStableEgg = entry.server?.toLowerCase().includes('youtube') ||
+                        entry.server?.toLowerCase().includes('yt') ||
+                        entry.server?.toLowerCase().includes('goog') ||
                         entry.server?.toLowerCase().includes('dpi') ||
                         (entry.id && entry.id.charCodeAt(0) % 10 === 0);
-    const eggClass = isStableEgg ? ' youtube-easter-egg' : '';
 
-    return `
-      <div class="history-card">
-        <div class="history-card-icon${eggClass}" data-id="${entry.id}" title="Подключиться к этому серверу">
-          <span class="history-icon-emoji">${emoji}</span>
-          <span class="history-icon-play generic">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <polygon points="6 3 20 12 6 21 6 3" fill="currentColor"/>
-            </svg>
-          </span>
-          <span class="history-icon-play youtube">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M21.58 7.18a3.001 3.001 0 0 0-2.12-2.12C17.59 4.5 12 4.5 12 4.5s-5.59 0-7.46.56A3.001 3.001 0 0 0 2.42 7.18 31.248 31.248 0 0 0 1.8 12c0 1.6.2 3.22.62 4.82a3.001 3.001 0 0 0 2.12 2.12c1.87.56 7.46.56 7.46.56s5.59 0 7.46-.56a3.001 3.001 0 0 0 2.12-2.12c.42-1.6.62-3.22.62-4.82a31.248 31.248 0 0 0-.62-4.82z" fill="#FF0000"/>
-              <polygon points="10 9 10 15 15 12" fill="#FFFFFF"/>
-            </svg>
-          </span>
-        </div>
-        <div class="history-card-body">
-          <div class="history-card-server" title="${entry.server}">${entry.server}</div>
-          <div class="history-card-meta">
-            <span class="history-meta-item">📡 ${proto}</span>
-            <span class="history-meta-item">⏱ ${dur}</span>
-            <span class="history-meta-item">📅 ${dateStr} ${timeStr}</span>
-          </div>
-        </div>
-        <div class="history-card-traffic">
-          <span class="history-traffic-down">↓ ${down}</span>
-          <span class="history-traffic-up">↑ ${up}</span>
-        </div>
-      </div>`;
-  }).join('');
+    const card = document.createElement('div');
+    card.className = 'history-card';
+
+    // Иконка запуска
+    const icon = document.createElement('div');
+    icon.className = isStableEgg ? 'history-card-icon youtube-easter-egg' : 'history-card-icon';
+    icon.dataset.id = entry.id;
+    icon.title = 'Подключиться к этому серверу';
+
+    const emojiSpan = document.createElement('span');
+    emojiSpan.className = 'history-icon-emoji';
+    emojiSpan.textContent = emojiFor(entry.protocol);
+
+    const playGeneric = document.createElement('span');
+    playGeneric.className = 'history-icon-play generic';
+    playGeneric.innerHTML = PLAY_ICON_SVG;
+
+    const playYoutube = document.createElement('span');
+    playYoutube.className = 'history-icon-play youtube';
+    playYoutube.innerHTML = YOUTUBE_ICON_SVG;
+
+    icon.appendChild(emojiSpan);
+    icon.appendChild(playGeneric);
+    icon.appendChild(playYoutube);
+
+    // Тело карточки
+    const body = document.createElement('div');
+    body.className = 'history-card-body';
+
+    const server = document.createElement('div');
+    server.className = 'history-card-server';
+    // Оба присваивания — свойства элемента, а не разметка: браузер не парсит их как HTML.
+    server.title = serverName;
+    server.textContent = serverName;
+
+    const meta = document.createElement('div');
+    meta.className = 'history-card-meta';
+    [`📡 ${proto}`, `⏱ ${dur}`, `📅 ${dateStr} ${timeStr}`].forEach(text => {
+      const item = document.createElement('span');
+      item.className = 'history-meta-item';
+      item.textContent = text;
+      meta.appendChild(item);
+    });
+
+    body.appendChild(server);
+    body.appendChild(meta);
+
+    // Трафик
+    const traffic = document.createElement('div');
+    traffic.className = 'history-card-traffic';
+
+    const downSpan = document.createElement('span');
+    downSpan.className = 'history-traffic-down';
+    downSpan.textContent = `↓ ${down}`;
+
+    const upSpan = document.createElement('span');
+    upSpan.className = 'history-traffic-up';
+    upSpan.textContent = `↑ ${up}`;
+
+    traffic.appendChild(downSpan);
+    traffic.appendChild(upSpan);
+
+    card.appendChild(icon);
+    card.appendChild(body);
+    card.appendChild(traffic);
+    fragment.appendChild(card);
+  });
+
+  list.appendChild(fragment);
 
   // Обработчик клика по иконке запуска (через делегирование)
   list.onclick = (e) => {
@@ -1042,7 +1176,13 @@ async function runDnsLeakTest() {
     statusIcon.textContent = '❌';
     statusTxt.textContent  = 'Ошибка проверки';
     ipEl.textContent = '—';
-    dnsList.innerHTML = `<div class="dns-leak-dns-entry" style="color:var(--danger)">${err.message}</div>`;
+    // Сообщение об ошибке может содержать данные ответа DoH — рендерим как текст.
+    dnsList.innerHTML = '';
+    const errDiv = document.createElement('div');
+    errDiv.className = 'dns-leak-dns-entry';
+    errDiv.style.color = 'var(--danger)';
+    errDiv.textContent = err.message || String(err);
+    dnsList.appendChild(errDiv);
   }
 }
 
@@ -1221,7 +1361,7 @@ function showUpdateModal(update) {
 
       try {
         // Trigger download process in background Go service
-        await window.api.downloadAndInstallUpdate(update.downloadUrl);
+        await window.api.downloadAndInstallUpdate(update.downloadUrl, update.signatureHex || "");
       } catch (err) {
         onError(err.message || err);
       }
@@ -1389,7 +1529,9 @@ function renderCustomRules() {
     else if (rule.type === 'domain_keyword') typeName = 'Keyword';
     else if (rule.type === 'ip_cidr') typeName = 'IP/CIDR';
     
-    infoSpan.innerHTML = `${actionBadge} <span style="color:var(--text-dim); font-size:11px;">[${typeName}]</span> <strong>${escapeHtml(rule.value)}</strong>`;
+    // typeName падает обратно на сырой rule.type для неизвестных значений, а
+    // settings.json правится вручную — экранируем и его, не только value.
+    infoSpan.innerHTML = `${actionBadge} <span style="color:var(--text-dim); font-size:11px;">[${escapeHtml(typeName)}]</span> <strong>${escapeHtml(rule.value)}</strong>`;
     
     const delBtn = document.createElement('button');
     delBtn.className = 'btn-glass';
@@ -1576,6 +1718,13 @@ if (window.api.onWatchdogReconnected) {
     statusText.textContent = currentLanguage === 'RU' ? 'Подключено' : 'Connected';
     statusText.style.color = 'var(--success)';
     statusDot.className = 'status-dot on';
+  });
+}
+if (window.api.onWatchdogWaiting) {
+  window.api.onWatchdogWaiting(() => {
+    statusText.textContent = currentLanguage === 'RU' ? 'Нет сети — ожидание...' : 'No network — waiting...';
+    statusText.style.color = 'var(--accent-color)';
+    statusDot.className = 'status-dot connecting';
   });
 }
 if (window.api.onWatchdogFailed) {

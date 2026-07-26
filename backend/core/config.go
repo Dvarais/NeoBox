@@ -1,11 +1,15 @@
 package core
 
 import (
+	"NeoBox/backend/i18n"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -13,6 +17,29 @@ import (
 	"strings"
 	"time"
 )
+
+// realisticUserAgents is a pool of browser-like User-Agent strings. Sending a
+// recognisable client name ("v2rayN" and friends) identifies the traffic as a
+// VPN tool to the subscription host and to anyone observing the request.
+var realisticUserAgents = []string{
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 OPR/112.0.0.0",
+}
+
+// getRandomUserAgent returns a random browser User-Agent string from the pool.
+func getRandomUserAgent() string {
+	idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(realisticUserAgents))))
+	if err != nil {
+		// Fallback to first entry if crypto/rand fails (extremely unlikely)
+		return realisticUserAgents[0]
+	}
+	return realisticUserAgents[idx.Int64()]
+}
 
 // Settings represents the NeoBox application settings.
 type Settings struct {
@@ -29,7 +56,7 @@ type Settings struct {
 	// DnsLeakProtection: when true (default), all DNS is routed through VPN to prevent leaks.
 	// When false, the local DNS resolver is allowed as fallback.
 	// Pointer so we can distinguish absent JSON key (nil → default true) from explicit false.
-	DnsLeakProtection  *bool `json:"dnsLeak"`
+	DnsLeakProtection *bool `json:"dnsLeak"`
 	// Ipv6LeakProtection: when true (default), IPv6 traffic is rejected to prevent leaks.
 	// When false, IPv6 traffic is allowed to bypass the tunnel.
 	// Pointer so we can distinguish absent JSON key (nil → default true) from explicit false.
@@ -55,8 +82,15 @@ func boolDefault(b *bool, def bool) bool {
 }
 
 // ParseProxyLink parses protocol-specific proxy URLs into a generic outbound map.
+// Links longer than maxLinkLength are rejected before any parsing, so a
+// malformed or hostile entry cannot turn into unbounded work.
 func ParseProxyLink(link string) (map[string]interface{}, error) {
 	sanitized := strings.TrimSpace(link)
+
+	if len(sanitized) > maxLinkLength {
+		return nil, errors.New(i18n.T(i18n.ErrLinkTooLong, maxLinkLength))
+	}
+
 	sanitized = strings.ReplaceAll(sanitized, " ", "%20")
 	sanitized = strings.ReplaceAll(sanitized, "\t", "%09")
 	u, err := url.Parse(sanitized)
@@ -115,7 +149,7 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 		if security == "tls" || security == "reality" {
 			tlsMap := make(map[string]interface{})
 			tlsMap["enabled"] = true
-			
+
 			serverName := params.Get("sni")
 			if serverName == "" {
 				serverName = params.Get("peer")
@@ -366,8 +400,8 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 				serverPart := parts[1]
 
 				authParts := strings.SplitN(auth, ":", 2)
-				// FIX #11: Guard against missing ":" — SplitN returns a 1-element slice if
-				// the separator is absent, making authParts[1] an index-out-of-range panic.
+				// SplitN returns a 1-element slice when the separator is absent, so
+				// indexing [1] without this check panics on a malformed link.
 				if len(authParts) < 2 {
 					return nil, fmt.Errorf("invalid shadowsocks legacy auth format: missing ':'")
 				}
@@ -375,7 +409,7 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 				password := authParts[1]
 
 				serverParts := strings.SplitN(serverPart, ":", 2)
-				// FIX #11b: Guard against missing ":" in server part — same class of bug as authParts.
+				// Same hazard as the auth part above: no ":" means no index 1.
 				if len(serverParts) < 2 {
 					return nil, fmt.Errorf("invalid shadowsocks legacy server format: missing port in %q", serverPart)
 				}
@@ -586,11 +620,13 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 
 // GenerateConfig generates a complete sing-box configuration map.
 //
-// FIX #16: The function no longer mutates the caller's outbound map. It creates a shallow
-// copy so that domain_resolver injection and server IP resolution don't side-effect the
-// original map (important for PingServer which also calls ParseProxyLink on the same link).
-// FIX #3: All type assertions on outbound fields are now safe (using the two-value form)
-// and return descriptive errors instead of panicking.
+// The caller's outbound map is never modified: domain_resolver injection and
+// server IP resolution happen on a shallow copy, because the same map is
+// reused elsewhere (PingServer parses the same link).
+//
+// Type assertions on outbound fields use the two-value form throughout and
+// report a descriptive error rather than panicking: the map is built from a
+// user-supplied link and its shape cannot be assumed.
 //
 // clashSecret is injected into the Clash API config so only NeoBox itself can
 // communicate with the local API endpoint on port 9097. Pass an empty string to
@@ -598,13 +634,13 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 func GenerateConfig(outbound map[string]interface{}, settings Settings, useSystemProxy bool, cacheDBPath string, clashSecret string) (map[string]interface{}, error) {
 	tunMode := settings.TunMode
 
-	// FIX #3 + #16: Extract and validate required fields before any work.
+	// Validate the required fields before doing any work.
 	outboundTag, ok := outbound["tag"].(string)
 	if !ok || outboundTag == "" {
 		return nil, fmt.Errorf("outbound map is missing required string field 'tag'")
 	}
 
-	// FIX #16: Work on a shallow copy so we don't mutate the caller's map.
+	// Work on a shallow copy so the caller's map is left untouched.
 	workOutbound := make(map[string]interface{}, len(outbound))
 	for k, v := range outbound {
 		workOutbound[k] = v
@@ -854,8 +890,8 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			{
 				"type":             "mixed",
 				"tag":              "mixed-in",
-				"listen":           "127.0.0.1",
-				"listen_port":      20809,
+				"listen":           ProxyListenHost,
+				"listen_port":      ProxyListenPort,
 				"set_system_proxy": useSystemProxy,
 			},
 		},
@@ -884,7 +920,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 				"store_fakeip": true,
 			},
 			"clash_api": map[string]interface{}{
-				"external_controller": "127.0.0.1:9097",
+				"external_controller": ClashAPIAddr,
 				// Security: always require a per-session secret so other processes on
 				// the machine cannot control the VPN core via the local Clash API.
 				"secret": clashSecret,
@@ -935,8 +971,15 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 // Security: HTTP (non-TLS) subscription URLs are rejected to prevent MITM attacks
 // where an attacker on the same network could substitute malicious proxy servers.
 // Use HTTPS URLs for all subscriptions.
+//
+// URLs longer than maxLinkLength are rejected before the request is made.
 func FetchSubscription(subURL string) ([]string, error) {
 	trimmedURL := strings.TrimSpace(subURL)
+
+	if len(trimmedURL) > maxLinkLength {
+		return nil, errors.New(i18n.T(i18n.ErrSubURLTooLong, maxLinkLength))
+	}
+
 	trimmedURL = strings.ReplaceAll(trimmedURL, " ", "%20")
 	trimmedURL = strings.ReplaceAll(trimmedURL, "\t", "%09")
 	lowerURL := strings.ToLower(trimmedURL)
@@ -944,12 +987,9 @@ func FetchSubscription(subURL string) ([]string, error) {
 	// Security: block plain HTTP subscription URLs — only HTTPS is allowed.
 	// Direct proxy links (vless://, vmess://, etc.) bypass this check.
 	if strings.HasPrefix(lowerURL, "http://") {
-		return nil, fmt.Errorf("небезопасный URL подписки: используйте HTTPS вместо HTTP для защиты от перехвата")
+		return nil, errors.New(i18n.T(i18n.ErrSubURLNotSecure))
 	}
-	if strings.HasPrefix(lowerURL, "vless://") || strings.HasPrefix(lowerURL, "vmess://") ||
-		strings.HasPrefix(lowerURL, "ss://") || strings.HasPrefix(lowerURL, "trojan://") ||
-		strings.HasPrefix(lowerURL, "tuic://") || strings.HasPrefix(lowerURL, "hysteria2://") ||
-		strings.HasPrefix(lowerURL, "hy2://") || strings.HasPrefix(lowerURL, "hysteria://") {
+	if IsProxyLink(trimmedURL) {
 		return []string{trimmedURL}, nil
 	}
 
@@ -958,11 +998,11 @@ func FetchSubscription(subURL string) ([]string, error) {
 	var fetchErr error
 
 	// 1. Try local proxy first (highly likely to succeed if VPN is connected)
-	proxyURL, proxyErr := url.Parse("http://127.0.0.1:20809")
+	proxyURL, proxyErr := url.Parse("http://" + ProxyListenAddr)
 	if proxyErr == nil {
 		req, reqErr := http.NewRequest("GET", trimmedURL, nil)
 		if reqErr == nil {
-			req.Header.Set("User-Agent", "v2rayN")
+			req.Header.Set("User-Agent", getRandomUserAgent())
 			proxyClient := &http.Client{
 				Timeout: 10 * time.Second,
 				Transport: &http.Transport{
@@ -971,7 +1011,6 @@ func FetchSubscription(subURL string) ([]string, error) {
 			}
 			resp, err := proxyClient.Do(req)
 			if err == nil {
-				// FIX #10: Handle ReadAll error explicitly instead of silently ignoring it.
 				limitReader := io.LimitReader(resp.Body, 20*1024*1024)
 				tempBytes, readErr := io.ReadAll(limitReader)
 				resp.Body.Close()
@@ -997,13 +1036,12 @@ func FetchSubscription(subURL string) ([]string, error) {
 	if rawData == "" {
 		req, reqErr := http.NewRequest("GET", trimmedURL, nil)
 		if reqErr == nil {
-			req.Header.Set("User-Agent", "v2rayN")
+			req.Header.Set("User-Agent", getRandomUserAgent())
 			directClient := &http.Client{
 				Timeout: 15 * time.Second,
 			}
 			resp, err := directClient.Do(req)
 			if err == nil {
-				// FIX #10: Handle ReadAll error explicitly.
 				limitReader := io.LimitReader(resp.Body, 20*1024*1024)
 				tempBytes, readErr := io.ReadAll(limitReader)
 				resp.Body.Close()
@@ -1243,7 +1281,7 @@ func FetchSubscription(subURL string) ([]string, error) {
 		if len(padded)%4 != 0 {
 			padded += strings.Repeat("=", 4-(len(padded)%4))
 		}
-		
+
 		decodedBytes, err := base64.StdEncoding.DecodeString(padded)
 		if err == nil {
 			rawData = string(decodedBytes)
@@ -1262,23 +1300,19 @@ func FetchSubscription(subURL string) ([]string, error) {
 		if trimmed == "" {
 			continue
 		}
-		
+
 		// If it is already a plain text link
-		trimmedLower := strings.ToLower(trimmed)
-		if strings.HasPrefix(trimmedLower, "vless://") || strings.HasPrefix(trimmedLower, "vmess://") ||
-		strings.HasPrefix(trimmedLower, "ss://") || strings.HasPrefix(trimmedLower, "trojan://") ||
-		strings.HasPrefix(trimmedLower, "tuic://") || strings.HasPrefix(trimmedLower, "hysteria2://") ||
-		strings.HasPrefix(trimmedLower, "hy2://") || strings.HasPrefix(trimmedLower, "hysteria://") {
+		if IsProxyLink(trimmed) {
 			parsedLinks = append(parsedLinks, trimmed)
 			continue
 		}
-		
+
 		// Otherwise, try to decode this individual line from base64 (MIME/line-by-line format)
 		padded := trimmed
 		if len(padded)%4 != 0 {
 			padded += strings.Repeat("=", 4-(len(padded)%4))
 		}
-		
+
 		// Try standard base64 decoding
 		decodedBytes, err := base64.StdEncoding.DecodeString(padded)
 		if err == nil {
@@ -1288,7 +1322,7 @@ func FetchSubscription(subURL string) ([]string, error) {
 				continue
 			}
 		}
-		
+
 		// Try URL-safe base64 decoding
 		decodedBytes, err = base64.URLEncoding.DecodeString(padded)
 		if err == nil {

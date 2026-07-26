@@ -3,6 +3,7 @@ import {
   BringToFront,
   CheckAdmin, 
   CheckUpdates, 
+  CheckTunStatus,
   DownloadAndInstallUpdate,
   FetchSubscription, 
   GetSettings, 
@@ -31,6 +32,7 @@ window.sessionBytesUp = 0;
 window.api = {
   // Commands
   bringToFront: () => BringToFront(),
+  checkTunStatus: () => CheckTunStatus(),
   startXray: async (link, useSystemProxy) => {
     const settings = await window.api.getSettings();
     const res = await StartXray(link, JSON.stringify(settings), useSystemProxy);
@@ -130,7 +132,7 @@ window.api = {
 
   // Auto update
   checkUpdates: () => CheckUpdates(),
-  downloadAndInstallUpdate: (downloadURL) => DownloadAndInstallUpdate(downloadURL),
+  downloadAndInstallUpdate: (downloadURL, signatureHex) => DownloadAndInstallUpdate(downloadURL, signatureHex),
   openUpdateLink: (url) => {
     window.open(url, '_blank');
   },
@@ -146,6 +148,9 @@ window.api = {
   onWatchdogReconnecting: (cb) => EventsOn('watchdog-reconnecting', cb),
   onWatchdogReconnected: (cb) => EventsOn('watchdog-reconnected', cb),
   onWatchdogFailed: (cb) => EventsOn('watchdog-failed', cb),
+  // Emitted while the VPN server is unreachable: the watchdog deliberately holds
+  // off restarting the core until connectivity comes back.
+  onWatchdogWaiting: (cb) => EventsOn('watchdog-waiting', cb),
 
   // Admin rights
   checkAdmin: () => CheckAdmin(),

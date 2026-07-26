@@ -6,7 +6,26 @@ NeoBox_Setup_v*.exe
 
 # Wails and Frontend Build Output
 build/bin/
-frontend/dist/
+
+# frontend/dist holds the built frontend, which main.go embeds with
+# //go:embed all:frontend/dist. Go's embed fails the build outright when the
+# pattern matches nothing, so a clean clone could not even run `go build ./...`
+# or `go test ./...` until npm had produced the directory. The generated files
+# stay ignored; the placeholder is tracked so the pattern always matches.
+#
+# The placeholder also exists at frontend/public/.gitkeep, which is what keeps
+# it alive: vite empties dist/ on every build and then copies public/ into it,
+# so the tracked copy is restored instead of disappearing from the working tree.
+#
+# Note the trailing /* — with a plain `frontend/dist/` git never descends into
+# the directory and the negation below would have no effect.
+frontend/dist/*
+!frontend/dist/.gitkeep
+
+# Runtime artifact: InitTray writes icon.ico next to the running executable,
+# which lands here when the binary is run from the repository root. The icon
+# that ships with the app is build/windows/icon.ico and stays tracked.
+/icon.ico
 
 # Dependency Directories
 node_modules/

@@ -77,10 +77,9 @@ func (m *CoreManager) Stop() error {
 
 // stopRaw performs context cancellation and resource cleanup.
 //
-// FIX #6: Close() errors are logged but never returned. The previous code returned
-// the Close() error, which contradicted the comment "failed close should not block a
-// restart" and caused Stop() callers to receive a spurious error even though cleanup
-// completed successfully. All callers already ignored the return value anyway.
+// A Close() failure is logged but never returned: cleanup has still happened,
+// and surfacing the error would make callers treat a completed teardown as a
+// failure and refuse to restart.
 func (m *CoreManager) stopRaw() error {
 	if m.cancel != nil {
 		m.cancel()

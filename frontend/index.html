@@ -3,11 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- SECURITY FIX #8: Removed unpkg.com external script dependency.
-       jsQR is now served locally with SRI integrity check.
-       Restored 'unsafe-inline' to style-src as it is required for inline styles and layout control.
-       This prevents XSS via compromised CDN. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-vEDIoVGWI2sjFNsIVvcsoLSZgM1UE7jIUqc0n1/uCFk='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.ipify.org https://raw.githubusercontent.com https://cloudflare-dns.com;">
+  <!-- jsQR is vendored locally instead of loaded from unpkg.com, so a compromised
+       CDN cannot inject script. It lives in public/lib/ so that vite copies it into
+       dist/ verbatim; its SRI hash is on the <script> tag at the bottom of this file.
+
+       script-src has no hash source: CSP hashes authorise INLINE scripts only, and
+       there are none here — every script is an external file covered by 'self'.
+       (A file's SRI hash sitting in script-src authorises nothing and only reads as
+       though it does.)
+
+       style-src keeps 'unsafe-inline': the UI sets element.style throughout, so
+       removing it requires refactoring those call sites first. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.ipify.org https://raw.githubusercontent.com https://cloudflare-dns.com;">
   <title>NeoBox Glass</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -596,7 +603,10 @@
     </div>
   </div>
 
-  <!-- SECURITY FIX #8: jsQR loaded locally with SRI integrity check instead of unpkg.com CDN -->
+  <!-- jsQR: vendored UMD build, served from public/lib/ so vite ships it in dist/.
+       Must stay a classic (non-module) script — it defines the global `jsQR` that
+       renderer.js calls. If this file is ever replaced, recompute the SRI hash:
+         openssl dgst -sha256 -binary public/lib/jsQR.js | openssl base64 -A -->
   <script src="lib/jsQR.js" integrity="sha256-vEDIoVGWI2sjFNsIVvcsoLSZgM1UE7jIUqc0n1/uCFk=" crossorigin="anonymous"></script>
   <script type="module" src="wails-bridge.js"></script>
   <script type="module" src="renderer.js"></script>
