@@ -5,8 +5,9 @@ import {
   CheckUpdates, 
   CheckTunStatus,
   DownloadAndInstallUpdate,
-  FetchSubscription, 
-  GetSettings, 
+  FetchSubscription,
+  GetAppVersion,
+  GetSettings,
   GetSubscriptions, 
   ImportClipboard, 
   NotifyWindowHidden,
@@ -69,6 +70,10 @@ window.api = {
     }
   },
   
+  // Version reported by the Go backend — the single source of truth for the
+  // number shown in the title bar.
+  getAppVersion: () => GetAppVersion(),
+
   // Settings & Subscriptions
   getSettings: async () => {
     try {

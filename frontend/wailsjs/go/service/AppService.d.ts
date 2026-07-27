@@ -15,6 +15,8 @@ export function DownloadAndInstallUpdate(arg1:string,arg2:string):Promise<void>;
 
 export function FetchSubscription(arg1:string):Promise<Array<string>>;
 
+export function GetAppVersion():Promise<string>;
+
 export function GetSettings():Promise<string>;
 
 export function GetSubscriptions():Promise<string>;

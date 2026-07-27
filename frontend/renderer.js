@@ -107,7 +107,7 @@ function updateCards() {
         if (isNewServer && (appState === 'on' || appState === 'connecting')) {
             restartBtn.click();
         }
-    }, serverSearchQuery, favoriteLinks, onToggleFavorite);
+    }, serverSearchQuery, favoriteLinks, onToggleFavorite, translations[currentLanguage]);
 }
 
 async function loadSubscriptions() {
@@ -119,18 +119,32 @@ async function loadSubscriptions() {
     });
 }
 
+// applyLanguage touches a lot of nodes; these guarded helpers keep it readable and
+// tolerate elements that only exist in some states of the UI.
+const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+const setTitle = (id, value) => { const el = document.getElementById(id); if (el) el.title = value; };
+const setPlaceholder = (id, value) => { const el = document.getElementById(id); if (el) el.placeholder = value; };
+
 function applyLanguage() {
   const t = translations[currentLanguage];
-  
+
   document.querySelectorAll('.nav-item').forEach(item => {
     const target = item.getAttribute('data-target');
     if (target === 'view-home') item.title = t.home;
     if (target === 'view-servers') item.title = t.servers;
+    if (target === 'view-history') item.title = t.history;
     if (target === 'view-routes') item.title = t.routes;
     if (target === 'view-settings') item.title = t.settings;
     if (target === 'view-logs') item.title = t.logs;
   });
   document.getElementById('langToggle').textContent = currentLanguage;
+
+  // Window controls and the servers-tab scrollbar widget are icon-only, so their
+  // tooltip is the only text they ever show.
+  setTitle('minimizeBtn', t.minimizeBtnTitle);
+  setTitle('closeBtn', t.closeBtnTitle);
+  setTitle('scrollUpBtn', t.scrollUpTitle);
+  setTitle('scrollDownBtn', t.scrollDownTitle);
 
   updateAppInterface(appState);
   
@@ -177,11 +191,15 @@ function applyLanguage() {
   document.getElementById('subUrl').placeholder = t.subUrlPlaceholder;
   document.getElementById('addSubBtn').textContent = t.addBtn;
   document.getElementById('updateSubBtn').textContent = t.updateCurrentBtn;
+  setTitle('updateSubBtn', t.updateCurrentBtnTitle);
   document.getElementById('importClipboardBtn').textContent = t.importClipboardBtn;
   document.getElementById('myLocationsTitle').textContent = t.myLocations;
   document.getElementById('pingAllBtn').textContent = t.pingAllBtn;
   document.getElementById('sortBtnText').textContent = t.sortBtn;
-  
+  setPlaceholder('serverSearchInput', t.serverSearchPlaceholder);
+  setTitle('bestServerBtn', t.bestServerBtnTitle);
+  setText('bestServerBtnText', t.bestServerBtn);
+
   document.querySelectorAll('.sort-item').forEach(item => {
     const mode = item.dataset.sort;
     item.textContent = t[`sort${mode.charAt(0).toUpperCase() + mode.slice(1)}`];
@@ -258,10 +276,37 @@ function applyLanguage() {
   document.getElementById('settingsStatus').textContent = t.statusDone;
   document.getElementById('logsTitle').textContent = t.logsTitle;
   document.getElementById('clearLogsBtn').textContent = t.logsClearBtn;
+  setText('saveLogsBtnText', t.saveLogsBtn);
+  setTitle('saveLogsBtn', t.saveLogsBtnTitle);
   document.querySelectorAll('.log-tab').forEach(tab => {
     const filter = tab.dataset.filter;
     tab.textContent = t[`log${filter.charAt(0) + filter.slice(1).toLowerCase()}`];
   });
+
+  // History tab. The cards themselves are rebuilt by renderHistoryTab() below,
+  // which picks up the language on its own.
+  setText('historyTitle', t.historyTitle);
+  setText('clearHistoryBtnText', t.historyClearBtn);
+  setText('historyStatSessionsLabel', t.historyStatSessionsLabel);
+  setText('historyStatTimeLabel', t.historyStatTimeLabel);
+  setText('historyStatDownLabel', t.historyStatDownLabel);
+  setText('historyStatUpLabel', t.historyStatUpLabel);
+  setText('historyEmptyText', t.historyEmptyText);
+  renderHistoryTab();
+
+  // Shared prompt/confirm modal — its buttons are reused by every dialog.
+  setText('modalCancel', t.modalCancel);
+  setText('modalConfirm', t.modalConfirm);
+
+  // DNS leak test. Only the static chrome is set here; the verdict line is
+  // written by runDnsLeakTest() when a test actually runs.
+  setText('dnsLeakBtnText', t.dnsLeakBtn);
+  setText('dnsLeakModalTitle', t.dnsLeakModalTitle);
+  setText('dnsLeakModalSubtitle', t.dnsLeakModalSubtitle);
+  setText('dnsLeakLoadingText', t.dnsLeakLoadingText);
+  setText('dnsLeakIpLabel', t.dnsLeakIpLabel);
+  setText('dnsLeakDnsLabel', t.dnsLeakDnsLabel);
+  setText('dnsLeakRetryBtnText', t.dnsLeakRetryBtn);
 
   // Update Modal translations
   const updateModalTitleEl = document.getElementById('updateModalTitle');
@@ -280,6 +325,8 @@ function applyLanguage() {
   if (tunStatusTitle) tunStatusTitle.textContent = t.tunStatusTitle;
   const restoreTunBtnText = document.getElementById('restoreTunBtnText');
   if (restoreTunBtnText) restoreTunBtnText.textContent = t.tunStatusRestoreBtn;
+  // Placeholder until the async probe below reports back.
+  setText('tunStatusText', t.tunStatusChecking);
   checkAndUpdateTunStatus();
 
   renderSubTabs(subTabsContainer, translations, currentLanguage, updateCards, (title, def) => showPrompt('modalOverlay', 'modalTitle', 'modalInput', 'modalCancel', 'modalConfirm', title, def), (title) => showConfirm('modalOverlay', 'modalTitle', 'modalInput', 'modalCancel', 'modalConfirm', title), loadSubscriptions);
@@ -744,13 +791,14 @@ function formatBytes(bytes) {
 
 // Формат длительности сессии в человекоческий вид
 function formatDuration(seconds) {
-  if (seconds < 60) return `${seconds}с`;
+  const t = translations[currentLanguage];
+  if (seconds < 60) return `${seconds}${t.durationSec}`;
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
-  if (m < 60) return `${m}м ${s}с`;
+  if (m < 60) return `${m}${t.durationMin} ${s}${t.durationSec}`;
   const h = Math.floor(m / 60);
   const rm = m % 60;
-  return `${h}ч ${rm}м`;
+  return `${h}${t.durationHour} ${rm}${t.durationMin}`;
 }
 
 // Запись сессии в историю
@@ -861,6 +909,7 @@ const YOUTUBE_ICON_SVG = `
 
 // Рендер вкладки История
 function renderHistoryTab() {
+  const t = translations[currentLanguage];
   const history = loadHistory();
   const list = document.getElementById('historyList');
   const empty = document.getElementById('historyEmpty');
@@ -907,8 +956,8 @@ function renderHistoryTab() {
 
   history.forEach(entry => {
     const date = new Date(entry.connectedAt);
-    const dateStr = date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
-    const timeStr = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    const dateStr = date.toLocaleDateString(t.dateLocale, { day: '2-digit', month: '2-digit' });
+    const timeStr = date.toLocaleTimeString(t.dateLocale, { hour: '2-digit', minute: '2-digit' });
     const dur = formatDuration(entry.durationSec);
     const down = formatBytes(entry.bytesDown || 0);
     const up = formatBytes(entry.bytesUp || 0);
@@ -929,7 +978,7 @@ function renderHistoryTab() {
     const icon = document.createElement('div');
     icon.className = isStableEgg ? 'history-card-icon youtube-easter-egg' : 'history-card-icon';
     icon.dataset.id = entry.id;
-    icon.title = 'Подключиться к этому серверу';
+    icon.title = t.historyConnectTitle;
 
     const emojiSpan = document.createElement('span');
     emojiSpan.className = 'history-icon-emoji';
@@ -1004,7 +1053,7 @@ function renderHistoryTab() {
         if (link) {
           selectAndConnectServer(link);
         } else {
-          showAlert(translations[currentLanguage].alertDialogTitle, "Не удалось найти сервер в текущих подписках", false, translations[currentLanguage]);
+          showAlert(translations[currentLanguage].alertDialogTitle, translations[currentLanguage].historyServerNotFound, false, translations[currentLanguage]);
         }
       }
     }
@@ -1046,6 +1095,7 @@ document.getElementById('dnsLeakCloseBtn').onclick = () => {
 document.getElementById('dnsLeakRetryBtn').onclick = () => runDnsLeakTest();
 
 async function runDnsLeakTest() {
+  const t = translations[currentLanguage];
   const overlay = document.getElementById('dnsLeakModalOverlay');
   const loading = document.getElementById('dnsLeakLoading');
   const result  = document.getElementById('dnsLeakResult');
@@ -1153,7 +1203,7 @@ async function runDnsLeakTest() {
       const div = document.createElement('div');
       div.className = 'dns-leak-dns-entry';
       div.style.color = 'var(--text-dim)';
-      div.textContent = 'Не удалось определить';
+      div.textContent = t.dnsLeakUnknown;
       dnsList.appendChild(div);
     }
 
@@ -1161,12 +1211,12 @@ async function runDnsLeakTest() {
       iconWrap.className = 'dns-leak-icon-wrap leak';
       banner.className   = 'dns-leak-status-banner leak';
       statusIcon.textContent = '⚠️';
-      statusTxt.textContent  = 'Обнаружена утечка DNS';
+      statusTxt.textContent  = t.dnsLeakDetected;
     } else {
       iconWrap.className = 'dns-leak-icon-wrap safe';
       banner.className   = 'dns-leak-status-banner';
       statusIcon.textContent = '✅';
-      statusTxt.textContent  = 'Утечек не обнаружено';
+      statusTxt.textContent  = t.dnsLeakSafe;
     }
   } catch (err) {
     loading.style.display = 'none';
@@ -1174,7 +1224,7 @@ async function runDnsLeakTest() {
     retryBtn.style.display = 'flex';
     banner.className = 'dns-leak-status-banner leak';
     statusIcon.textContent = '❌';
-    statusTxt.textContent  = 'Ошибка проверки';
+    statusTxt.textContent  = t.dnsLeakTestError;
     ipEl.textContent = '—';
     // Сообщение об ошибке может содержать данные ответа DoH — рендерим как текст.
     dnsList.innerHTML = '';
@@ -1371,6 +1421,14 @@ function showUpdateModal(update) {
 
 // Инициализация
 async function init() {
+  // The title bar reads the version from the backend rather than carrying its own
+  // copy, so it always matches the release the update check compares against.
+  // Runs before the update check, which can sit on an open modal for a while.
+  try {
+    const version = await window.api.getAppVersion();
+    if (version) setText('appVersion', `v${version}`);
+  } catch (e) { console.error('Version lookup failed:', e); }
+
   // Проверка обновлений
   try {
     const update = await window.api.checkUpdates();
@@ -1604,14 +1662,17 @@ if (bestServerBtn) {
     });
     updateCards();
     
+    // Only the label span is swapped — writing to the button itself would drop
+    // the lightning icon that sits next to it.
+    const bestServerBtnText = document.getElementById('bestServerBtnText');
     bestServerBtn.disabled = true;
-    const originalText = bestServerBtn.textContent;
-    bestServerBtn.textContent = currentLanguage === 'RU' ? 'Поиск...' : 'Finding...';
-    
+    const originalText = bestServerBtnText.textContent;
+    bestServerBtnText.textContent = currentLanguage === 'RU' ? 'Поиск...' : 'Finding...';
+
     setTimeout(async () => {
       bestServerBtn.disabled = false;
-      bestServerBtn.textContent = originalText;
-      
+      bestServerBtnText.textContent = originalText;
+
       let bestLink = null;
       let minPing = Infinity;
       uniqueLinks.forEach(l => {

@@ -33,6 +33,13 @@ const currentVersion = "1.7.5"
 // unbounded data onto the user's disk.
 const maxUpdateSize = 256 * 1024 * 1024
 
+// GetAppVersion exposes the compiled-in version to the UI. The title bar reads
+// it from here instead of carrying its own copy, so the number the user sees can
+// never drift from the one CheckUpdates compares against the GitHub release.
+func (s *AppService) GetAppVersion() string {
+	return currentVersion
+}
+
 // CheckUpdates queries GitHub API to check if a new version is available.
 func (s *AppService) CheckUpdates() map[string]interface{} {
 	response := map[string]interface{}{"available": false}

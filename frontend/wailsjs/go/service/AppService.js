@@ -26,6 +26,10 @@ export function FetchSubscription(arg1) {
   return window['go']['service']['AppService']['FetchSubscription'](arg1);
 }
 
+export function GetAppVersion() {
+  return window['go']['service']['AppService']['GetAppVersion']();
+}
+
 export function GetSettings() {
   return window['go']['service']['AppService']['GetSettings']();
 }

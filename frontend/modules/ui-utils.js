@@ -142,7 +142,7 @@ export function showAlert(title, message, isError = false, t = {}) {
     const isLongError = isError && (message.length > 80 || message.includes('\n') || message.includes('failed') || message.includes('uTLS'));
     
     if (isLongError) {
-      msgEl.innerText = isError ? (t.errorDialogTitle || 'Ошибка запуска:') : message;
+      msgEl.innerText = isError ? (t.errorDialogTitle || 'Error') : message;
       termText.innerText = message;
       termContainer.style.display = 'block';
     } else {
@@ -154,12 +154,12 @@ export function showAlert(title, message, isError = false, t = {}) {
     // Copy to clipboard setup
     if (isError) {
       copyBtn.style.display = 'flex';
-      copyBtnText.innerText = t.errorDialogCopy || 'Копировать';
+      copyBtnText.innerText = t.errorDialogCopy || 'Copy';
       copyBtn.onclick = () => {
         navigator.clipboard.writeText(message).then(() => {
-          copyBtnText.innerText = t.errorDialogCopied || 'Скопировано!';
+          copyBtnText.innerText = t.errorDialogCopied || 'Copied!';
           setTimeout(() => {
-            copyBtnText.innerText = t.errorDialogCopy || 'Копировать';
+            copyBtnText.innerText = t.errorDialogCopy || 'Copy';
           }, 1500);
         });
       };
@@ -168,7 +168,7 @@ export function showAlert(title, message, isError = false, t = {}) {
       copyBtn.onclick = null;
     }
 
-    confirmBtn.innerText = t.errorDialogClose || 'ОК';
+    confirmBtn.innerText = t.errorDialogClose || 'OK';
     overlay.style.display = 'flex';
     confirmBtn.focus();
 

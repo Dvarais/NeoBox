@@ -51,7 +51,9 @@
   <main>
     <!-- Верхняя полоса управления -->
     <div class="window-header">
-      <div class="window-title">NeoBox <span style="font-size: 10px; opacity: 0.5; margin-left: 6px; font-weight: normal; vertical-align: middle;">v1.7.0</span></div>
+      <!-- appVersion is filled in from the Go backend at startup; the literal here
+           is only what shows if that call fails. -->
+      <div class="window-title">NeoBox <span id="appVersion" style="font-size: 10px; opacity: 0.5; margin-left: 6px; font-weight: normal; vertical-align: middle;">v1.7.5</span></div>
       <div class="window-controls">
         <button id="minimizeBtn" class="control-btn" title="Свернуть">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -212,7 +214,7 @@
         <div style="display: flex; gap: 8px; align-items: center;">
           <button id="dnsLeakBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            DNS Leak
+            <span id="dnsLeakBtnText">DNS Leak</span>
           </button>
           <button id="pingAllBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;">Проверить пинг всех</button>
         </div>
@@ -230,7 +232,7 @@
         </div>
         <button id="bestServerBtn" class="btn-glass" style="white-space:nowrap; padding: 6px 14px; font-size:12px;" title="Пинговать все и подключиться к самому быстрому">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-          Лучший сервер
+          <span id="bestServerBtnText">Лучший сервер</span>
         </button>
       </div>
 
@@ -415,7 +417,7 @@
         <div style="display: flex; gap: 8px;">
           <button id="saveLogsBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;" title="Сохранить логи в файл">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Сохранить
+            <span id="saveLogsBtnText">Сохранить</span>
           </button>
           <button id="clearLogsBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;">Очистить</button>
         </div>
@@ -460,7 +462,7 @@
         </div>
         <div class="update-title-area">
           <h3 id="updateModalTitle">Доступно обновление</h3>
-          <span id="updateModalVersion" class="update-badge">v1.7.0</span>
+          <span id="updateModalVersion" class="update-badge"></span>
         </div>
       </div>
       
@@ -596,7 +598,7 @@
       <div class="modal-actions" style="margin-top:20px; border-top:1px solid var(--glass-border); padding-top:15px;">
         <button id="dnsLeakRetryBtn" class="btn-glass" style="display:none;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
-          Повторить
+          <span id="dnsLeakRetryBtnText">Повторить</span>
         </button>
         <button id="dnsLeakCloseBtn" class="btn-glass" style="background:var(--accent-color);color:#000;font-weight:bold;border:none;padding-left:24px;padding-right:24px;">OK</button>
       </div>

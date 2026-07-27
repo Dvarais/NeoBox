@@ -136,7 +136,9 @@ export function parseBasicInfo(link) {
       address: address
     };
   } catch (e) {
-    return { type: '', name: '', address: 'Неизвестно' };
+    // Left blank rather than filled with a placeholder: this module has no
+    // language table, so the caller substitutes a localised label if it needs one.
+    return { type: '', name: '', address: '' };
   }
 }
 
@@ -162,7 +164,7 @@ export function sortServers(servers, sortMode, pingData) {
   return sorted;
 }
 
-export function renderCards(container, servers, activeServerLink, pingData, sortMode, onServerSelect, searchQuery, favoriteLinks, onToggleFavorite) {
+export function renderCards(container, servers, activeServerLink, pingData, sortMode, onServerSelect, searchQuery, favoriteLinks, onToggleFavorite, t = {}) {
   if (!container) return;
   container.innerHTML = '';
 
@@ -198,7 +200,7 @@ export function renderCards(container, servers, activeServerLink, pingData, sort
       pingColor = pingData[link] < 150 ? 'var(--success)' : pingData[link] < 400 ? '#f59e0b' : 'var(--danger)';
     }
 
-    const displayName = info.name || info.address || 'Прокси';
+    const displayName = info.name || info.address || t.proxyFallbackName || 'Proxy';
     const displayType = info.type ? info.type.toUpperCase() : 'VPN';
     const flag = getCountryFlag(info.name, info.address);
 
@@ -227,7 +229,7 @@ export function renderCards(container, servers, activeServerLink, pingData, sort
 
     const addressP = document.createElement('p');
     addressP.style.cssText = 'font-size:11px; color:var(--text-dim); margin:2px 0 0;';
-    addressP.textContent = info.address;
+    addressP.textContent = info.address || t.unknownAddress || 'Unknown';
 
     infoDiv.appendChild(titleH4);
     infoDiv.appendChild(addressP);
@@ -246,7 +248,9 @@ export function renderCards(container, servers, activeServerLink, pingData, sort
     const isFav = favoriteLinks && favoriteLinks.has(link);
     starBtn.innerHTML = isFav ? '★' : '☆';
     if (isFav) starBtn.style.color = '#f59e0b';
-    starBtn.title = isFav ? 'Удалить из избранного' : 'Добавить в избранное';
+    starBtn.title = isFav
+      ? (t.favoriteRemove || 'Remove from favorites')
+      : (t.favoriteAdd || 'Add to favorites');
 
     starBtn.onclick = (e) => {
       e.stopPropagation();
