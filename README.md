@@ -1,147 +1,272 @@
 # NeoBox
 
-[English](#english) | [Русский](#русский)
+A VPN client for Windows built on the sing-box core, written in Go with a Wails frontend.
+
+[English](#english) · [Русский](#русский)
 
 ---
 
 ## English
 
-NeoBox is a secure, high-performance VPN client for Windows powered by sing-box and built with Go and Wails. It features a custom frameless window with a native Windows Acrylic translucency effect.
+### What it is
 
-### Installation Guide for Users
+NeoBox is a desktop client for proxy protocols — you paste a subscription link or a
+single server URL, pick a location, and it routes your traffic through it. The core
+doing the actual work is [sing-box](https://github.com/SagerNet/sing-box); NeoBox is
+the interface around it, plus the Windows-specific parts sing-box does not handle on
+its own: the TUN adapter, the system proxy, firewall rules, the tray icon.
 
-#### Prerequisites
-NeoBox is compiled for Windows. Windows 10 or Windows 11 is recommended to support the full visual effects of the Acrylic translucent backdrop.
+The window is frameless with the native Windows Acrylic backdrop, so it looks like it
+belongs on Windows 10/11 rather than like a browser in a box.
 
-#### Steps
-1. Download the latest installer `NeoBox_Setup_v1.7.5.exe` or the standalone executable `NeoBox.exe` from the Releases section of the GitHub repository.
-2. Run the installer to install NeoBox on your system.
-3. Launch the application.
-4. If you enable TUN mode, the application will prompt you for Administrator privileges. This is required because creating a virtual network interface (using the Wintun driver) to route system-wide traffic requires administrative control.
-5. The required `wintun.dll` driver is bundled with the application and loaded automatically.
+### What it does
 
-### Developer Guide
+**Protocols.** VLESS, VMess, Trojan, Shadowsocks, TUIC, Hysteria and Hysteria 2.
+Servers come from a subscription URL, from your clipboard, or from a QR code — either
+scanned with a webcam or loaded from an image file.
 
-#### Prerequisites
-To run and build this project from source, you must install:
-- Go (version 1.20 or newer)
-- Node.js (version 16 or newer) and npm
-- Wails CLI (install via `go install github.com/wailsapp/wails/v2/cmd/wails@latest`)
+**Two ways to route traffic.** TUN mode captures everything on the machine through a
+virtual adapter (this needs Administrator rights — Windows will ask). System proxy
+mode is lighter: NeoBox listens on `127.0.0.1:20809` and points Windows at it, which
+covers browsers and most apps that respect the system setting.
 
-#### Directory Structure
-- `backend/`: Core Go logic — sing-box lifecycle, config generation, encrypted storage, and the Wails service bindings.
-- `frontend/`: Vanilla JavaScript UI bundled with Vite — custom title bar, connection state, and settings.
-- `build/`: Application icons, Windows build templates, and installers.
-- `cmd/`: Release tooling (`keygen`, `sign`).
+**Split tunneling.** In TUN mode you can list `.exe` names that should skip the VPN,
+or invert it into a whitelist where only the listed apps go through the tunnel. Useful
+for games and remote desktop.
 
-#### Development Mode
-To start a hot-reloading development server with uTLS support enabled (which allows sing-box outbound TLS masquerading), run the following command in the project root:
+**Routing rules.** There is a one-click "bypass Russian blocks" toggle that pulls the
+`geoip-ru` and `geosite-ru` rule sets, a list of domains to always send direct, and a
+custom rules table where you can match a domain, a domain suffix, a keyword or an IP
+range and send it direct, through the proxy, or block it outright. Custom rules win
+over the geo rules.
+
+**Leak protection.** Kill Switch blocks internet access through Windows Firewall if the
+tunnel drops. Separately you can turn on DNS leak protection, IPv6 blocking, and
+FakeDNS. There is also a built-in DNS leak test that shows which resolver your queries
+actually reach.
+
+**Day-to-day things.** Ping all servers and sort by latency, star favourites, search,
+auto-pick the fastest server, a connection history with per-session traffic and
+duration, a tray menu you can connect from, auto-connect on launch, start minimised,
+launch with Windows. If the connection dies, a watchdog reconnects with backoff instead
+of leaving you offline. Subscriptions refresh themselves once a day. The interface is
+in Russian and English.
+
+### Installing
+
+You need Windows — 10 or 11 if you want the Acrylic effect to actually render.
+
+1. Grab `NeoBox_Setup_v1.7.5.1.exe` from the [Releases](https://github.com/Dvarais/NeoBox/releases)
+   page, or `NeoBox.exe` if you would rather run it without installing.
+2. Run it, then launch the app.
+3. Add a subscription and pick a server.
+
+If you enable TUN mode, the app will ask for Administrator rights. That is unavoidable:
+creating a virtual network adapter to capture system-wide traffic requires them. The
+`wintun.dll` driver ships with the app and loads by itself — you do not install it
+separately.
+
+### Security
+
+Your subscriptions contain full proxy links: UUIDs, passwords, the lot. NeoBox keeps
+them encrypted at rest with AES-256-GCM, under a key sealed by Windows DPAPI — so the
+files are useless if someone copies them off the machine to a different user or PC. The
+same applies to the last selected server and your favourites, which live in `state.json`.
+`settings.json` stays plain, readable JSON on purpose: it holds toggles, DNS choice and
+routing lists, nothing worth hiding, and you should be able to edit it in Notepad.
+
+Updates are verified with an Ed25519 signature before anything is executed, and the
+check is fail-closed: no valid signature means no in-app install, and the app just opens
+the release page instead.
+
+Kill Switch rules are tracked with a marker file, so a crashed session cannot leave your
+machine firewalled off the internet with no way back — the rules are cleared on the next
+start.
+
+### Building from source
+
+You will need:
+
+- Go 1.24 or newer (see `go.mod`)
+- Node.js 16 or newer with npm
+- Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+
+For development, with hot reload:
+
 ```bash
 wails dev -tags with_utls
 ```
-This launches a Vite development server for the frontend and compiles the backend on the fly.
 
-#### Production Build
-To compile a production-ready package with full capabilities (including uTLS, Clash API, QUIC, WireGuard, and gVisor support), run:
+The `with_utls` tag matters — without it sing-box cannot do TLS fingerprint
+masquerading, and a lot of servers expect it.
+
+For a release build with everything switched on:
+
 ```bash
 wails build -tags "with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor"
 ```
-The compiled binaries will be outputted to the `build/bin/` directory.
+
+Binaries land in `build/bin/`.
 
 #### Using the Go toolchain directly
-`go build ./...` and `go test ./...` work on a fresh clone. `frontend/dist/`
-ships a tracked `.gitkeep` so that the `//go:embed all:frontend/dist` pattern
-always matches something — without it, Go fails the build outright before npm
-has ever run.
 
-A binary produced that way embeds **no user interface**. Build the frontend
-first whenever you intend to actually run the app:
+`go build ./...` and `go test ./...` work on a fresh clone. `frontend/dist/` ships a
+tracked `.gitkeep` so the `//go:embed all:frontend/dist` pattern always matches
+something — without it Go refuses to build before npm has ever run.
+
+The catch: a binary built that way contains **no user interface**. Build the frontend
+first if you intend to run it:
+
 ```bash
 cd frontend && npm ci && npm run build
 ```
+
 `wails build` and `wails dev` do this for you.
 
-#### Cutting a release
-Every release **must** carry an Ed25519 signature next to the installer.
-Without it, NeoBox 1.7.5 and newer refuse to install the update in-app and fall
-back to opening the release page (see `SECURITY_CHANGES.md`, fix #2):
-```bash
-wails build -tags "with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor"
-go run ./cmd/sign -key <private_key_hex> -file NeoBox_Setup_v1.7.5.exe
-```
-Upload the resulting file as a release asset named exactly
-`<installer filename>.sig`. Keep the private key offline; `go run ./cmd/keygen`
-generates a new pair if it is ever lost, but the public key in
-`backend/security/signature.go` must then be updated before the release ships.
+#### Project layout
+
+| Directory | What's in it |
+|---|---|
+| `backend/core/` | sing-box lifecycle, config generation, proxy link parsing |
+| `backend/service/` | Wails bindings — settings, subscriptions, updates, tray, watchdog |
+| `backend/security/` | Encryption, Ed25519 signatures, firewall rules, autostart |
+| `backend/storage/` | Encrypted file storage with atomic writes |
+| `backend/i18n/` | Translations for everything rendered in Go (tray, notifications) |
+| `frontend/` | Vanilla JS UI bundled with Vite |
+| `build/` | Icons, Windows manifests, NSIS installer template |
+| `cmd/` | Signing tools: `keygen`, `sign` |
 
 ---
 
 ## Русский
 
-NeoBox — это безопасный и высокопроизводительный VPN-клиент для Windows на базе ядра sing-box, разработанный с использованием Go и Wails. Он обладает кастомным окном без рамок (frameless) с поддержкой полупрозрачного эффекта размытия Windows Acrylic.
+VPN-клиент для Windows на ядре sing-box, написанный на Go с интерфейсом на Wails.
 
-### Руководство по установке для пользователей
+### Что это
 
-#### Системные требования
-NeoBox скомпилирован под операционную систему Windows. Для полноценной поддержки визуального эффекта Acrylic рекомендуется использовать Windows 10 или Windows 11.
+NeoBox — десктопный клиент для прокси-протоколов: вставляете ссылку на подписку или
+адрес отдельного сервера, выбираете локацию, и трафик идёт через неё. Всю работу с
+протоколами делает [sing-box](https://github.com/SagerNet/sing-box); NeoBox — это
+интерфейс вокруг него плюс то, чем sing-box сам по себе не занимается: TUN-адаптер,
+системный прокси, правила брандмауэра, иконка в трее.
 
-#### Шаги установки
-1. Загрузите актуальный установщик `NeoBox_Setup_v1.7.5.exe` or портативную версию `NeoBox.exe` из раздела релизов (Releases) репозитория на GitHub.
-2. Запустите установщик для установки NeoBox в систему.
-3. Запустите установленное приложение.
-4. При включении TUN-режима приложение запросит права администратора. Это необходимо, так как создание виртуального сетевого интерфейса (через драйвер Wintun) для маршрутизации системного трафика требует привилегий суперпользователя.
-5. Необходимый драйвер `wintun.dll` поставляется в комплекте с приложением и загружается автоматически.
+Окно без стандартной рамки, с нативным эффектом Windows Acrylic — выглядит как
+приложение для Windows 10/11, а не как браузер в коробке.
 
-### Руководство для разработчиков
+### Что умеет
 
-#### Требования к окружению
-Для запуска и сборки проекта из исходного кода вам понадобятся:
-- Go (версии 1.20 или новее)
-- Node.js (версии 16 или новее) и менеджер пакетов npm
-- Wails CLI (установка через команду `go install github.com/wailsapp/wails/v2/cmd/wails@latest`)
+**Протоколы.** VLESS, VMess, Trojan, Shadowsocks, TUIC, Hysteria и Hysteria 2. Серверы
+добавляются из подписки по URL, из буфера обмена или через QR-код — со сканированием
+камерой или из файла с картинкой.
 
-#### Структура директорий
-- `backend/`: Основная логика на Go — жизненный цикл sing-box, генерация конфигурации, шифрованное хранилище и биндинги Wails.
-- `frontend/`: Интерфейс на чистом JavaScript, собираемый через Vite (кастомный заголовок окна, статус подключения и управление настройками).
-- `build/`: Иконки приложения, шаблоны манифестов для Windows и скрипты сборки установщика.
-- `cmd/`: Утилиты выпуска релизов (`keygen`, `sign`).
+**Два способа пустить трафик.** TUN-режим перехватывает всё на машине через виртуальный
+адаптер (нужны права администратора, Windows их запросит). Системный прокси — вариант
+полегче: NeoBox слушает `127.0.0.1:20809` и прописывает себя в настройки Windows, чего
+хватает для браузеров и большинства приложений, которые эти настройки уважают.
 
-#### Режим разработки
-Чтобы запустить сервер разработки с поддержкой автоматической перезагрузки кода и поддержкой uTLS (необходим для маскировки исходящего TLS-трафика в sing-box), выполните следующую команду в корневой папке проекта:
+**Раздельное туннелирование.** В TUN-режиме можно перечислить имена `.exe`, которые
+пойдут мимо VPN, либо перевернуть список в белый — тогда через туннель пойдут только
+указанные программы. Удобно для игр и удалённого рабочего стола.
+
+**Правила маршрутизации.** Есть переключатель обхода российских блокировок в один клик
+(подтягивает наборы правил `geoip-ru` и `geosite-ru`), список доменов, которые всегда
+идут напрямую, и таблица своих правил: домен, суффикс домена, ключевое слово или
+диапазон IP — и действие «напрямую», «через VPN» или «заблокировать». Свои правила
+приоритетнее гео-правил.
+
+**Защита от утечек.** Kill Switch перекрывает интернет через брандмауэр Windows, если
+туннель оборвался. Отдельно включаются защита от утечек DNS, блокировка IPv6 и FakeDNS.
+Ещё есть встроенный тест на утечку DNS — он показывает, до какого резолвера реально
+доходят ваши запросы.
+
+**Повседневные мелочи.** Пинг всех серверов и сортировка по задержке, избранное, поиск,
+автовыбор самого быстрого сервера, история подключений с трафиком и длительностью каждой
+сессии, меню в трее, из которого можно подключиться, автоподключение при запуске, старт
+свёрнутым, запуск вместе с Windows. Если соединение отвалится, watchdog переподключится
+сам, с нарастающей паузой между попытками, а не оставит вас без сети. Подписки
+обновляются раз в сутки. Интерфейс на русском и английском.
+
+### Установка
+
+Нужна Windows — 10 или 11, если хотите, чтобы эффект Acrylic действительно отрисовался.
+
+1. Скачайте `NeoBox_Setup_v1.7.5.1.exe` со страницы
+   [Releases](https://github.com/Dvarais/NeoBox/releases) или `NeoBox.exe`, если
+   предпочитаете портативный вариант без установки.
+2. Запустите установщик, затем само приложение.
+3. Добавьте подписку и выберите сервер.
+
+При включении TUN-режима приложение попросит права администратора. Без них никак:
+создание виртуального сетевого адаптера для перехвата системного трафика их требует.
+Драйвер `wintun.dll` идёт в комплекте и загружается сам — отдельно ставить не нужно.
+
+### Безопасность
+
+В подписках лежат полные прокси-ссылки: UUID, пароли, всё сразу. NeoBox хранит их на
+диске зашифрованными (AES-256-GCM) под ключом, запечатанным через Windows DPAPI — то
+есть файлы бесполезны, если их скопировать на другую машину или к другому пользователю.
+То же касается последнего выбранного сервера и избранного, они лежат в `state.json`.
+`settings.json` намеренно остаётся обычным читаемым JSON: там переключатели, выбор DNS
+и списки маршрутизации — ничего, что стоило бы прятать, и это должно нормально
+правиться в блокноте.
+
+Обновления проверяются подписью Ed25519 до того, как что-либо будет запущено, причём
+проверка fail-closed: нет валидной подписи — нет установки внутри приложения, вместо
+неё просто откроется страница релиза.
+
+Правила Kill Switch помечаются файлом-маркером, поэтому упавшая сессия не оставит машину
+отрезанной от интернета без возможности это откатить — правила снимутся при следующем
+запуске.
+
+### Сборка из исходников
+
+Понадобится:
+
+- Go 1.24 или новее (см. `go.mod`)
+- Node.js 16 или новее и npm
+- Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+
+Режим разработки с горячей перезагрузкой:
+
 ```bash
 wails dev -tags with_utls
 ```
-Эта команда запустит локальный Vite-сервер для фронтенда и скомпилирует бэкенд на лету.
 
-#### Сборка финального релиза
-Для компиляции готового к распространению дистрибутива со всеми возможностями (включая uTLS, Clash API, QUIC, WireGuard и gVisor), выполните:
+Тег `with_utls` важен: без него sing-box не умеет маскировать отпечаток TLS, а этого
+ждут многие серверы.
+
+Релизная сборка со всем включённым:
+
 ```bash
 wails build -tags "with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor"
 ```
-Скомпилированные файлы сборки будут сохранены в директорию `build/bin/`.
 
-#### Прямая работа с Go
-`go build ./...` и `go test ./...` работают на свежем клоне. В `frontend/dist/`
-лежит отслеживаемый `.gitkeep`, чтобы шаблон `//go:embed all:frontend/dist`
-всегда что-то находил — без него Go прерывает сборку ещё до того, как запускался
-npm.
+Результат складывается в `build/bin/`.
 
-Собранный так бинарник **не содержит интерфейса**. Перед реальным запуском
-приложения соберите фронтенд:
+#### Работа напрямую через Go
+
+`go build ./...` и `go test ./...` работают на свежем клоне. В `frontend/dist/` лежит
+отслеживаемый `.gitkeep`, чтобы шаблону `//go:embed all:frontend/dist` всегда было что
+найти — без него Go прерывает сборку ещё до того, как запускался npm.
+
+Нюанс: собранный так бинарник **не содержит интерфейса**. Если собираетесь его
+запускать, сначала соберите фронтенд:
+
 ```bash
 cd frontend && npm ci && npm run build
 ```
-`wails build` и `wails dev` делают это автоматически.
 
-#### Выпуск релиза
-Каждый релиз **обязан** нести Ed25519-подпись рядом с установщиком. Без неё
-NeoBox 1.7.5 и новее откажется устанавливать обновление внутри приложения и
-откроет страницу релиза (см. `SECURITY_CHANGES.md`, исправление #2):
-```bash
-wails build -tags "with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor"
-go run ./cmd/sign -key <приватный_ключ_hex> -file NeoBox_Setup_v1.7.5.exe
-```
-Загрузите полученный файл как ассет релиза с именем ровно
-`<имя установщика>.sig`. Приватный ключ храните офлайн; `go run ./cmd/keygen`
-создаст новую пару, если он утерян, но тогда до выпуска релиза нужно обновить
-публичный ключ в `backend/security/signature.go`.
+`wails build` и `wails dev` делают это за вас.
+
+#### Структура проекта
+
+| Каталог | Что внутри |
+|---|---|
+| `backend/core/` | Жизненный цикл sing-box, генерация конфига, разбор прокси-ссылок |
+| `backend/service/` | Биндинги Wails — настройки, подписки, обновления, трей, watchdog |
+| `backend/security/` | Шифрование, подписи Ed25519, правила брандмауэра, автозапуск |
+| `backend/storage/` | Шифрованное хранилище файлов с атомарной записью |
+| `backend/i18n/` | Переводы для всего, что рисуется на стороне Go (трей, уведомления) |
+| `frontend/` | Интерфейс на чистом JS, собирается через Vite |
+| `build/` | Иконки, манифесты Windows, шаблон установщика NSIS |
+| `cmd/` | Утилиты подписи: `keygen`, `sign` |
