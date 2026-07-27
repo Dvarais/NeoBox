@@ -34,9 +34,15 @@ Unicode true
 ####
 !include "wails_tools.nsh"
 
-# The version information for this two must consist of 4 parts
-VIProductVersion "${INFO_PRODUCTVERSION}.0"
-VIFileVersion    "${INFO_PRODUCTVERSION}.0"
+# The version information for this two must consist of 4 parts.
+#
+# NeoBox versions already have four (1.7.5.1), so — unlike the stock Wails
+# template — nothing is appended here. The template's "${INFO_PRODUCTVERSION}.0"
+# assumes a three-part version; with ours it produces five parts and makensis
+# rejects the build. If the version ever drops back to three parts, put the
+# ".0" back.
+VIProductVersion "${INFO_PRODUCTVERSION}"
+VIFileVersion    "${INFO_PRODUCTVERSION}"
 
 VIAddVersionKey "CompanyName"     "${INFO_COMPANYNAME}"
 VIAddVersionKey "FileDescription" "${INFO_PRODUCTNAME} Installer"
