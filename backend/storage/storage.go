@@ -3,7 +3,9 @@
 //
 // Only files listed in secretFiles are encrypted. settings.json is deliberately
 // left as plain JSON: it carries no secrets (routing rules, DNS, toggles) and
-// users are expected to be able to open it in a text editor.
+// users are expected to be able to open it in a text editor. The settings fields
+// that DO carry credentials live in state.json, which is written through
+// WriteSecret — see backend/service/settings.go.
 package storage
 
 import (

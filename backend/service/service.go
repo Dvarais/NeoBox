@@ -41,7 +41,8 @@ type AppService struct {
 	wailsCtx   context.Context
 	wailsCtxMu sync.RWMutex
 
-	// fileMu serialises access to settings.json and subscriptions.json.
+	// fileMu serialises access to settings.json, state.json and
+	// subscriptions.json.
 	fileMu sync.Mutex
 
 	// trayMu guards the tray menu items and the window visibility they display.
@@ -108,6 +109,11 @@ func NewAppService(cm *core.CoreManager, userDataDir string) *AppService {
 		coreManager: cm,
 		userDataDir: userDataDir,
 	}
+	// Move any proxy credentials an older build left sitting in plaintext in
+	// settings.json into the encrypted store. This runs before the first read
+	// below so nothing observes the half-migrated state.
+	svc.migrateSecretSettings()
+
 	// Adopt the language the user last chose, so the tray, toasts and diagnostics
 	// come up translated rather than in the default language.
 	var settings map[string]interface{}
