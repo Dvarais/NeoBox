@@ -36,8 +36,6 @@ func (s *AppService) GetSettings() string {
 // SaveSettings saves settings to settings.json as plain, human-readable JSON.
 // Users can open and edit this file directly in any text editor.
 func (s *AppService) SaveSettings(settingsJSON string) bool {
-	s.fileMu.Lock()
-	defer s.fileMu.Unlock()
 	filePath := filepath.Join(s.userDataDir, "settings.json")
 
 	// Validate JSON before writing to avoid corrupting the file
@@ -47,15 +45,11 @@ func (s *AppService) SaveSettings(settingsJSON string) bool {
 	}
 
 	// Apply autostart update if needed based on settings changes
+	var lang string
+	var hasLang bool
 	var settingsMap map[string]interface{}
 	if err := json.Unmarshal([]byte(settingsJSON), &settingsMap); err == nil {
-		// Keep the backend's language in step with the interface. The tray menu,
-		// toasts and diagnostics are rendered in Go and never pass through the
-		// frontend's translation table, so this is what stops them being stuck in
-		// whatever language the app started in.
-		if lang, ok := settingsMap["language"].(string); ok {
-			s.applyLanguage(lang)
-		}
+		lang, hasLang = settingsMap["language"].(string)
 
 		openAtLogin, _ := settingsMap["openAtLogin"].(bool)
 		exePath, err := os.Executable()
@@ -79,6 +73,24 @@ func (s *AppService) SaveSettings(settingsJSON string) bool {
 		out = []byte(settingsJSON)
 	}
 
+	s.fileMu.Lock()
 	err := os.WriteFile(filePath, out, 0644)
-	return err == nil
+	s.fileMu.Unlock()
+	if err != nil {
+		return false
+	}
+
+	// Keep the backend's language in step with the interface. The tray menu,
+	// toasts and diagnostics are rendered in Go and never pass through the
+	// frontend's translation table, so this is what stops them being stuck in
+	// whatever language the app started in.
+	//
+	// This MUST stay outside fileMu. applyLanguage rebuilds the tray, and that
+	// path takes fileMu itself to read the subscriptions, so calling it while
+	// holding the lock deadlocked the app on every language switch — sync.Mutex
+	// is not reentrant.
+	if hasLang {
+		s.applyLanguage(lang)
+	}
+	return true
 }
