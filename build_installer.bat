@@ -19,11 +19,21 @@ shift
 goto :parse_args
 :args_done
 
+REM --key accepts either the hex private key itself or a path to a file holding
+REM it. The file form keeps the key out of the console history. If the path
+REM exists but is empty, _PRIVATE_KEY stays the path and cmd/sign rejects it.
+if defined _PRIVATE_KEY if exist "%_PRIVATE_KEY%" for /f "usebackq delims=" %%k in ("%_PRIVATE_KEY%") do if not defined _KEY_LINE set "_KEY_LINE=%%k"
+if defined _KEY_LINE set "_PRIVATE_KEY=%_KEY_LINE%"
+
 echo ==========================================
 echo [1/5] Cleaning old build files...
 echo ==========================================
+REM Signatures are removed too. A .sig left over from an earlier version would
+REM otherwise sit next to a new installer it does not match.
 if exist "%_SCRIPT_DIR%NeoBox_Setup_*.exe" del /f /q "%_SCRIPT_DIR%NeoBox_Setup_*.exe"
+if exist "%_SCRIPT_DIR%NeoBox_Setup_*.exe.sig" del /f /q "%_SCRIPT_DIR%NeoBox_Setup_*.exe.sig"
 if exist "%_SCRIPT_DIR%build\bin\NeoBox_Setup_*.exe" del /f /q "%_SCRIPT_DIR%build\bin\NeoBox_Setup_*.exe"
+if exist "%_SCRIPT_DIR%build\bin\NeoBox_Setup_*.exe.sig" del /f /q "%_SCRIPT_DIR%build\bin\NeoBox_Setup_*.exe.sig"
 if exist "%_SCRIPT_DIR%build\bin\NeoBox.exe" del /f /q "%_SCRIPT_DIR%build\bin\NeoBox.exe"
 if exist "%_SCRIPT_DIR%build\bin\NeoBox.exe.sig" del /f /q "%_SCRIPT_DIR%build\bin\NeoBox.exe.sig"
 echo Clean completed.
@@ -50,8 +60,8 @@ echo.
 echo ==========================================
 echo [3.5/5] Signing NeoBox.exe...
 echo ==========================================
-go run cmd/sign/main.go -key %_PRIVATE_KEY% -file "%_SCRIPT_DIR%build\bin\NeoBox.exe"
-if %ERRORLEVEL% neq 0 echo WARNING: Failed to sign NeoBox.exe 1>&2
+go run cmd/sign/main.go -key "%_PRIVATE_KEY%" -file "%_SCRIPT_DIR%build\bin\NeoBox.exe"
+if %ERRORLEVEL% neq 0 goto :sign_failed
 :skip_sign_exe
 
 echo.
@@ -77,8 +87,8 @@ echo Found setup package: %_SETUP_FILE%
 
 if not defined _PRIVATE_KEY goto :skip_sign_setup
 echo Signing setup package...
-go run cmd/sign/main.go -key %_PRIVATE_KEY% -file "%_SETUP_FILE%"
-if %ERRORLEVEL% neq 0 echo WARNING: Failed to sign setup package 1>&2
+go run cmd/sign/main.go -key "%_PRIVATE_KEY%" -file "%_SETUP_FILE%"
+if %ERRORLEVEL% neq 0 goto :sign_failed
 :skip_sign_setup
 
 echo.
@@ -106,4 +116,12 @@ exit /b 1
 
 :no_setup
 echo ERROR: Setup file not found in root. 1>&2
+exit /b 1
+
+:sign_failed
+echo ERROR: Signing failed -- see the message above. 1>&2
+echo        --key takes the 128-character hex private key printed by 1>&2
+echo        "go run cmd/keygen/main.go", or a path to a file containing it. 1>&2
+echo        Releasing an unsigned build would break the in-app updater, so 1>&2
+echo        the build stops here rather than warning and carrying on. 1>&2
 exit /b 1
