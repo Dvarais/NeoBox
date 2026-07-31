@@ -25,6 +25,20 @@ REM exists but is empty, _PRIVATE_KEY stays the path and cmd/sign rejects it.
 if defined _PRIVATE_KEY if exist "%_PRIVATE_KEY%" for /f "usebackq delims=" %%k in ("%_PRIVATE_KEY%") do if not defined _KEY_LINE set "_KEY_LINE=%%k"
 if defined _KEY_LINE set "_PRIVATE_KEY=%_KEY_LINE%"
 
+REM Read the version straight out of wails.json, which is the single source of
+REM truth. It has to be passed to makensis explicitly: NSIS takes the version
+REM from INFO_PRODUCTVERSION in build\windows\installer\wails_tools.nsh, and
+REM Wails only rewrites that file during `wails build -nsis`. This script builds
+REM without -nsis and invokes makensis itself, so the value baked into that file
+REM goes stale the moment wails.json is bumped — which silently produced an
+REM installer named after the previous release.
+set "_VERSION="
+for /f "tokens=2 delims=:," %%v in ('findstr /c:"productVersion" "%_SCRIPT_DIR%wails.json"') do set "_VERSION=%%~v"
+set "_VERSION=%_VERSION: =%"
+set "_VERSION=%_VERSION:"=%"
+if not defined _VERSION goto :no_version
+echo Building version %_VERSION%
+
 echo ==========================================
 echo [1/5] Cleaning old build files...
 echo ==========================================
@@ -70,7 +84,7 @@ echo [4/5] Packaging NSIS installer...
 echo ==========================================
 if not exist "C:\Program Files (x86)\NSIS\makensis.exe" goto :no_nsis
 
-"C:\Program Files (x86)\NSIS\makensis.exe" /DARG_WAILS_AMD64_BINARY=..\..\bin\NeoBox.exe "%_SCRIPT_DIR%build\windows\installer\project.nsi"
+"C:\Program Files (x86)\NSIS\makensis.exe" /DINFO_PRODUCTVERSION=%_VERSION% /DARG_WAILS_AMD64_BINARY=..\..\bin\NeoBox.exe "%_SCRIPT_DIR%build\windows\installer\project.nsi"
 if %ERRORLEVEL% neq 0 goto :nsis_failed
 
 echo.
@@ -116,6 +130,12 @@ exit /b 1
 
 :no_setup
 echo ERROR: Setup file not found in root. 1>&2
+exit /b 1
+
+:no_version
+echo ERROR: Could not read productVersion from wails.json. 1>&2
+echo        Without it the installer would be named after whatever stale 1>&2
+echo        version sits in build\windows\installer\wails_tools.nsh. 1>&2
 exit /b 1
 
 :sign_failed
