@@ -161,9 +161,11 @@ func (s *AppService) InitTray(iconBytes []byte) {
 					if wCtxToggle != nil {
 						if visible {
 							wailsruntime.WindowHide(wCtxToggle)
+							s.onWindowHidden()
 						} else {
 							s.BringToFront()
 							wailsruntime.EventsEmit(wCtxToggle, "window-restored", nil)
+							s.onWindowRestored()
 						}
 					}
 
@@ -205,14 +207,59 @@ func (s *AppService) SetWindowVisible(visible bool) {
 	s.windowVisible = visible
 }
 
+// isWindowVisible reports whether the main window is currently on screen.
+// While it is not, there is nobody to read live output, so the log and traffic
+// streams stop pushing events into WebView2 entirely.
+func (s *AppService) isWindowVisible() bool {
+	s.trayMu.Lock()
+	defer s.trayMu.Unlock()
+	return s.windowVisible
+}
+
+// onWindowRestored hands the frontend everything that accumulated while it was
+// hidden: the buffered log lines, and one traffic sample carrying the session
+// totals so the counters pick up where the traffic actually left off rather
+// than where the last delivered event did.
+//
+// Callers must not hold trayMu — this reaches into other locks and the Wails
+// runtime.
+func (s *AppService) onWindowRestored() {
+	s.flushLogStream()
+
+	// Only when a session is actually running: the frontend reveals the
+	// speedometer on the first traffic-stats event, and it has no business
+	// appearing while disconnected.
+	if !s.coreManager.IsRunning() {
+		return
+	}
+	totalUp, totalDown := s.sessionTraffic()
+	s.emitSafe("traffic-stats", map[string]interface{}{
+		"up":        int64(0),
+		"down":      int64(0),
+		"totalUp":   totalUp,
+		"totalDown": totalDown,
+	})
+}
+
 // NotifyWindowHidden is called from the frontend when the window is hidden.
 func (s *AppService) NotifyWindowHidden() {
 	s.trayMu.Lock()
-	defer s.trayMu.Unlock()
 	s.windowVisible = false
 	if s.mToggleItem != nil {
 		s.mToggleItem.SetTitle(i18n.T(i18n.TrayShowWindow))
 	}
+	s.trayMu.Unlock()
+	s.onWindowHidden()
+}
+
+// onWindowHidden tells the frontend to go idle. Wails hides the Win32 window
+// without touching the WebView2 controller's visibility, so the page never sees
+// a visibilitychange and would otherwise keep its timers and animations running
+// against a window nobody can see.
+//
+// Callers must not hold trayMu.
+func (s *AppService) onWindowHidden() {
+	s.emitSafe("window-hidden", nil)
 }
 
 // NotifyWindowShown is called from the frontend when the window is shown.
@@ -230,6 +277,7 @@ func (s *AppService) NotifyWindowShown() {
 	if wCtx != nil {
 		wailsruntime.EventsEmit(wCtx, "window-restored", nil)
 	}
+	s.onWindowRestored()
 }
 
 // BringToFront forces the application window to the foreground and focuses it.

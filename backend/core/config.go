@@ -63,6 +63,11 @@ type Settings struct {
 	Ipv6LeakProtection *bool `json:"ipv6Leak"`
 	// CustomRules are user-defined routing rules added before geoip/geosite rules.
 	CustomRules []CustomRule `json:"customRules"`
+	// VerboseLogging raises the core log level from "warn" to "info". At "info"
+	// sing-box logs the open and the close of every connection, which is useful
+	// when diagnosing routing but is a firehose during ordinary browsing — and
+	// every line has to cross into the WebView2 renderer. Off by default.
+	VerboseLogging bool `json:"verboseLogging"`
 }
 
 // CustomRule represents a single user-defined routing rule.
@@ -874,9 +879,16 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		})
 	}
 
+	// "warn" keeps the Logs tab to things that actually need attention. "info"
+	// adds a line per connection open and close, which the user opts into.
+	logLevel := "warn"
+	if settings.VerboseLogging {
+		logLevel = "info"
+	}
+
 	config := map[string]interface{}{
 		"log": map[string]interface{}{
-			"level":     "info",
+			"level":     logLevel,
 			"timestamp": true,
 		},
 		"dns": map[string]interface{}{

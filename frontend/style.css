@@ -30,6 +30,15 @@ body.window-hidden {
   transform: scale(0.98);
 }
 
+/* Окно ушло в трей. Бесконечные анимации (пульс кнопки, спиннеры, шиммер)
+   заставляют композитор WebView2 перерисовывать кадр за кадром даже там, где
+   этого никто не видит. Ставим их на паузу до возвращения окна. */
+body.app-idle *,
+body.app-idle *::before,
+body.app-idle *::after {
+  animation-play-state: paused !important;
+}
+
 /* Window Header */
 .window-header {
   position: fixed;

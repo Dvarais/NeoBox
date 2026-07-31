@@ -72,6 +72,16 @@ type AppService struct {
 	hasProxyBackup    bool
 	quitting          bool
 	mutexHandle       windows.Handle
+	// logStream batches sing-box log lines on their way to the frontend; nil
+	// while no core session is running. See logstream.go.
+	logStream *logStreamer
+
+	// trafficMu guards the session traffic totals. They are accumulated in Go
+	// rather than the frontend so they stay correct across periods where the
+	// window is hidden and no traffic-stats events are sent at all.
+	trafficMu   sync.Mutex
+	sessionUp   int64
+	sessionDown int64
 
 	// watchdogMu guards the auto-reconnect watchdog.
 	watchdogMu     sync.Mutex
@@ -80,23 +90,6 @@ type AppService struct {
 	watchdogProxy  bool
 
 	quitOnce sync.Once
-}
-
-type wailsLogWriter struct {
-	mu  sync.RWMutex
-	ctx context.Context
-}
-
-// WriteMessage takes a read lock before touching ctx: sing-box calls it from
-// its own goroutines while SetContext writes from the Wails main goroutine,
-// which is a data race the detector reliably flags.
-func (w *wailsLogWriter) WriteMessage(level uint8, message string) {
-	w.mu.RLock()
-	ctx := w.ctx
-	w.mu.RUnlock()
-	if ctx != nil {
-		wailsruntime.EventsEmit(ctx, "xray-log", message)
-	}
 }
 
 // NewAppService creates a new AppService instance.
@@ -151,6 +144,52 @@ func (s *AppService) emitSafe(event string, data ...interface{}) {
 	if ctx != nil {
 		wailsruntime.EventsEmit(ctx, event, data...)
 	}
+}
+
+// stopLogStream ends the current session's log batching after a final flush, so
+// the tail of the output still reaches the UI. No-op when nothing is running.
+func (s *AppService) stopLogStream() {
+	s.stateMu.Lock()
+	ls := s.logStream
+	s.logStream = nil
+	s.stateMu.Unlock()
+	if ls != nil {
+		ls.stopStreaming()
+	}
+}
+
+// flushLogStream pushes whatever has accumulated while the window was hidden.
+func (s *AppService) flushLogStream() {
+	s.stateMu.Lock()
+	ls := s.logStream
+	s.stateMu.Unlock()
+	if ls != nil {
+		ls.flush()
+	}
+}
+
+// resetSessionTraffic zeroes the counters at the start of a core session.
+func (s *AppService) resetSessionTraffic() {
+	s.trafficMu.Lock()
+	s.sessionUp, s.sessionDown = 0, 0
+	s.trafficMu.Unlock()
+}
+
+// addSessionTraffic folds one sample of the Clash traffic stream into the
+// session totals and returns the running totals.
+func (s *AppService) addSessionTraffic(up, down int64) (totalUp, totalDown int64) {
+	s.trafficMu.Lock()
+	defer s.trafficMu.Unlock()
+	s.sessionUp += up
+	s.sessionDown += down
+	return s.sessionUp, s.sessionDown
+}
+
+// sessionTraffic reads the running totals.
+func (s *AppService) sessionTraffic() (totalUp, totalDown int64) {
+	s.trafficMu.Lock()
+	defer s.trafficMu.Unlock()
+	return s.sessionUp, s.sessionDown
 }
 
 // SaveLogs writes the provided log text to a timestamped file in the logs directory.

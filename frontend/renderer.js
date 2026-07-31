@@ -45,6 +45,10 @@ window.sessionBytesDown = 0;
 window.sessionBytesUp = 0;
 let sessionConnectedAt = null; // timestamp начала сессии
 let sessionTimerInterval = null;
+let sessionTimerStart = 0; // отсчитываем от метки, а не от числа тиков
+// false, пока окно свёрнуто в трей: там UI никто не видит, а каждая его
+// «живая» деталь держит WebView2 в работе. См. setUiActive.
+let uiActive = true;
 
 // Favorites
 let favoriteLinks = new Set();
@@ -84,6 +88,9 @@ navItems.forEach(item => {
     if (targetId === 'view-servers') {
       setTimeout(updateCustomScroll, 50);
     }
+    // Lines that arrived while this view was closed were kept out of the DOM;
+    // rebuild the panel now that it is visible.
+    if (targetId === 'view-logs' && logsDomStale) renderLogs();
   });
 });
 
@@ -268,6 +275,8 @@ function applyLanguage() {
   document.getElementById('ipv6LeakLabel').textContent = t.ipv6LeakLabel;
   document.getElementById('fakeDnsLabel').textContent = t.fakeDnsLabel;
   document.getElementById('fakeDnsDesc').textContent = t.fakeDnsDesc;
+  setText('verboseLoggingLabel', t.verboseLoggingLabel);
+  setText('verboseLoggingDesc', t.verboseLoggingDesc);
   document.getElementById('saveRoutesBtn').textContent = t.saveRoutesBtn;
   document.getElementById('routesStatus').textContent = t.statusDone;
   document.getElementById('saveAppsBtn').textContent = t.saveAppsBtn;
@@ -411,20 +420,8 @@ function updateAppInterface(state) {
     startSessionTracking();
     // Start live connection timer
     if (timerBadge) timerBadge.style.display = 'flex';
-    clearInterval(sessionTimerInterval);
-    const timerStart = Date.now();
-    sessionTimerInterval = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - timerStart) / 1000);
-      const h = String(Math.floor(elapsed / 3600)).padStart(2, '0');
-      const m = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
-      const s = String(elapsed % 60).padStart(2, '0');
-      if (timerText) timerText.textContent = `${h}:${m}:${s}`;
-    }, 1000);
-
-    // Start periodic TUN check if TUN mode is enabled
-    clearInterval(tunStatusInterval);
-    checkAndUpdateTunStatus();
-    tunStatusInterval = setInterval(checkAndUpdateTunStatus, 3000);
+    sessionTimerStart = Date.now();
+    startLiveTimers();
   } else if (state === 'connecting') {
     powerBtn.classList.add('on');
     powerBtn.classList.remove('pulse-animation');
@@ -447,15 +444,58 @@ function updateAppInterface(state) {
     restartBtn.style.display = 'none';
     disconnectBtn.style.display = 'none';
     currentIp.textContent = '—';
-    clearInterval(sessionTimerInterval);
-    sessionTimerInterval = null;
+    stopLiveTimers();
+    sessionTimerStart = 0;
     if (timerBadge) timerBadge.style.display = 'none';
     if (timerText) timerText.textContent = '00:00:00';
 
-    clearInterval(tunStatusInterval);
-    tunStatusInterval = null;
     const tunStatusContainer = document.getElementById('tunStatusContainer');
     if (tunStatusContainer) tunStatusContainer.style.display = 'none';
+  }
+}
+
+// Таймер считается от sessionTimerStart, а не накоплением тиков, — иначе после
+// паузы в трее он отстал бы ровно на время, что окно было скрыто.
+function renderSessionTimer() {
+  const timerText = document.getElementById('sessionTimerText');
+  if (!timerText || !sessionTimerStart) return;
+  const elapsed = Math.floor((Date.now() - sessionTimerStart) / 1000);
+  const h = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+  const m = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+  const s = String(elapsed % 60).padStart(2, '0');
+  timerText.textContent = `${h}:${m}:${s}`;
+}
+
+// startLiveTimers запускает опрос, который имеет смысл только при видимом окне.
+function startLiveTimers() {
+  stopLiveTimers();
+  if (!uiActive || appState !== 'on') return;
+
+  renderSessionTimer();
+  sessionTimerInterval = setInterval(renderSessionTimer, 1000);
+
+  checkAndUpdateTunStatus();
+  tunStatusInterval = setInterval(checkAndUpdateTunStatus, 3000);
+}
+
+function stopLiveTimers() {
+  clearInterval(sessionTimerInterval);
+  sessionTimerInterval = null;
+  clearInterval(tunStatusInterval);
+  tunStatusInterval = null;
+}
+
+// setUiActive переводит интерфейс в простой, когда окно уходит в трей: гасит
+// опросы и через класс app-idle останавливает бесконечные CSS-анимации, которые
+// иначе держали бы композитор WebView2 занятым круглосуточно.
+function setUiActive(active) {
+  if (uiActive === active) return;
+  uiActive = active;
+  document.body.classList.toggle('app-idle', !active);
+  if (active) {
+    startLiveTimers();
+  } else {
+    stopLiveTimers();
   }
 }
 
@@ -505,6 +545,9 @@ const MAX_LOG_ENTRIES = 500;
 const logsArray = [];
 let currentLogFilter = 'ALL';
 let isScrolledToBottom = true;
+// True when lines arrived while the Logs view was closed, so the panel needs a
+// full rebuild before it is shown again.
+let logsDomStale = false;
 
 fullLogOutput.addEventListener('scroll', () => {
     isScrolledToBottom = Math.abs(fullLogOutput.scrollHeight - fullLogOutput.clientHeight - fullLogOutput.scrollTop) < 5;
@@ -538,8 +581,11 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-function parseLogLine(rawString) {
-  const clean = stripAnsi(rawString);
+// parseLogLine splits an already ANSI-stripped line into its parts. It runs on
+// every line that arrives, so it deliberately does no escaping or highlighting
+// — that work lives in renderLogHtml and only runs for lines actually going on
+// screen.
+function parseLogLine(clean) {
   let level = 'INFO';
   let timeStr = '';
   let contextStr = '';
@@ -575,9 +621,14 @@ function parseLogLine(rawString) {
     }
   }
 
-  // Format HTML
+  return { level, timeStr, contextStr, messageStr, isSuccess };
+}
+
+// renderLogHtml turns a parsed line into markup. Only called for lines being
+// put into the DOM, which is why the log panel costs nothing while it is closed.
+function renderLogHtml({ level, timeStr, contextStr, messageStr, isSuccess }) {
   let html = '';
-  
+
   // 1. Time badge
   if (timeStr) {
     let formattedTime = timeStr;
@@ -620,64 +671,89 @@ function parseLogLine(rawString) {
 
   html += `<span class="log-msg">${formattedMessage}</span>`;
 
-  return {
-    level: level,
-    htmlText: html
-  };
+  return html;
+}
+
+function isLogsViewOpen() {
+  return document.body.getAttribute('data-active-tab') === 'view-logs';
+}
+
+function makeLogElement(entry) {
+  const el = document.createElement('div');
+  el.className = `log-line log-${entry.level.toLowerCase()}`;
+  el.innerHTML = renderLogHtml(parseLogLine(entry.text));
+  return el;
 }
 
 function renderLogs() {
   fullLogOutput.innerHTML = '';
-  const filteredLogs = currentLogFilter === 'ALL' ? logsArray : logsArray.filter(log => log.level === currentLogFilter);
   const fragment = document.createDocumentFragment();
-  filteredLogs.forEach(log => {
-      const el = document.createElement('div');
-      el.className = `log-line log-${log.level.toLowerCase()}`;
-      el.innerHTML = log.htmlText || log.text;
-      fragment.appendChild(el);
+  logsArray.forEach(entry => {
+      if (currentLogFilter !== 'ALL' && entry.level !== currentLogFilter) return;
+      fragment.appendChild(makeLogElement(entry));
   });
   fullLogOutput.appendChild(fragment);
   fullLogOutput.scrollTop = fullLogOutput.scrollHeight;
+  logsDomStale = false;
 }
 
-function addLogEntry(rawString) {
-  const parsed = parseLogLine(rawString);
+// addLogEntries takes a whole batch from the backend and touches the DOM once.
+// Entries keep only the raw line and its level: the markup is rebuilt on demand
+// in makeLogElement, which halves what a full buffer retains.
+function addLogEntries(lines) {
+  if (!Array.isArray(lines) || lines.length === 0) return;
 
-  const logEntry = { 
-    level: parsed.level, 
-    text: stripAnsi(rawString), 
-    htmlText: parsed.htmlText 
-  };
-  logsArray.push(logEntry);
-  if (logsArray.length > MAX_LOG_ENTRIES) logsArray.shift();
+  const wasAtBottom = isScrolledToBottom;
+  // Nothing is on screen while the Logs view is closed, so skip the DOM work
+  // entirely and rebuild from the array if and when the user opens it.
+  const viewOpen = isLogsViewOpen();
+  const fragment = viewOpen ? document.createDocumentFragment() : null;
+  let appended = 0;
 
-  if (currentLogFilter === 'ALL' || currentLogFilter === parsed.level) {
-      const wasAtBottom = isScrolledToBottom;
-      const el = document.createElement('div');
-      el.className = `log-line log-${parsed.level.toLowerCase()}`;
-      el.innerHTML = parsed.htmlText;
-      fullLogOutput.appendChild(el);
-      while (fullLogOutput.childNodes.length > MAX_LOG_ENTRIES) fullLogOutput.removeChild(fullLogOutput.firstChild);
-      if (wasAtBottom) fullLogOutput.scrollTop = fullLogOutput.scrollHeight;
+  for (const raw of lines) {
+    const text = stripAnsi(String(raw));
+
+    // Фильтруем системный "шум" Windows, который не является ошибкой приложения
+    if (text.includes('wsasend: An established connection was aborted')) continue;
+    if (text.includes('connection was aborted by the software in your host machine')) continue;
+
+    const entry = { level: parseLogLine(text).level, text };
+    logsArray.push(entry);
+
+    if (viewOpen && (currentLogFilter === 'ALL' || currentLogFilter === entry.level)) {
+      fragment.appendChild(makeLogElement(entry));
+      appended++;
+    }
+  }
+
+  if (logsArray.length > MAX_LOG_ENTRIES) {
+    logsArray.splice(0, logsArray.length - MAX_LOG_ENTRIES);
+  }
+
+  if (!viewOpen) {
+    logsDomStale = true;
+  } else if (appended > 0) {
+    fullLogOutput.appendChild(fragment);
+    const excess = fullLogOutput.childNodes.length - MAX_LOG_ENTRIES;
+    for (let i = 0; i < excess; i++) fullLogOutput.removeChild(fullLogOutput.firstChild);
+    if (wasAtBottom) fullLogOutput.scrollTop = fullLogOutput.scrollHeight;
   }
 }
 
 // События API
-window.api.onLog((data) => {
-  const cleanData = data.toString();
-  // Фильтруем системный "шум" Windows, который не является ошибкой приложения
-  if (cleanData.includes('wsasend: An established connection was aborted')) return;
-  if (cleanData.includes('connection was aborted by the software in your host machine')) return;
-  
-  addLogEntry(cleanData);
-  // Use a precise pattern so partial matches like 'DNS server started' or
-  // 'restarted' don't falsely trigger the connected state.
-  if (/\bsing-box\s+started\b/i.test(cleanData) && appState !== 'on') updateAppInterface('on');
+window.api.onLog(addLogEntries);
+
+// The backend signals this once the core is actually up. Previously the UI
+// watched the log stream for "sing-box started", which meant the connected
+// state silently depended on the core's log level being verbose enough.
+window.api.onStarted(() => {
+  if (appState !== 'on') updateAppInterface('on');
 });
 
 clearLogsBtn.onclick = () => {
   logsArray.length = 0;
   fullLogOutput.innerHTML = '';
+  logsDomStale = false;
 };
 
 window.api.onStopped(() => {
@@ -1270,6 +1346,7 @@ function collectAndSaveSettings() {
     dnsLeak: document.getElementById('dnsLeakCheckbox').checked,
     ipv6Leak: document.getElementById('ipv6LeakCheckbox').checked,
     fakeDns: document.getElementById('fakeDnsCheckbox').checked,
+    verboseLogging: document.getElementById('verboseLoggingCheckbox').checked,
     lastSelectedServer: activeServerLink,
     customDirect: document.getElementById('customDirect').value.split('\n').map(s => s.trim()).filter(s => s.length > 0),
     processMode: processModeHidden.value,
@@ -1307,13 +1384,19 @@ async function animateAndAction(action) {
   document.body.classList.add('window-hidden');
   await new Promise(res => setTimeout(res, 250));
   action();
+  // Только после того, как окно действительно ушло: до этого анимация
+  // затухания ещё должна проигрываться.
+  setUiActive(false);
 }
 
 document.getElementById('minimizeBtn').onclick = () => animateAndAction(() => window.api.minimize());
 document.getElementById('closeBtn').onclick = () => animateAndAction(() => window.api.close());
 
+window.api.onWindowHidden(() => setUiActive(false));
+
 window.api.onWindowRestored(() => {
   document.body.classList.remove('window-hidden');
+  setUiActive(true);
 });
 
 function showUpdateModal(update) {
@@ -1484,6 +1567,7 @@ async function init() {
     document.getElementById('dnsLeakCheckbox').checked = settings.dnsLeak !== undefined ? !!settings.dnsLeak : true;
     document.getElementById('ipv6LeakCheckbox').checked = settings.ipv6Leak !== undefined ? !!settings.ipv6Leak : true;
     document.getElementById('fakeDnsCheckbox').checked = settings.fakeDns !== undefined ? !!settings.fakeDns : true;
+    document.getElementById('verboseLoggingCheckbox').checked = !!settings.verboseLogging;
     if (settings.customDirect) document.getElementById('customDirect').value = settings.customDirect.join('\n');
     
     if (settings.processListBlacklist) processListBlacklistEl.value = settings.processListBlacklist.join('\n');

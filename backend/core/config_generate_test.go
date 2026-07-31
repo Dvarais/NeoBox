@@ -680,3 +680,31 @@ func TestConfigIsJSONSerialisable(t *testing.T) {
 		}
 	}
 }
+
+func logLevel(t *testing.T, cfg map[string]interface{}) string {
+	t.Helper()
+	logSection, ok := cfg["log"].(map[string]interface{})
+	if !ok {
+		t.Fatal("config has no log section")
+	}
+	level, ok := logSection["level"].(string)
+	if !ok {
+		t.Fatal("log section has no level")
+	}
+	return level
+}
+
+// The default is deliberately quiet: at "info" sing-box logs every connection
+// open and close, and each of those lines has to cross into the WebView2
+// renderer, which is what made memory grow without bound.
+func TestLogLevelDefaultsToWarn(t *testing.T) {
+	if got := logLevel(t, generate(t, Settings{})); got != "warn" {
+		t.Errorf("default log level = %q, want %q", got, "warn")
+	}
+}
+
+func TestVerboseLoggingRaisesLogLevel(t *testing.T) {
+	if got := logLevel(t, generate(t, Settings{VerboseLogging: true})); got != "info" {
+		t.Errorf("verbose log level = %q, want %q", got, "info")
+	}
+}

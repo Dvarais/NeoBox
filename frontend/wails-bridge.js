@@ -121,7 +121,10 @@ window.api = {
   },
 
   // Event bindings (mocked or bound to Wails runtime EventsOn)
-  onLog: (callback) => EventsOn('xray-log', callback),
+  // The backend batches log lines (see backend/service/logstream.go): the
+  // callback receives an array, not a single line.
+  onLog: (callback) => EventsOn('xray-log-batch', callback),
+  onStarted: (callback) => EventsOn('xray-started', callback),
   onStopped: (callback) => EventsOn('xray-stopped', callback),
   onSubscriptionResult: (callback) => {
     window.api._subResultCallback = callback;
@@ -173,6 +176,12 @@ window.api = {
       NotifyWindowHidden();
     }
   },
+  // Emitted by the backend whenever the window goes to the tray, including the
+  // paths the frontend never sees (tray menu toggle, close-to-tray).
+  onWindowHidden: (callback) => {
+    EventsOn('window-hidden', callback);
+    EventsOn('wails:window-minimise', callback);
+  },
   onWindowRestored: (callback) => {
     EventsOn('window-restored', callback);
     EventsOn('wails:window-unminimise', callback);
@@ -212,10 +221,10 @@ EventsOn('traffic-stats', (data) => {
     speedDownload.textContent = formatSpeed(data.down);
     speedUpload.textContent = formatSpeed(data.up);
 
-    // Накапливаем суммарный трафик за сессию
-    // data.down/up — текущая скорость в bytes/s, интервал поллинга ~1с
-    window.sessionBytesDown += (data.down || 0);
-    window.sessionBytesUp   += (data.up   || 0);
+    // Итоги за сессию считает Go: пока окно в трее события сюда не приходят
+    // вовсе, и суммирование на этой стороне потеряло бы весь этот трафик.
+    window.sessionBytesDown = data.totalDown || 0;
+    window.sessionBytesUp   = data.totalUp   || 0;
 
     const totalContainer = document.getElementById('sessionTotalContainer');
     const totalDown = document.getElementById('sessionTotalDown');

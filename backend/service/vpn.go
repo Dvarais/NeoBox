@@ -88,13 +88,26 @@ func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[s
 	wCtx := s.wailsCtx
 	s.wailsCtxMu.RUnlock()
 	if wCtx != nil {
-		lw := &wailsLogWriter{}
-		lw.mu.Lock()
-		lw.ctx = wCtx
-		lw.mu.Unlock()
-		logWriter = lw
+		// A previous session's streamer may still be running — the watchdog
+		// reconnects by calling StartXray again — and overwriting the field
+		// would strand its goroutine.
+		s.stopLogStream()
+		// emitSafe re-reads wailsCtx under its own lock on every send, so the
+		// streamer never captures a context that SetContext may replace.
+		ls := newLogStreamer(s.emitSafe, s.isWindowVisible)
+		s.stateMu.Lock()
+		s.logStream = ls
+		s.stateMu.Unlock()
+		logWriter = ls
 	}
+
+	// A new session starts its traffic counters from zero.
+	s.resetSessionTraffic()
+
 	if err := s.coreManager.Start(string(configBytes), logWriter); err != nil {
+		// The streamer was already running to catch startup output; wind it
+		// down so a failed attempt does not leave its goroutine behind.
+		s.stopLogStream()
 		errMsg := err.Error()
 		// Provide a user-friendly message if the proxy port is already in use.
 		// This replaces the TOCTOU check with atomic error detection from sing-box itself.
@@ -116,6 +129,7 @@ func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[s
 		if err := s.enableKillSwitch(serverIP); err != nil {
 			fmt.Printf("[killswitch] failed to arm: %v\n", err)
 			_ = s.coreManager.Stop()
+			s.stopLogStream()
 			s.disableKillSwitch()
 			response["error"] = i18n.T(i18n.ErrKillSwitchFailed, err)
 			return response
@@ -146,6 +160,13 @@ func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[s
 	// Start watchdog — auto-reconnect if tunnel drops
 	go s.startWatchdog(link, useSystemProxy)
 
+	// Tell the UI the session is up. It used to infer this by matching
+	// "sing-box started" in the log stream, which tied the connected state to
+	// the core's log level — and to the UI receiving a line it does not
+	// otherwise need. Every start path (including the watchdog's reconnect)
+	// comes through here, so this is both the earlier and the surer signal.
+	s.emitSafe("xray-started", nil)
+
 	response["success"] = true
 	return response
 }
@@ -171,6 +192,7 @@ func (s *AppService) StopXray() map[string]interface{} {
 		response["error"] = err.Error()
 		return response
 	}
+	s.stopLogStream()
 
 	s.wailsCtxMu.RLock()
 	wCtxStop := s.wailsCtx
@@ -202,6 +224,7 @@ func (s *AppService) RestartXray(link string, settingsJSON string, useSystemProx
 	}
 	s.stateMu.Unlock()
 	_ = s.coreManager.Stop()
+	s.stopLogStream()
 
 	// Emit stopped event so UI knows the old session ended
 	s.wailsCtxMu.RLock()
@@ -299,14 +322,30 @@ func (s *AppService) startTrafficMonitor(ctx context.Context) {
 				return
 			}
 
+			// Keep draining the stream regardless of window state — stopping
+			// would break the HTTP connection — but fold every sample into the
+			// session totals here rather than in JS. The frontend used to sum
+			// the per-second speeds itself, which cannot survive a period where
+			// no events are delivered at all.
+			totalUp, totalDown := s.addSessionTraffic(stats.Up, stats.Down)
+
+			// While the window is hidden nobody can see the speedometer, and
+			// every event is a separate ExecuteScript into WebView2. Skip it;
+			// onWindowRestored sends one catch-up sample with the totals.
+			if !s.isWindowVisible() {
+				continue
+			}
+
 			// Emit stats to the Wails frontend
 			s.wailsCtxMu.RLock()
 			wCtx := s.wailsCtx
 			s.wailsCtxMu.RUnlock()
 			if wCtx != nil {
 				wailsruntime.EventsEmit(wCtx, "traffic-stats", map[string]interface{}{
-					"up":   stats.Up,
-					"down": stats.Down,
+					"up":        stats.Up,
+					"down":      stats.Down,
+					"totalUp":   totalUp,
+					"totalDown": totalDown,
 				})
 			}
 		}
