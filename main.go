@@ -113,7 +113,10 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0}, // Transparent background
+		// Opaque, and matching --bg-color in style.css: the page paints a solid
+		// background anyway, so a transparent one only showed through in the
+		// resize gutters and during the fade-out animation.
+		BackgroundColour: &options.RGBA{R: 11, G: 15, B: 25, A: 255},
 		OnStartup: func(ctx context.Context) {
 			appService.SetContext(ctx)
 			appService.StartAutoUpdateScheduler()
@@ -150,11 +153,15 @@ func main() {
 		Bind: []interface{}{
 			appService,
 		},
-		// Native Windows backdrop configurations for premium glass effects
 		Windows: &windows.Options{
-			WebviewIsTransparent: true,
-			WindowIsTranslucent:  true,
-			BackdropType:         windows.Acrylic, // High-fidelity Windows Acrylic blurring
+			// The page fills itself with an opaque background (body in
+			// style.css), so nothing was ever visible through the window.
+			// Asking for transparency anyway bought no glass effect and cost
+			// real memory: it puts WebView2 on its transparent composition
+			// path, which keeps extra render surfaces alive in the GPU process.
+			WebviewIsTransparent: false,
+			WindowIsTranslucent:  false,
+			BackdropType:         windows.None,
 			Theme:                windows.Dark,
 		},
 	})

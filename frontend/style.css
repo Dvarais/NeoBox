@@ -108,10 +108,13 @@ body.app-idle *::after {
 }
 
 /* Sidebar */
+/* backdrop-filter остался только там, где за элементом действительно что-то
+   есть: шапка, под которую уезжает контент, и оверлеи модалок. На постоянных
+   панелях поверх сплошного фона страницы размывать нечего, а каждый такой слой
+   — это отдельная render surface плюс буфер размытия в памяти GPU. */
 aside {
   width: 70px;
   background: rgba(22, 27, 44, 0.5);
-  backdrop-filter: blur(10px);
   border-right: 1px solid var(--glass-border);
   display: flex;
   flex-direction: column;
@@ -392,7 +395,6 @@ input[type="text"]:focus, select:focus, textarea:focus {
   width: 350px;
   height: 200px;
   background: rgba(0, 0, 0, 0.8);
-  backdrop-filter: blur(10px);
   border-top: 1px solid var(--glass-border);
   border-left: 1px solid var(--glass-border);
   padding: 10px;
@@ -425,7 +427,6 @@ input[type="text"]:focus, select:focus, textarea:focus {
   flex-direction: column;
   height: 100%;
   background: rgba(22, 27, 44, 0.4);
-  backdrop-filter: blur(10px);
   border: 1px solid var(--glass-border);
   color: #e2e8f0;
   font-family: 'Consolas', 'Courier New', monospace;
@@ -859,7 +860,6 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--glass-border);
   border-radius: 12px;
-  backdrop-filter: blur(10px);
   box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
   transition: all 0.3s ease;
 }
@@ -1224,7 +1224,6 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   border: 1px solid var(--glass-border);
   border-radius: 12px;
   padding: 10px 18px;
-  backdrop-filter: blur(8px);
   transition: all 0.25s ease;
 }
 
@@ -1589,7 +1588,6 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   border: 1px solid rgba(56, 189, 248, 0.15);
   border-radius: 16px;
   padding: 15px 18px;
-  backdrop-filter: blur(16px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4),
               inset 0 1px 0 rgba(255, 255, 255, 0.05);
   transition: all 0.3s ease;
