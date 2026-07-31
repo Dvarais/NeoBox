@@ -982,8 +982,23 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			"address":        []string{"172.18.0.1/30", "fdfe:dcba:9876::1/126"},
 			"auto_route":     true,
 			"strict_route":   true,
-			"stack":          "gvisor",
-			"mtu":            1280,
+			// "mixed" runs TCP through the system stack and keeps gVisor for
+			// UDP. It is what sing-tun itself picks when no stack is named and
+			// gVisor is compiled in (see sing-tun/stack.go), so it is the best
+			// travelled path, and it takes TCP -- the bulk of the traffic -- out
+			// of the userspace network stack entirely.
+			//
+			// Note the side effect: the system stack forwards over real sockets
+			// and so adds a Windows Firewall rule allowing inbound TCP for this
+			// executable (sing-tun/stack_system.go calls fixWindowsFirewall).
+			// The system stack also needs one address beyond the first in each
+			// prefix for its NAT; the /30 and /126 above provide it.
+			"stack": "mixed",
+			// sing-box's own default. The previous 1280 -- the IPv6 minimum, a
+			// value that is never wrong and rarely right -- meant roughly seven
+			// times as many packets for the same bytes, and every one of them
+			// paid a full stack traversal.
+			"mtu": 9000,
 		})
 		config["inbounds"] = inboundsSection
 	}

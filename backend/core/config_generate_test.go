@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"net/netip"
 	"os"
 	"testing"
 )
@@ -727,6 +728,58 @@ func TestCoreLogIsNotWrittenToStderr(t *testing.T) {
 		}
 		if output != os.DevNull {
 			t.Errorf("verbose=%v: log output = %q, want %q", verbose, output, os.DevNull)
+		}
+	}
+}
+
+func tunInbound(t *testing.T, cfg map[string]interface{}) map[string]interface{} {
+	t.Helper()
+	inbounds, ok := cfg["inbounds"].([]map[string]interface{})
+	if !ok {
+		t.Fatal("config has no inbounds")
+	}
+	for _, in := range inbounds {
+		if in["type"] == "tun" {
+			return in
+		}
+	}
+	t.Fatal("no tun inbound in config")
+	return nil
+}
+
+// Both values were inherited from the project's first commit without a stated
+// reason and both cost real CPU. Pin them so a future change is a decision
+// rather than a drift.
+func TestTunStackAndMTU(t *testing.T) {
+	tun := tunInbound(t, generate(t, Settings{TunMode: true}))
+
+	// "mixed" keeps gVisor for UDP but takes TCP out of the userspace stack.
+	if got := tun["stack"]; got != "mixed" {
+		t.Errorf("tun stack = %v, want mixed", got)
+	}
+	// 1280 is the IPv6 minimum: safe, and about seven times more packets per
+	// byte than sing-box's own default.
+	if got := tun["mtu"]; got != 9000 {
+		t.Errorf("tun mtu = %v, want 9000", got)
+	}
+}
+
+// The system stack underneath "mixed" claims the address after the first one in
+// each prefix for its NAT, and refuses to start without it.
+func TestTunPrefixesLeaveRoomForSystemStackNAT(t *testing.T) {
+	tun := tunInbound(t, generate(t, Settings{TunMode: true}))
+	addrs, ok := tun["address"].([]string)
+	if !ok || len(addrs) == 0 {
+		t.Fatal("tun inbound has no address list")
+	}
+	for _, a := range addrs {
+		prefix, err := netip.ParsePrefix(a)
+		if err != nil {
+			t.Fatalf("address %q does not parse: %v", a, err)
+		}
+		if !prefix.Contains(prefix.Addr().Next()) {
+			t.Errorf("prefix %s has no address after %s; the system stack cannot NAT",
+				prefix, prefix.Addr())
 		}
 	}
 }
