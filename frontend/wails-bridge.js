@@ -177,11 +177,12 @@ window.api = {
     }
   },
   // Emitted by the backend whenever the window goes to the tray, including the
-  // paths the frontend never sees (tray menu toggle, close-to-tray).
-  onWindowHidden: (callback) => {
-    EventsOn('window-hidden', callback);
-    EventsOn('wails:window-minimise', callback);
-  },
+  // paths the frontend never sees (tray menu toggle, close-to-tray). The
+  // frontend's own minimise and close buttons idle the UI themselves; a
+  // minimise the app never initiated (taskbar, Win+D) is not covered, because
+  // Wails hides the Win32 window without touching the WebView2 controller and
+  // so the page is never told.
+  onWindowHidden: (callback) => EventsOn('window-hidden', callback),
   onWindowRestored: (callback) => {
     EventsOn('window-restored', callback);
     EventsOn('wails:window-unminimise', callback);
