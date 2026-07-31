@@ -56,7 +56,7 @@ in Russian and English.
 
 You need Windows — 10 or 11 if you want the Acrylic effect to actually render.
 
-1. Grab `NeoBox_Setup_v1.7.5.3.exe` from the [Releases](https://github.com/Dvarais/NeoBox/releases)
+1. Grab `NeoBox_Setup_v1.7.5.4.exe` from the [Releases](https://github.com/Dvarais/NeoBox/releases)
    page, or `NeoBox.exe` if you would rather run it without installing.
 2. Run it, then launch the app.
 3. Add a subscription and pick a server.
@@ -190,7 +190,7 @@ NeoBox — десктопный клиент для прокси-протоко�
 
 Нужна Windows — 10 или 11, если хотите, чтобы эффект Acrylic действительно отрисовался.
 
-1. Скачайте `NeoBox_Setup_v1.7.5.3.exe` со страницы
+1. Скачайте `NeoBox_Setup_v1.7.5.4.exe` со страницы
    [Releases](https://github.com/Dvarais/NeoBox/releases) или `NeoBox.exe`, если
    предпочитаете портативный вариант без установки.
 2. Запустите установщик, затем само приложение.

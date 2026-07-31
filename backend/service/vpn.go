@@ -243,18 +243,29 @@ func (s *AppService) RestartXray(link string, settingsJSON string, useSystemProx
 	return s.StartXray(link, settingsJSON, useSystemProxy)
 }
 
-// PingServer measures TCP round-trip latency to the server host and port.
+// PingServer measures round-trip latency to a server: the TCP handshake where
+// the protocol runs over TCP, and an ICMP echo where it does not.
+//
+// The split exists because a TCP dial to a UDP-only server — WireGuard, TUIC,
+// Hysteria — can only ever time out, so every such node used to report -1 and
+// sank to the bottom of the "fastest server" ordering however good it was.
 func (s *AppService) PingServer(link string) int {
 	outbound, err := core.ParseProxyLink(link)
 	if err != nil {
 		return -1
 	}
 
-	server, _ := outbound["server"].(string)
-	port, _ := outbound["server_port"].(int)
-
+	server, port := core.ServerEndpoint(outbound)
 	if server == "" || port == 0 {
 		return -1
+	}
+
+	if core.IsUDPOnly(core.ProtocolOf(link)) {
+		// ICMP times the path to the host rather than the service on the port.
+		// It is the closest thing to a round trip available without performing
+		// the protocol's own handshake, and it returns -1 when the server
+		// filters echo requests — the same "unknown" the caller already handles.
+		return icmpEchoLatency(server, 3*time.Second)
 	}
 
 	// Use net.JoinHostPort so IPv6 addresses are correctly wrapped in brackets: [::1]:port

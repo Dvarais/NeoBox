@@ -26,9 +26,23 @@ func TestProtocolOf(t *testing.T) {
 		{"Hy2://pw@example.com:443", "hysteria2"},
 		{"  vless://uuid@example.com:443  ", "vless"},
 
+		{"anytls://pw@example.com:443", "anytls"},
+		{"socks://example.com:1080", "socks"},
+		{"socks5://user:pw@example.com:1080", "socks"},
+
+		// An HTTP proxy is told from a web address by its shape: explicit port,
+		// no path. Both spell "http://", and only the former is a node.
+		{"http://1.2.3.4:8080#Home", "http"},
+		{"http://user:pw@1.2.3.4:8080", "http"},
+		{"http://[2001:db8::1]:8080", "http"},
+		{"http://example.com:8080/", "http"},
+
 		// Not proxy links.
 		{"https://example.com/sub", ""},
 		{"http://example.com/sub", ""},
+		{"http://example.com:8080/sub", ""},
+		{"http://example.com", ""},
+		{"http://[2001:db8::1]", ""},
 		{"example.com", ""},
 		{"", ""},
 		{"://nohost", ""},
@@ -75,6 +89,10 @@ func TestProtocolOfCoversParsedSchemes(t *testing.T) {
 		"hysteria2://pw@example.com:443",
 		"hy2://pw@example.com:443",
 		"hysteria://example.com:443?auth=x",
+		"anytls://pw@example.com:443",
+		"socks://example.com:1080",
+		"socks5://user:pw@example.com:1080",
+		"http://1.2.3.4:8080",
 	}
 
 	for _, link := range links {

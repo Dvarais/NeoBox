@@ -37,9 +37,14 @@ const (
 	ErrSecretGeneration  = "error.secret.generate"
 
 	// Errors produced while parsing links and subscriptions.
-	ErrLinkTooLong     = "error.link.too_long"
-	ErrSubURLTooLong   = "error.suburl.too_long"
-	ErrSubURLNotSecure = "error.suburl.insecure"
+	ErrLinkTooLong          = "error.link.too_long"
+	ErrSubURLTooLong        = "error.suburl.too_long"
+	ErrSubURLNotSecure      = "error.suburl.insecure"
+	ErrSubBlockedByHost     = "error.sub.blocked"
+	ErrSubUnreachable       = "error.sub.unreachable"
+	ErrSubNoNodes           = "error.sub.no_nodes"
+	ErrWireGuardNoAddress   = "error.wireguard.no_address"
+	ErrTransportUnsupported = "error.transport.unsupported"
 
 	// Diagnostics screen.
 	DiagWintunName         = "diag.wintun.name"
@@ -103,9 +108,14 @@ var messages = map[Lang]map[string]string{
 		ErrSignatureRejected: "Проверка подписи не удалась: %v",
 		ErrSecretGeneration:  "Не удалось сгенерировать секрет для Clash API, подключение отменено: %v",
 
-		ErrLinkTooLong:     "Ссылка прокси слишком длинная (максимум %d символов)",
-		ErrSubURLTooLong:   "URL подписки слишком длинный (максимум %d символов)",
-		ErrSubURLNotSecure: "Небезопасный URL подписки: используйте HTTPS вместо HTTP для защиты от перехвата",
+		ErrLinkTooLong:          "Ссылка прокси слишком длинная (максимум %d символов)",
+		ErrSubURLTooLong:        "URL подписки слишком длинный (максимум %d символов)",
+		ErrSubURLNotSecure:      "Небезопасный URL подписки: используйте HTTPS вместо HTTP для защиты от перехвата",
+		ErrSubBlockedByHost:     "Сервер подписки вернул веб-страницу вместо списка серверов. Обычно это страница входа, оплаты или проверки — откройте ссылку в браузере и проверьте, активна ли подписка.",
+		ErrSubUnreachable:       "Не удалось загрузить подписку: %v",
+		ErrSubNoNodes:           "Подписка загружена, но не содержит серверов в поддерживаемом формате",
+		ErrWireGuardNoAddress:   "В ссылке WireGuard не указан адрес интерфейса (параметр address) — без него туннель не поднять",
+		ErrTransportUnsupported: "Транспорт %s не поддерживается ядром sing-box. Такой сервер работает только в клиентах на базе Xray.",
 
 		DiagWintunName:         "Wintun драйвер",
 		DiagWintunFound:        "Найден (%s)",
@@ -163,9 +173,14 @@ var messages = map[Lang]map[string]string{
 		ErrSignatureRejected: "Signature verification failed: %v",
 		ErrSecretGeneration:  "Could not generate the Clash API secret, connection cancelled: %v",
 
-		ErrLinkTooLong:     "Proxy link is too long (maximum %d characters)",
-		ErrSubURLTooLong:   "Subscription URL is too long (maximum %d characters)",
-		ErrSubURLNotSecure: "Insecure subscription URL: use HTTPS instead of HTTP to prevent interception",
+		ErrLinkTooLong:          "Proxy link is too long (maximum %d characters)",
+		ErrSubURLTooLong:        "Subscription URL is too long (maximum %d characters)",
+		ErrSubURLNotSecure:      "Insecure subscription URL: use HTTPS instead of HTTP to prevent interception",
+		ErrSubBlockedByHost:     "The subscription host returned a web page instead of a server list. That is usually a sign-in, payment or verification page — open the link in a browser and check that the subscription is still active.",
+		ErrSubUnreachable:       "Could not download the subscription: %v",
+		ErrSubNoNodes:           "The subscription was downloaded but holds no servers in a supported format",
+		ErrWireGuardNoAddress:   "The WireGuard link carries no interface address (the \"address\" parameter); the tunnel cannot come up without it",
+		ErrTransportUnsupported: "The %s transport is not supported by the sing-box core. Such a server only works in Xray-based clients.",
 
 		DiagWintunName:         "Wintun driver",
 		DiagWintunFound:        "Found (%s)",

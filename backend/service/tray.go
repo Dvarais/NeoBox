@@ -406,6 +406,10 @@ var trayProtocolLabels = map[string]string{
 	"tuic":      "tuic:",
 	"hysteria2": "hy2:",
 	"hysteria":  "hy1:",
+	"anytls":    "anytls:",
+	"socks":     "socks:",
+	"http":      "http:",
+	"wireguard": "wg:",
 }
 
 // RebuildTrayServers mirrors the saved subscriptions into the tray menu.

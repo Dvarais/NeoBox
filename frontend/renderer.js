@@ -1019,7 +1019,7 @@ function renderHistoryTab() {
   // раздаёт. Карточки собираются через DOM API с textContent, а не шаблонной
   // строкой в innerHTML: раньше имя вставлялось сырым и в тело, и в атрибут
   // title, где кавычка в имени позволяла дописать произвольные атрибуты.
-  const protocolEmoji = { vless: '🟢', vmess: '🟡', trojan: '🔷', ss: '💜', tuic: '🟤', hysteria2: '🔵', hy2: '🔵' };
+  const protocolEmoji = { vless: '🟢', vmess: '🟡', trojan: '🔷', ss: '💜', tuic: '🟤', hysteria2: '🔵', hy2: '🔵', hysteria: '🔵', anytls: '🟠', wireguard: '⚪', wg: '⚪', socks: '⚫', socks5: '⚫', http: '⚫' };
   // Ключ ищем через hasOwnProperty: он тоже из ссылки, и protocolEmoji['constructor']
   // иначе вернул бы функцию из прототипа Object вместо эмодзи.
   const emojiFor = (protocol) => {
@@ -2020,11 +2020,17 @@ async function handleQrImport(link) {
   const t = translations[currentLanguage];
   const trimmed = link.trim();
   
-  if (trimmed.startsWith('vless://') || trimmed.startsWith('vmess://') ||
-      trimmed.startsWith('ss://') || trimmed.startsWith('trojan://') ||
-      trimmed.startsWith('tuic://') || trimmed.startsWith('hysteria2://') ||
-      trimmed.startsWith('hy2://') || trimmed.startsWith('hysteria://')) {
-    
+  // Kept in step with proxySchemes in backend/core/protocol.go. "http" is left
+  // out on purpose: a QR code holding a web address must not import as a
+  // server, and only the backend can tell the two shapes apart.
+  const qrSchemes = [
+    'vless', 'vmess', 'ss', 'trojan', 'tuic',
+    'hysteria', 'hysteria2', 'hy2', 'anytls',
+    'socks', 'socks5', 'wireguard', 'wg',
+  ];
+
+  if (qrSchemes.some(scheme => trimmed.toLowerCase().startsWith(`${scheme}://`))) {
+
     let qrSub = allSubscriptions.find(s => s.url === 'qrcode');
     if (qrSub) {
       const existing = new Set(qrSub.links);
@@ -2045,9 +2051,27 @@ async function handleQrImport(link) {
     closeQrModal();
     await loadSubscriptions();
     showAlert(t.alertDialogTitle, t.qrSuccessImport, false, t);
-  } else {
-    showAlert(t.errorDialogTitle, t.qrNoCodeError, true, t);
+    return;
   }
+
+  // Most QR codes handed out by a provider hold the subscription address, not a
+  // single node. Rejecting those was the whole reason scanning "did not work":
+  // the code read perfectly and was then thrown away.
+  if (/^https?:\/\//i.test(trimmed)) {
+    closeQrModal();
+    // Name it after the host, which is all the code carries and still tells one
+    // provider from another in the tab strip.
+    let name = trimmed;
+    try {
+      name = new URL(trimmed).hostname || trimmed;
+    } catch (e) {
+      // Not a URL the browser can parse; the raw text still names the tab.
+    }
+    await addSubscriptionByUrl(name, trimmed);
+    return;
+  }
+
+  showAlert(t.errorDialogTitle, t.qrUnsupportedContent.replace('{content}', trimmed.slice(0, 120)), true, t);
 }
 
 document.getElementById('pingAllBtn').onclick = () => {
@@ -2081,16 +2105,19 @@ document.getElementById('tunModeCheckbox').onchange = async (e) => {
   }
 };
 
-document.getElementById('addSubBtn').onclick = async () => {
-  const nameInput = document.getElementById('subName');
-  const urlInput = document.getElementById('subUrl');
-  const name = nameInput.value.trim();
-  const url = urlInput.value.trim();
-  if (!name || !url) return;
+// Wails rejects a bound call with the text of the Go error, sometimes wrapped
+// in an Error and sometimes as a bare string. The backend already translates
+// the message, so it goes straight to the user.
+function subscriptionErrorText(e) {
+  if (!e) return '';
+  return typeof e === 'string' ? e : (e.message || String(e));
+}
 
-  nameInput.value = '';
-  urlInput.value = '';
-
+// Adds a subscription and fetches it in the background, showing the tab with a
+// spinner straight away. Shared by the "add" button and the QR import, since a
+// QR code carrying a subscription address has to end up in exactly the same
+// state as one typed by hand — auto-update included.
+async function addSubscriptionByUrl(name, url) {
   const newSubId = Date.now().toString();
   const newSub = { id: newSubId, name, url, links: [], loading: true };
   allSubscriptions.push(newSub);
@@ -2120,8 +2147,23 @@ document.getElementById('addSubBtn').onclick = async () => {
         await window.api.saveSubscriptions(allSubscriptions);
         await loadSubscriptions();
       }
+      const t = translations[currentLanguage];
+      showAlert(t.errorDialogTitle, subscriptionErrorText(e), true, t);
     }
   })();
+}
+
+document.getElementById('addSubBtn').onclick = async () => {
+  const nameInput = document.getElementById('subName');
+  const urlInput = document.getElementById('subUrl');
+  const name = nameInput.value.trim();
+  const url = urlInput.value.trim();
+  if (!name || !url) return;
+
+  nameInput.value = '';
+  urlInput.value = '';
+
+  await addSubscriptionByUrl(name, url);
 };
 
 document.getElementById('importClipboardBtn').onclick = () => {
@@ -2134,7 +2176,9 @@ document.getElementById('updateSubBtn').onclick = async () => {
   document.getElementById('updateSubBtn').textContent = currentLanguage === 'RU' ? 'Обновление...' : 'Updating...';
   
   if (currentActiveSubId === 'all') {
-    // Update all subscriptions
+    // Update all subscriptions. Failures are collected rather than reported one
+    // by one, so a dead subscription cannot bury the user in dialogs.
+    const failures = [];
     for (const sub of allSubscriptions) {
       try {
         const links = await window.api.fetchSubscription(sub.url);
@@ -2143,10 +2187,14 @@ document.getElementById('updateSubBtn').onclick = async () => {
         }
       } catch (e) {
         console.error('Failed to update subscription:', sub.name, e);
+        failures.push(`${sub.name}: ${subscriptionErrorText(e)}`);
       }
     }
     await window.api.saveSubscriptions(allSubscriptions);
     await loadSubscriptions();
+    if (failures.length > 0) {
+      showAlert(t.errorDialogTitle, failures.join('\n\n'), true, t);
+    }
   } else {
     // Update the selected active subscription
     const sub = allSubscriptions.find(s => s.id === currentActiveSubId);
@@ -2160,6 +2208,7 @@ document.getElementById('updateSubBtn').onclick = async () => {
         }
       } catch (e) {
         console.error('Failed to update subscription:', sub.name, e);
+        showAlert(t.errorDialogTitle, subscriptionErrorText(e), true, t);
       }
     }
   }

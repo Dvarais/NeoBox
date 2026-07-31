@@ -32,6 +32,13 @@ var realisticUserAgents = []string{
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 OPR/112.0.0.0",
 }
 
+// subscriptionClientUA names NeoBox as a proxy client. Some subscription hosts
+// sniff the User-Agent and serve a human-facing HTML activation page to
+// anything that looks like a browser, handing the node list only to a
+// recognised client. This is sent solely as a retry after a browser User-Agent
+// has been turned away, so an ordinary fetch still keeps NeoBox anonymous.
+const subscriptionClientUA = "v2rayN/6.45"
+
 // getRandomUserAgent returns a random browser User-Agent string from the pool.
 func getRandomUserAgent() string {
 	idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(realisticUserAgents))))
@@ -85,6 +92,110 @@ func boolDefault(b *bool, def bool) bool {
 		return def
 	}
 	return *b
+}
+
+// decodeBase64Any decodes a base64 payload written in any of the four common
+// spellings: the standard or the URL-safe alphabet, padded or not. Clients
+// disagree on which they emit and a subscription is not worth losing over it.
+func decodeBase64Any(payload string) ([]byte, error) {
+	padded := strings.TrimSpace(payload)
+	if len(padded)%4 != 0 {
+		padded += strings.Repeat("=", 4-(len(padded)%4))
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(padded)
+	if err == nil {
+		return decoded, nil
+	}
+	return base64.URLEncoding.DecodeString(padded)
+}
+
+// unescapeOrKeep percent-decodes a URL component, leaving it untouched when it
+// is not valid escaping — a literal "%" in a password is likelier than an
+// intentional escape, and dropping the value would be worse than either.
+func unescapeOrKeep(component string) string {
+	if unescaped, err := url.PathUnescape(component); err == nil {
+		return unescaped
+	}
+	return component
+}
+
+// copyFirstWireGuardPeer replaces the "peers" list of a WireGuard outbound with
+// a copy and returns the first peer, ready to be modified. It returns nil for
+// anything that is not a WireGuard endpoint with at least one peer.
+//
+// The copy exists because GenerateConfig promises not to touch the caller's
+// outbound: its own copy is shallow, so the peer maps underneath are still the
+// caller's until they are duplicated here.
+func copyFirstWireGuardPeer(outbound map[string]interface{}) map[string]interface{} {
+	if outboundType, _ := outbound["type"].(string); outboundType != "wireguard" {
+		return nil
+	}
+	peers, _ := outbound["peers"].([]interface{})
+	if len(peers) == 0 {
+		return nil
+	}
+
+	copied := make([]interface{}, 0, len(peers))
+	var first map[string]interface{}
+	for _, item := range peers {
+		peer, ok := item.(map[string]interface{})
+		if !ok {
+			copied = append(copied, item)
+			continue
+		}
+		clone := make(map[string]interface{}, len(peer))
+		for k, v := range peer {
+			clone[k] = v
+		}
+		if first == nil {
+			first = clone
+		}
+		copied = append(copied, clone)
+	}
+	outbound["peers"] = copied
+	return first
+}
+
+// withPrefixLength gives a WireGuard interface address the prefix length
+// sing-box requires. Clash and most share links carry a bare address, meaning
+// "this address only", which is /32 for IPv4 and /128 for IPv6.
+func withPrefixLength(address string) string {
+	if strings.Contains(address, "/") {
+		return address
+	}
+	if strings.Contains(address, ":") {
+		return address + "/128"
+	}
+	return address + "/32"
+}
+
+// parseReserved reads the three reserved bytes WARP-style WireGuard peers
+// prepend to each packet. They are written either as decimals ("0,0,0") or as
+// the base64 of the same three bytes; anything else yields nil, leaving the
+// field out rather than sending a wrong header.
+func parseReserved(value string) []int {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+
+	if parts := strings.Split(value, ","); len(parts) == 3 {
+		reserved := make([]int, 0, 3)
+		for _, part := range parts {
+			b, err := strconv.Atoi(strings.TrimSpace(part))
+			if err != nil || b < 0 || b > 255 {
+				return nil
+			}
+			reserved = append(reserved, b)
+		}
+		return reserved
+	}
+
+	if decoded, err := decodeBase64Any(value); err == nil && len(decoded) == 3 {
+		return []int{int(decoded[0]), int(decoded[1]), int(decoded[2])}
+	}
+	return nil
 }
 
 // ParseProxyLink parses protocol-specific proxy URLs into a generic outbound map.
@@ -232,9 +343,16 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 				"host": hupHost,
 				"path": hupPath,
 			}
-		} else if transportType == "http" || transportType == "h2" || transportType == "xhttp" || transportType == "splithttp" {
-			// XHTTP/SplitHTTP is an Xray-core transport not natively supported by sing-box.
-			// We map it to the "http" (HTTP/2) transport as the closest compatible alternative.
+		} else if transportType == "xhttp" || transportType == "splithttp" {
+			// XHTTP/SplitHTTP is an Xray-core transport, and sing-box 1.13 has
+			// no implementation of it — the transport list is tcp, ws, quic,
+			// grpc and httpupgrade. NeoBox used to map it onto HTTP/2 as "the
+			// closest alternative", but the two are not wire-compatible: the
+			// node then failed at connect time with an error about the server,
+			// which sent people looking in the wrong place. Say what is
+			// actually wrong instead.
+			return nil, errors.New(i18n.T(i18n.ErrTransportUnsupported, transportType))
+		} else if transportType == "http" || transportType == "h2" {
 			httpPath := params.Get("path")
 			if httpPath == "" {
 				httpPath = "/"
@@ -257,19 +375,21 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 		return outbound, nil
 
 	case "vmess":
-		// VMess usually uses base64-encoded hostname containing a JSON string.
-		b64Str := u.Host
-		// Pad base64 if needed.
-		if len(b64Str)%4 != 0 {
-			b64Str += strings.Repeat("=", 4-(len(b64Str)%4))
+		// VMess carries a base64-encoded JSON object where a host would be.
+		//
+		// The payload is taken from the raw string rather than u.Host: standard
+		// base64 can contain "/", which url.Parse reads as the start of a path
+		// and so would cut the payload in half. The alphabet is not fixed
+		// either — clients emit both standard and URL-safe base64 — so each is
+		// tried in turn.
+		b64Str := sanitized[strings.Index(sanitized, "://")+len("://"):]
+		if i := strings.Index(b64Str, "#"); i >= 0 {
+			b64Str = b64Str[:i]
 		}
-		decodedBytes, err := base64.StdEncoding.DecodeString(b64Str)
+		b64Str = strings.TrimSuffix(b64Str, "/")
+		decodedBytes, err := decodeBase64Any(b64Str)
 		if err != nil {
-			// Try decoding without host/hostname split.
-			decodedBytes, err = base64.StdEncoding.DecodeString(u.Hostname())
-			if err != nil {
-				return nil, fmt.Errorf("failed to decode vmess base64: %w", err)
-			}
+			return nil, fmt.Errorf("failed to decode vmess base64: %w", err)
 		}
 
 		var vmessData map[string]interface{}
@@ -360,7 +480,10 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 				"host": hostVal,
 				"path": pathVal,
 			}
-		} else if netVal == "http" || netVal == "h2" || netVal == "xhttp" || netVal == "splithttp" {
+		} else if netVal == "xhttp" || netVal == "splithttp" {
+			// Not a transport sing-box has — see the same case for VLESS above.
+			return nil, errors.New(i18n.T(i18n.ErrTransportUnsupported, netVal))
+		} else if netVal == "http" || netVal == "h2" {
 			pathVal, _ := vmessData["path"].(string)
 			if pathVal == "" {
 				pathVal = "/"
@@ -388,6 +511,17 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 		outbound["server"] = u.Hostname()
 		outbound["server_port"] = portInt
 
+		// SIP003 plugin, e.g. "?plugin=obfs-local;obfs=http;obfs-host=cdn.com".
+		// Set before the branches below, each of which returns on its own.
+		// Dropping it — as NeoBox used to — leaves a node that imports cleanly
+		// and then cannot connect, because the server expects the obfuscation.
+		if name, opts := parsePluginParam(u.Query().Get("plugin")); name != "" {
+			outbound["plugin"] = name
+			if opts != "" {
+				outbound["plugin_opts"] = opts
+			}
+		}
+
 		var authPart string
 		if u.User != nil {
 			authPart = u.User.String()
@@ -395,11 +529,7 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 
 		// Shadowsocks legacy base64 parsing.
 		if authPart == "" && u.Hostname() != "" && u.Port() == "" {
-			b64Str := u.Hostname()
-			if len(b64Str)%4 != 0 {
-				b64Str += strings.Repeat("=", 4-(len(b64Str)%4))
-			}
-			decoded, err := base64.StdEncoding.DecodeString(b64Str)
+			decoded, err := decodeBase64Any(u.Hostname())
 			if err == nil && strings.Contains(string(decoded), "@") {
 				parts := strings.SplitN(string(decoded), "@", 2)
 				auth := parts[0]
@@ -431,18 +561,18 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 		if authPart != "" {
 			if !strings.Contains(authPart, ":") {
 				// Base64 encoded user info.
-				if len(authPart)%4 != 0 {
-					authPart += strings.Repeat("=", 4-(len(authPart)%4))
-				}
-				decoded, err := base64.StdEncoding.DecodeString(authPart)
-				if err == nil {
+				if decoded, err := decodeBase64Any(authPart); err == nil {
 					authPart = string(decoded)
 				}
 			}
 			authParts := strings.SplitN(authPart, ":", 2)
 			if len(authParts) == 2 {
-				outbound["method"] = authParts[0]
-				outbound["password"] = authParts[1]
+				// u.User.String() hands back the userinfo still percent-escaped,
+				// so a password containing "@", "/" or a space arrives encoded.
+				// PathUnescape and not QueryUnescape: the latter would turn a
+				// "+" inside a password into a space.
+				outbound["method"] = unescapeOrKeep(authParts[0])
+				outbound["password"] = unescapeOrKeep(authParts[1])
 			}
 		}
 		return outbound, nil
@@ -619,6 +749,159 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 		}
 		outbound["tls"] = tlsMap
 		return outbound, nil
+
+	case "anytls":
+		// AnyTLS share link: anytls://PASSWORD@host:port?sni=…&insecure=1#name
+		portInt, _ := strconv.Atoi(u.Port())
+		if portInt == 0 {
+			portInt = 443
+		}
+		outbound["server"] = u.Hostname()
+		outbound["server_port"] = portInt
+
+		if u.User != nil {
+			// sing-box authenticates with a single password. Links usually carry
+			// it alone, but a "user:password@" pair also occurs in the wild —
+			// there the second half is the secret.
+			password := u.User.Username()
+			if p, ok := u.User.Password(); ok && p != "" {
+				password = p
+			}
+			outbound["password"] = password
+		}
+
+		params := u.Query()
+
+		// AnyTLS is TLS-only by definition, so the block is unconditional.
+		tlsMap := make(map[string]interface{})
+		tlsMap["enabled"] = true
+		sni := params.Get("sni")
+		if sni == "" {
+			sni = u.Hostname()
+		}
+		tlsMap["server_name"] = sni
+		if fp := params.Get("fp"); fp != "" {
+			tlsMap["utls"] = map[string]interface{}{
+				"enabled":     true,
+				"fingerprint": fp,
+			}
+		}
+		if alpnStr := params.Get("alpn"); alpnStr != "" {
+			tlsMap["alpn"] = strings.Split(alpnStr, ",")
+		}
+		if insecure := params.Get("insecure"); insecure == "1" || insecure == "true" {
+			tlsMap["insecure"] = true
+		}
+		outbound["tls"] = tlsMap
+		return outbound, nil
+
+	case "socks", "socks5":
+		// Both spellings are the same outbound; sing-box knows it as "socks".
+		outbound["type"] = "socks"
+		portInt, _ := strconv.Atoi(u.Port())
+		if portInt == 0 {
+			portInt = 1080
+		}
+		outbound["server"] = u.Hostname()
+		outbound["server_port"] = portInt
+		outbound["version"] = "5"
+
+		if u.User != nil {
+			if username := u.User.Username(); username != "" {
+				outbound["username"] = username
+			}
+			if password, ok := u.User.Password(); ok && password != "" {
+				outbound["password"] = password
+			}
+		}
+		return outbound, nil
+
+	case "wireguard":
+		// wireguard://PRIVATE_KEY@host:port?publickey=…&address=172.16.0.2/32&…
+		// which is the shape v2rayN and NekoBox write. The private key is
+		// base64 and can contain "/", so it travels percent-escaped in the
+		// userinfo and url.Parse hands it back decoded.
+		portInt, _ := strconv.Atoi(u.Port())
+		if portInt == 0 {
+			portInt = 51820
+		}
+		params := u.Query()
+
+		// Unlike every other protocol here, WireGuard needs the address of the
+		// local tunnel interface: it is part of the key exchange, not something
+		// the peer can hand out afterwards.
+		var addresses []string
+		for _, address := range strings.Split(params.Get("address"), ",") {
+			if address = strings.TrimSpace(address); address != "" {
+				addresses = append(addresses, withPrefixLength(address))
+			}
+		}
+		if len(addresses) == 0 {
+			return nil, errors.New(i18n.T(i18n.ErrWireGuardNoAddress))
+		}
+
+		peer := map[string]interface{}{
+			"address":     u.Hostname(),
+			"port":        portInt,
+			"public_key":  params.Get("publickey"),
+			"allowed_ips": []string{"0.0.0.0/0", "::/0"},
+		}
+		if psk := params.Get("presharedkey"); psk != "" {
+			peer["pre_shared_key"] = psk
+		}
+		if keepalive, err := strconv.Atoi(params.Get("keepalive")); err == nil && keepalive > 0 {
+			peer["persistent_keepalive_interval"] = keepalive
+		}
+		// WARP and its relatives prepend three reserved bytes to every packet.
+		if reserved := parseReserved(params.Get("reserved")); reserved != nil {
+			peer["reserved"] = reserved
+		}
+
+		outbound["type"] = "wireguard"
+		outbound["address"] = addresses
+		outbound["private_key"] = u.User.Username()
+		outbound["peers"] = []interface{}{peer}
+		if mtu, err := strconv.Atoi(params.Get("mtu")); err == nil && mtu > 0 {
+			outbound["mtu"] = mtu
+		}
+		return outbound, nil
+
+	case "http":
+		// Plain HTTP CONNECT proxy. ProtocolOf only reaches this case for links
+		// shaped like a proxy (explicit port, no path) — see isHTTPProxyLink.
+		portInt, _ := strconv.Atoi(u.Port())
+		if portInt == 0 {
+			portInt = 80
+		}
+		outbound["server"] = u.Hostname()
+		outbound["server_port"] = portInt
+
+		if u.User != nil {
+			if username := u.User.Username(); username != "" {
+				outbound["username"] = username
+			}
+			if password, ok := u.User.Password(); ok && password != "" {
+				outbound["password"] = password
+			}
+		}
+
+		// An HTTP proxy reached over TLS (Clash calls it "https"). The scheme
+		// cannot carry that, so it travels as a query parameter.
+		params := u.Query()
+		if tlsParam := params.Get("tls"); tlsParam == "1" || tlsParam == "true" {
+			tlsMap := make(map[string]interface{})
+			tlsMap["enabled"] = true
+			sni := params.Get("sni")
+			if sni == "" {
+				sni = u.Hostname()
+			}
+			tlsMap["server_name"] = sni
+			if insecure := params.Get("insecure"); insecure == "1" || insecure == "true" {
+				tlsMap["insecure"] = true
+			}
+			outbound["tls"] = tlsMap
+		}
+		return outbound, nil
 	}
 
 	return nil, fmt.Errorf("unsupported proxy protocol: %s", protocol)
@@ -681,8 +964,17 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 
 	// Pre-resolve proxy domain to IP to avoid DNS inside the tunnel.
 	// Uses a 2-second timeout so slow DNS won't freeze VPN startup.
+	//
+	// A WireGuard endpoint keeps its server address inside the first peer
+	// instead of a top-level field, and that peer is a nested map the shallow
+	// copy above still shares with the caller — so it is copied before being
+	// rewritten, or resolving would reach back into the caller's outbound.
 	serverDomain, _ := workOutbound["server"].(string)
 	workOutbound["domain_resolver"] = "dns-direct"
+	wgPeer := copyFirstWireGuardPeer(workOutbound)
+	if wgPeer != nil {
+		serverDomain, _ = wgPeer["address"].(string)
+	}
 	if net.ParseIP(serverDomain) == nil {
 		resolveCtx, resolveCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer resolveCancel()
@@ -690,7 +982,11 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		if err == nil {
 			for _, addr := range addrs {
 				if addr.IP.To4() != nil {
-					workOutbound["server"] = addr.IP.String()
+					if wgPeer != nil {
+						wgPeer["address"] = addr.IP.String()
+					} else {
+						workOutbound["server"] = addr.IP.String()
+					}
 					break
 				}
 			}
@@ -972,6 +1268,18 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		},
 	}
 
+	// WireGuard is not an outbound. sing-box 1.11 moved it into its own
+	// "endpoints" section, and a "wireguard" outbound is now a stub that refuses
+	// to start. Nothing else about the config changes: route.final still names
+	// the tag, and the remote DNS server still detours through it.
+	if outboundType, _ := workOutbound["type"].(string); outboundType == "wireguard" {
+		config["endpoints"] = []interface{}{workOutbound}
+		config["outbounds"] = []interface{}{
+			map[string]interface{}{"type": "direct", "tag": "direct"},
+			map[string]interface{}{"type": "block", "tag": "block"},
+		}
+	}
+
 	if settings.BypassRu {
 		routeSection := config["route"].(map[string]interface{})
 		routeSection["rule_set"] = []map[string]interface{}{
@@ -1025,6 +1333,39 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 	return config, nil
 }
 
+// errSubBlocked marks a response that arrived intact but carried no
+// subscription: an HTML page or an empty body. The failure is content-level
+// rather than transport-level, which makes it the only one worth retrying with
+// a different User-Agent.
+var errSubBlocked = errors.New("returned HTML or empty data")
+
+// fetchSubscriptionBody performs a single GET and returns the body only when it
+// looks like subscription data.
+func fetchSubscriptionBody(client *http.Client, subURL, userAgent string) ([]byte, error) {
+	req, err := http.NewRequest("GET", subURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 20*1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("response read error: %w", err)
+	}
+
+	trimmed := strings.ToLower(strings.TrimSpace(string(body)))
+	if trimmed == "" || strings.Contains(trimmed, "<html") || strings.Contains(trimmed, "<script") {
+		return nil, errSubBlocked
+	}
+	return body, nil
+}
+
 // FetchSubscription loads subscription contents (both JSON-based xray-ext and standard lists).
 //
 // Security: HTTP (non-TLS) subscription URLs are rejected to prevent MITM attacks
@@ -1052,91 +1393,62 @@ func FetchSubscription(subURL string) ([]string, error) {
 		return []string{trimmedURL}, nil
 	}
 
-	var rawData string
+	// Transports, in the order they are tried: the local proxy first (highly
+	// likely to succeed while the VPN is connected), then a direct request.
+	type transport struct {
+		name   string
+		client *http.Client
+	}
+	var transports []transport
+	if proxyURL, err := url.Parse("http://" + ProxyListenAddr); err == nil {
+		transports = append(transports, transport{"proxy", &http.Client{
+			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				Proxy: http.ProxyURL(proxyURL),
+			},
+		}})
+	}
+	transports = append(transports, transport{"direct", &http.Client{
+		Timeout: 15 * time.Second,
+	}})
+
+	// Each transport asks with a browser User-Agent first. Only when the host
+	// answers with an HTML page or nothing at all — the signature of a panel
+	// that sniffs the User-Agent — is the request repeated announcing a proxy
+	// client, which is the one thing a different UA can fix.
+	userAgents := []string{getRandomUserAgent(), subscriptionClientUA}
+
 	var bodyBytes []byte
-	var fetchErr error
+	var fetchErrs []string
+	anyBlocked := false
 
-	// 1. Try local proxy first (highly likely to succeed if VPN is connected)
-	proxyURL, proxyErr := url.Parse("http://" + ProxyListenAddr)
-	if proxyErr == nil {
-		req, reqErr := http.NewRequest("GET", trimmedURL, nil)
-		if reqErr == nil {
-			req.Header.Set("User-Agent", getRandomUserAgent())
-			proxyClient := &http.Client{
-				Timeout: 10 * time.Second,
-				Transport: &http.Transport{
-					Proxy: http.ProxyURL(proxyURL),
-				},
-			}
-			resp, err := proxyClient.Do(req)
+fetch:
+	for _, t := range transports {
+		for _, ua := range userAgents {
+			body, err := fetchSubscriptionBody(t.client, trimmedURL, ua)
 			if err == nil {
-				limitReader := io.LimitReader(resp.Body, 20*1024*1024)
-				tempBytes, readErr := io.ReadAll(limitReader)
-				resp.Body.Close()
-				if readErr != nil {
-					fetchErr = fmt.Errorf("proxy response read error: %w", readErr)
-				} else {
-					tempData := strings.TrimSpace(string(tempBytes))
-					isHTML := strings.Contains(strings.ToLower(tempData), "<html") || strings.Contains(strings.ToLower(tempData), "<script")
-					if !isHTML && len(tempData) > 0 {
-						rawData = tempData
-						bodyBytes = tempBytes
-					} else {
-						fetchErr = fmt.Errorf("proxy returned HTML or empty data")
-					}
-				}
-			} else {
-				fetchErr = err
+				bodyBytes = body
+				break fetch
 			}
+			fetchErrs = append(fetchErrs, fmt.Sprintf("%s: %v", t.name, err))
+			if !errors.Is(err, errSubBlocked) {
+				break // the transport itself failed; another UA will not help
+			}
+			anyBlocked = true
 		}
 	}
 
-	// 2. Fallback/Try direct fetch if proxy failed, returned HTML, or is not running
-	if rawData == "" {
-		req, reqErr := http.NewRequest("GET", trimmedURL, nil)
-		if reqErr == nil {
-			req.Header.Set("User-Agent", getRandomUserAgent())
-			directClient := &http.Client{
-				Timeout: 15 * time.Second,
-			}
-			resp, err := directClient.Do(req)
-			if err == nil {
-				limitReader := io.LimitReader(resp.Body, 20*1024*1024)
-				tempBytes, readErr := io.ReadAll(limitReader)
-				resp.Body.Close()
-				if readErr != nil {
-					if fetchErr != nil {
-						fetchErr = fmt.Errorf("direct read error: %v; proxy error: %v", readErr, fetchErr)
-					} else {
-						fetchErr = fmt.Errorf("direct response read error: %w", readErr)
-					}
-				} else {
-					tempData := strings.TrimSpace(string(tempBytes))
-					isHTML := strings.Contains(strings.ToLower(tempData), "<html") || strings.Contains(strings.ToLower(tempData), "<script")
-					if !isHTML && len(tempData) > 0 {
-						rawData = tempData
-						bodyBytes = tempBytes
-					} else {
-						if fetchErr != nil {
-							fetchErr = fmt.Errorf("direct returned HTML or empty; proxy error: %v", fetchErr)
-						} else {
-							fetchErr = fmt.Errorf("direct returned HTML or empty data")
-						}
-					}
-				}
-			} else {
-				if fetchErr != nil {
-					fetchErr = fmt.Errorf("direct error: %v; proxy error: %v", err, fetchErr)
-				} else {
-					fetchErr = err
-				}
-			}
+	if bodyBytes == nil {
+		// The two failures need different advice, and one page beats any number
+		// of transport errors: a host that answers with a page is reachable and
+		// the subscription itself is the problem, while an unreachable host says
+		// nothing about the subscription at all.
+		if anyBlocked {
+			return nil, errors.New(i18n.T(i18n.ErrSubBlockedByHost))
 		}
+		return nil, errors.New(i18n.T(i18n.ErrSubUnreachable, strings.Join(fetchErrs, "; ")))
 	}
-
-	if rawData == "" {
-		return nil, fmt.Errorf("failed to fetch subscription: %v", fetchErr)
-	}
+	rawData := strings.TrimSpace(string(bodyBytes))
 
 	// Try parsing xray-ext JSON subscription format
 	if strings.HasPrefix(rawData, "[") && strings.HasSuffix(rawData, "]") {
@@ -1328,6 +1640,22 @@ func FetchSubscription(subURL string) ([]string, error) {
 		}
 	}
 
+	// sing-box's own format: either a whole config object with an "outbounds"
+	// list, or a bare array of outbounds that the xray-ext branch above did not
+	// recognise as its own.
+	if strings.HasPrefix(rawData, "{") || strings.HasPrefix(rawData, "[") {
+		if links := parseSingboxOutbounds(bodyBytes); len(links) > 0 {
+			return links, nil
+		}
+	}
+
+	// Clash YAML, as served by most panels and sub-converters.
+	if looksLikeClashYAML(rawData) {
+		if links := parseClashYAML(bodyBytes); len(links) > 0 {
+			return links, nil
+		}
+	}
+
 	// Otherwise parse as standard newline separated plain text list (sometimes base64 encoded)
 	// First, check if the entire payload is a single-line or multi-line base64 block
 	cleanRawData := strings.ReplaceAll(rawData, "\r", "")
@@ -1336,19 +1664,8 @@ func FetchSubscription(subURL string) ([]string, error) {
 	cleanRawData = strings.ReplaceAll(cleanRawData, "\t", "")
 
 	if !strings.Contains(cleanRawData, "://") && cleanRawData != "" {
-		padded := cleanRawData
-		if len(padded)%4 != 0 {
-			padded += strings.Repeat("=", 4-(len(padded)%4))
-		}
-
-		decodedBytes, err := base64.StdEncoding.DecodeString(padded)
-		if err == nil {
+		if decodedBytes, err := decodeBase64Any(cleanRawData); err == nil {
 			rawData = string(decodedBytes)
-		} else {
-			decodedBytes, err = base64.URLEncoding.DecodeString(padded)
-			if err == nil {
-				rawData = string(decodedBytes)
-			}
 		}
 	}
 
@@ -1367,31 +1684,18 @@ func FetchSubscription(subURL string) ([]string, error) {
 		}
 
 		// Otherwise, try to decode this individual line from base64 (MIME/line-by-line format)
-		padded := trimmed
-		if len(padded)%4 != 0 {
-			padded += strings.Repeat("=", 4-(len(padded)%4))
-		}
-
-		// Try standard base64 decoding
-		decodedBytes, err := base64.StdEncoding.DecodeString(padded)
-		if err == nil {
+		if decodedBytes, err := decodeBase64Any(trimmed); err == nil {
 			decodedStr := strings.TrimSpace(string(decodedBytes))
 			if strings.Contains(decodedStr, "://") {
 				parsedLinks = append(parsedLinks, decodedStr)
-				continue
-			}
-		}
-
-		// Try URL-safe base64 decoding
-		decodedBytes, err = base64.URLEncoding.DecodeString(padded)
-		if err == nil {
-			decodedStr := strings.TrimSpace(string(decodedBytes))
-			if strings.Contains(decodedStr, "://") {
-				parsedLinks = append(parsedLinks, decodedStr)
-				continue
 			}
 		}
 	}
 
+	if len(parsedLinks) == 0 {
+		// The download worked, so the payload is in a shape nothing here
+		// recognises — or the panel handed back an empty list.
+		return nil, errors.New(i18n.T(i18n.ErrSubNoNodes))
+	}
 	return parsedLinks, nil
 }

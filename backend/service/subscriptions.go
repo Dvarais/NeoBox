@@ -147,12 +147,13 @@ func purgeBootstrapSub(subsJSON string) string {
 }
 
 // FetchSubscription loads subscription contents from subscription URL.
-func (s *AppService) FetchSubscription(url string) []string {
-	links, err := core.FetchSubscription(url)
-	if err != nil {
-		return []string{}
-	}
-	return links
+//
+// The error is returned rather than swallowed: Wails rejects the JavaScript
+// promise with its text, which is how the user finds out that a subscription
+// came back as a login page or in a format NeoBox cannot read. Silently
+// returning an empty list left the interface with nothing to say.
+func (s *AppService) FetchSubscription(url string) ([]string, error) {
+	return core.FetchSubscription(url)
 }
 
 // ImportClipboard filters proxy links from raw clipboard string.
