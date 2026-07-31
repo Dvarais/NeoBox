@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -144,6 +145,20 @@ func (s *AppService) emitSafe(event string, data ...interface{}) {
 	if ctx != nil {
 		wailsruntime.EventsEmit(ctx, event, data...)
 	}
+}
+
+// releaseIdleMemory hands pages the Go heap no longer needs back to the OS.
+//
+// The runtime's scavenger does this on its own, but lazily and over minutes, so
+// after a burst of work the process keeps holding the peak long after it stopped
+// needing it -- which is precisely the number a user sees in Task Manager and
+// reads as the application's appetite.
+//
+// Call it only on transitions where the burst is genuinely over and a pause
+// costs nothing: the window going to the tray, a session ending. It forces a
+// full collection, so it has no business anywhere near a hot path.
+func releaseIdleMemory() {
+	debug.FreeOSMemory()
 }
 
 // stopLogStream ends the current session's log batching after a final flush, so

@@ -260,6 +260,7 @@ func (s *AppService) NotifyWindowHidden() {
 // Callers must not hold trayMu.
 func (s *AppService) onWindowHidden() {
 	s.emitSafe("window-hidden", nil)
+	releaseIdleMemory()
 }
 
 // NotifyWindowShown is called from the frontend when the window is shown.

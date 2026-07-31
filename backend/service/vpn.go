@@ -205,6 +205,11 @@ func (s *AppService) StopXray() map[string]interface{} {
 	// Notify user via Windows toast on disconnect
 	go sendToast(i18n.T(i18n.ToastDisconnectedTitle), i18n.T(i18n.ToastDisconnectedBody))
 
+	// A session's buffers -- the gVisor stack's packets, the DNS tables, the
+	// routing rules -- all become garbage at once here. Hand them back rather
+	// than sitting on the peak until the scavenger gets round to it.
+	releaseIdleMemory()
+
 	response["success"] = true
 	return response
 }

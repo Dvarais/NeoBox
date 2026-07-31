@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"time"
 	"unsafe"
 
@@ -29,7 +30,22 @@ var assets embed.FS
 //go:embed build/windows/icon.ico
 var trayIcon []byte
 
+// goMemoryLimit is a backstop, not a tuning knob. Steady state for this process
+// measures around 176 MB of private bytes, most of which is the 35 MB binary
+// image, thread stacks and the gVisor TUN stack's packet buffers rather than the
+// Go heap, so this ceiling sits far above anything normal operation reaches and
+// never costs collection cycles in practice.
+//
+// What it buys is a bound on the abnormal case: without a limit the GC targets a
+// multiple of the live heap and nothing else, so a pathological session -- a
+// runaway rule set, a DNS table that will not stop growing -- has no ceiling at
+// all short of the machine's memory. Past this point the collector works harder
+// instead of the process simply taking more.
+const goMemoryLimit = 384 << 20 // 384 MiB
+
 func main() {
+	debug.SetMemoryLimit(goMemoryLimit)
+
 	// Hide the console window immediately if running in standalone mode (e.g. from registry startup)
 	security.HideConsoleIfNeeded()
 
