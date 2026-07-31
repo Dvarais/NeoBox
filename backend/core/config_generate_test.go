@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 )
 
@@ -706,5 +707,26 @@ func TestLogLevelDefaultsToWarn(t *testing.T) {
 func TestVerboseLoggingRaisesLogLevel(t *testing.T) {
 	if got := logLevel(t, generate(t, Settings{VerboseLogging: true})); got != "info" {
 		t.Errorf("verbose log level = %q, want %q", got, "info")
+	}
+}
+
+// The core's log stream must never reach os.Stderr. InitCrashLog redirects
+// stderr into crash.log so that a panic in a core goroutine leaves a trace, and
+// with sing-box's default output that file collected every connection instead --
+// 728 MB in one session. The UI gets the lines through the platform log writer.
+func TestCoreLogIsNotWrittenToStderr(t *testing.T) {
+	for _, verbose := range []bool{false, true} {
+		cfg := generate(t, Settings{VerboseLogging: verbose})
+		logSection, ok := cfg["log"].(map[string]interface{})
+		if !ok {
+			t.Fatal("config has no log section")
+		}
+		output, ok := logSection["output"].(string)
+		if !ok {
+			t.Fatalf("verbose=%v: log section has no output; sing-box defaults it to stderr", verbose)
+		}
+		if output != os.DevNull {
+			t.Errorf("verbose=%v: log output = %q, want %q", verbose, output, os.DevNull)
+		}
 	}
 }

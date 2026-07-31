@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -890,6 +891,18 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		"log": map[string]interface{}{
 			"level":     logLevel,
 			"timestamp": true,
+			// Send the core's own log stream to the null device. With "output"
+			// unset sing-box writes every line to os.Stderr, and InitCrashLog
+			// has replaced stderr with crash.log so that a panic in a core
+			// goroutine leaves a trace on disk. The two combined turned a file
+			// meant for crash traces into a transcript of every connection --
+			// it reached 728 MB in a single session.
+			//
+			// Nothing is lost: the UI receives every line through the platform
+			// log writer (see service.logStreamer), which is also what "Save
+			// logs" writes out. Pointing at a real file instead would just move
+			// the unbounded growth somewhere else.
+			"output": os.DevNull,
 		},
 		"dns": map[string]interface{}{
 			"servers":         dnsServers,
