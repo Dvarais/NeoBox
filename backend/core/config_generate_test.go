@@ -783,3 +783,48 @@ func TestTunPrefixesLeaveRoomForSystemStackNAT(t *testing.T) {
 		}
 	}
 }
+
+// NAT-PMP requests aimed at the tunnel's own gateway address can never be
+// answered, so they repeat -- each retry from a fresh source port, and so each
+// one a whole new connection for sing-box to set up. A capture measured 5374
+// distinct source ports across 5452 packets in eight seconds, costing 1.4 CPU
+// cores while carrying nothing. Refuse them before that work happens.
+func TestNatPmpIsRejectedBeforeItBecomesAConnection(t *testing.T) {
+	rules := routeRules(t, generate(t, Settings{TunMode: true}))
+
+	natPmp := -1
+	for i, r := range rules {
+		ports, _ := r["port"].([]int)
+		if r["action"] == "reject" && len(ports) == 1 && ports[0] == 5351 {
+			natPmp = i
+			break
+		}
+	}
+	if natPmp < 0 {
+		t.Fatal("no rule rejects NAT-PMP; every request becomes a connection")
+	}
+
+	if got := rules[natPmp]["network"]; got != "udp" {
+		t.Errorf("NAT-PMP rule network = %v, want udp", got)
+	}
+	// An ICMP error tells the sender to give up; a silent drop reads as packet
+	// loss and brings the retries straight back.
+	if got := rules[natPmp]["method"]; got != "default" {
+		t.Errorf("NAT-PMP reject method = %v, want default (ICMP error)", got)
+	}
+
+	// The tunnel's gateway address doubles as the DNS server, so DNS has to be
+	// hijacked before anything addressed there is refused.
+	lastHijack := -1
+	for i, r := range rules {
+		if r["action"] == "hijack-dns" {
+			lastHijack = i
+		}
+	}
+	if lastHijack < 0 {
+		t.Fatal("no DNS hijack rule")
+	}
+	if natPmp < lastHijack {
+		t.Errorf("NAT-PMP reject at %d precedes the DNS hijack at %d", natPmp, lastHijack)
+	}
+}

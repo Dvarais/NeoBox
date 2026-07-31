@@ -724,6 +724,25 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		// rejected instead of being intercepted, causing potential DNS leaks via IPv6.
 		{"port": []int{53}, "action": "hijack-dns"},
 		{"protocol": "dns", "action": "hijack-dns"},
+		// Turn away NAT-PMP. In TUN mode the tunnel becomes the default gateway,
+		// so anything on the machine looking for a port-mapping gateway aims its
+		// requests at the tunnel's own address — and nothing here can answer,
+		// because sing-box is not a NAT-PMP gateway.
+		//
+		// Unanswered, those requests repeat, and each one arrives from a fresh
+		// source port: a packet capture measured 5374 distinct source ports
+		// across 5452 packets in eight seconds. Every one of them is a new
+		// connection to sing-box — rule evaluation, process lookup, a socket, a
+		// NAT entry — which is why 680 tiny packets a second cost 1.4 CPU cores
+		// while carrying no traffic at all.
+		//
+		// Rejecting with an ICMP error rather than dropping is deliberate: a
+		// silent drop looks like packet loss and invites more retries, while the
+		// error tells the sender there is no gateway here and lets it stop.
+		//
+		// Sits after the DNS hijack because the tunnel's address doubles as the
+		// DNS server, and DNS must be intercepted before anything is refused.
+		{"network": "udp", "port": []int{5351}, "action": "reject", "method": "default"},
 	}
 
 	// Block IPv6 to prevent leaks.
