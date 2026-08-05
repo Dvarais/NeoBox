@@ -1,6 +1,9 @@
 package core
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // maxLinkLength caps a proxy link or subscription URL. Anything longer is
 // rejected before parsing, so a malformed or hostile entry cannot turn into
@@ -102,6 +105,11 @@ func IsUDPOnly(protocol string) bool {
 // Every protocol but one keeps them in "server" and "server_port". WireGuard is
 // an endpoint rather than an outbound and holds its address in the first peer,
 // which is why reading the top-level fields used to yield nothing for it.
+//
+// This is the only correct way to ask a parsed outbound where it connects.
+// Reading outbound["server"] directly is what silently returned "" for every
+// WireGuard node — which the Kill Switch then refused to arm on, aborting the
+// connection outright.
 func ServerEndpoint(outbound map[string]interface{}) (string, int) {
 	if outboundType, _ := outbound["type"].(string); outboundType == "wireguard" {
 		peers, _ := outbound["peers"].([]interface{})
@@ -113,11 +121,30 @@ func ServerEndpoint(outbound map[string]interface{}) (string, int) {
 			return "", 0
 		}
 		host, _ := peer["address"].(string)
-		port, _ := peer["port"].(int)
-		return host, port
+		return host, portOf(peer["port"])
 	}
 
 	host, _ := outbound["server"].(string)
-	port, _ := outbound["server_port"].(int)
-	return host, port
+	return host, portOf(outbound["server_port"])
+}
+
+// portOf reads a port out of a parsed outbound. ParseProxyLink always writes an
+// int, but the same maps are also built by decoding JSON — where a number
+// arrives as float64 — and from links that carried the port verbatim as text.
+// A port that fails to parse reads as 0, which every caller already treats as
+// "no usable endpoint".
+func portOf(value interface{}) int {
+	switch p := value.(type) {
+	case int:
+		return p
+	case float64:
+		return int(p)
+	case string:
+		port, err := strconv.Atoi(p)
+		if err != nil {
+			return 0
+		}
+		return port
+	}
+	return 0
 }

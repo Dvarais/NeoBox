@@ -152,23 +152,11 @@ func upstreamProbeAddr(link string) string {
 	if err != nil {
 		return ""
 	}
-	host, _ := outbound["server"].(string)
-	if host == "" {
-		return ""
-	}
-
-	// server_port is filled in by different parser branches as an int, and may
-	// arrive as another numeric shape when the link carried it verbatim.
-	port := 0
-	switch p := outbound["server_port"].(type) {
-	case int:
-		port = p
-	case float64:
-		port = int(p)
-	case string:
-		port, _ = strconv.Atoi(p)
-	}
-	if port <= 0 || port > 65535 {
+	// ServerEndpoint, not outbound["server"]: a WireGuard endpoint keeps its
+	// address in the first peer, so the direct read yielded nothing for it and
+	// the watchdog silently lost its upstream check on every WireGuard node.
+	host, port := core.ServerEndpoint(outbound)
+	if host == "" || port <= 0 || port > 65535 {
 		return ""
 	}
 	return net.JoinHostPort(host, strconv.Itoa(port))

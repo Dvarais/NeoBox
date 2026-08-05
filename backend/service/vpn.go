@@ -125,8 +125,12 @@ func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[s
 	// says leaks are impossible while nothing is actually blocking them. So a
 	// failure here aborts the connection instead of being discarded.
 	if settings.KillSwitch {
-		serverIP, _ := outbound["server"].(string)
-		if err := s.enableKillSwitch(serverIP); err != nil {
+		// Ask ServerEndpoint rather than reading outbound["server"]: a WireGuard
+		// endpoint has no such field — its address lives in the first peer — so
+		// the direct read handed the Kill Switch an empty host, which it rightly
+		// refused to arm on. Every WireGuard node was unconnectable as a result.
+		serverHost, _ := core.ServerEndpoint(outbound)
+		if err := s.enableKillSwitch(serverHost); err != nil {
 			fmt.Printf("[killswitch] failed to arm: %v\n", err)
 			_ = s.coreManager.Stop()
 			s.stopLogStream()

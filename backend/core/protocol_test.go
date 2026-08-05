@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"net"
+	"strconv"
+	"testing"
+)
 
 func TestProtocolOf(t *testing.T) {
 	tests := []struct {
@@ -74,6 +78,86 @@ func TestIsProxyLink(t *testing.T) {
 	} {
 		if IsProxyLink(link) {
 			t.Errorf("IsProxyLink(%q) = true, want false", link)
+		}
+	}
+}
+
+// Every protocol NeoBox can parse must yield an endpoint. The Kill Switch
+// refuses to arm without one and aborts the connection, so a protocol missing
+// here is a protocol that cannot be used with the Kill Switch on at all — which
+// is exactly what happened to WireGuard while callers read outbound["server"]
+// directly instead of asking ServerEndpoint.
+func TestServerEndpointCoversEveryProtocol(t *testing.T) {
+	links := []string{
+		"vless://uuid@example.com:443",
+		"vmess://eyJhZGQiOiJleGFtcGxlLmNvbSIsInBvcnQiOjQ0MywiaWQiOiJ1dWlkIn0=",
+		"trojan://pw@example.com:443",
+		"ss://YWVzLTI1Ni1nY206cGFzcw==@example.com:8388",
+		"tuic://uuid:pw@example.com:443",
+		"hysteria2://pw@example.com:443",
+		"hysteria://example.com:443?auth=x",
+		"anytls://pw@example.com:443",
+		"socks5://user:pw@example.com:1080",
+		"http://example.com:8080",
+		"wireguard://cHJpdmF0ZWtleQ==@example.com:51820?publickey=cGVlcmtleQ==&address=172.16.0.2",
+	}
+
+	for _, link := range links {
+		outbound, err := ParseProxyLink(link)
+		if err != nil {
+			t.Errorf("ParseProxyLink(%q) failed: %v", link, err)
+			continue
+		}
+		host, port := ServerEndpoint(outbound)
+		if host == "" {
+			t.Errorf("ServerEndpoint(%q) returned no host", link)
+		}
+		if port <= 0 || port > 65535 {
+			t.Errorf("ServerEndpoint(%q) returned port %d, which is not usable", link, port)
+		}
+	}
+}
+
+// WireGuard is the reason ServerEndpoint exists: it is an endpoint rather than
+// an outbound, so its address lives in the first peer and not in "server".
+func TestServerEndpointReadsWireGuardPeer(t *testing.T) {
+	outbound, err := ParseProxyLink(
+		"wireguard://cHJpdmF0ZWtleQ==@vpn.example.com:51821?publickey=cGVlcmtleQ==&address=172.16.0.2")
+	if err != nil {
+		t.Fatalf("ParseProxyLink failed: %v", err)
+	}
+	if _, ok := outbound["server"]; ok {
+		t.Fatal("a WireGuard outbound now has a top-level \"server\" field; this test is no longer meaningful")
+	}
+
+	host, port := ServerEndpoint(outbound)
+	if got := net.JoinHostPort(host, strconv.Itoa(port)); got != "vpn.example.com:51821" {
+		t.Errorf("ServerEndpoint = %q, want vpn.example.com:51821", got)
+	}
+}
+
+// The port is an int as ParseProxyLink writes it, but the same maps are also
+// built by decoding JSON (float64) and from links carrying the port as text.
+func TestServerEndpointAcceptsEveryPortShape(t *testing.T) {
+	for name, value := range map[string]interface{}{
+		"int":     443,
+		"float64": float64(443),
+		"string":  "443",
+	} {
+		_, port := ServerEndpoint(map[string]interface{}{"server": "example.com", "server_port": value})
+		if port != 443 {
+			t.Errorf("port given as %s read as %d, want 443", name, port)
+		}
+	}
+
+	for name, value := range map[string]interface{}{
+		"absent":             nil,
+		"non-numeric string": "https",
+		"bool":               true,
+	} {
+		_, port := ServerEndpoint(map[string]interface{}{"server": "example.com", "server_port": value})
+		if port != 0 {
+			t.Errorf("port given as %s read as %d, want 0", name, port)
 		}
 	}
 }
