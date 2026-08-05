@@ -1,46 +1,61 @@
-export let allSubscriptions = [];
-export let currentActiveSubId = 'all';
+import { showConfirm, showPrompt } from './ui-utils';
+import type { Subscription } from './api';
+import type { Language, Translations } from './translations';
 
-export async function loadSubscriptions(callback) {
+export type { Subscription };
+
+/** Идентификатор выбранной вкладки: id подписки либо один из двух псевдо-списков. */
+export type SubscriptionTabId = string | 'all' | 'favorites';
+
+export let allSubscriptions: Subscription[] = [];
+export let currentActiveSubId: SubscriptionTabId = 'all';
+
+export async function loadSubscriptions(callback?: () => void): Promise<void> {
   allSubscriptions = await window.api.getSubscriptions();
   if (callback) callback();
 }
 
-export function renderSubTabs(container, translations, currentLanguage, onTabChange, showPrompt, showConfirm, loadSubscriptions) {
+export function renderSubTabs(
+  container: HTMLElement | null,
+  translations: Record<Language, Translations>,
+  currentLanguage: Language,
+  onTabChange: () => void,
+  reload: () => void | Promise<void>,
+): void {
   if (!container) return;
   const t = translations[currentLanguage];
   container.innerHTML = '';
-  
-  const createTab = (id, name) => {
+
+  const createTab = (id: SubscriptionTabId, name: string): HTMLButtonElement => {
     const btn = document.createElement('button');
     btn.className = `btn-glass ${currentActiveSubId === id ? 'active' : ''}`;
     btn.style.padding = '6px 15px';
     btn.style.position = 'relative';
-    
+
     let displayName = id === 'all' ? t.allServersTab : name;
     if (id !== 'all') {
-      const sub = allSubscriptions.find(s => s.id === id);
+      const sub = allSubscriptions.find((s) => s.id === id);
       if (sub && sub.loading) {
         displayName += ' ⏳';
       }
     }
     btn.textContent = displayName;
-    
-    btn.onclick = (e) => {
+
+    btn.onclick = () => {
       currentActiveSubId = id;
       onTabChange();
     };
 
     if (id !== 'all') {
       btn.draggable = true;
-      
+
       btn.ondragstart = (e) => {
-        e.dataTransfer.setData('text/plain', id);
+        e.dataTransfer?.setData('text/plain', id);
         btn.classList.add('dragging');
         btn.style.opacity = '0.5';
       };
 
-      btn.ondragend = (e) => {
+      btn.ondragend = () => {
         btn.classList.remove('dragging');
         btn.style.opacity = '1';
       };
@@ -51,26 +66,23 @@ export function renderSubTabs(container, translations, currentLanguage, onTabCha
 
       btn.ondrop = async (e) => {
         e.preventDefault();
-        const draggedId = e.dataTransfer.getData('text/plain');
+        const draggedId = e.dataTransfer?.getData('text/plain');
         if (draggedId && draggedId !== id && draggedId !== 'all') {
-          const draggedIndex = allSubscriptions.findIndex(s => s.id === draggedId);
-          const targetIndex = allSubscriptions.findIndex(s => s.id === id);
+          const draggedIndex = allSubscriptions.findIndex((s) => s.id === draggedId);
+          const targetIndex = allSubscriptions.findIndex((s) => s.id === id);
           if (draggedIndex !== -1 && targetIndex !== -1) {
             const [draggedSub] = allSubscriptions.splice(draggedIndex, 1);
             allSubscriptions.splice(targetIndex, 0, draggedSub);
             await window.api.saveSubscriptions(allSubscriptions);
-            await loadSubscriptions(() => {
-              renderSubTabs(container, translations, currentLanguage, onTabChange, showPrompt, showConfirm, loadSubscriptions);
-              onTabChange();
-            });
+            await reload();
           }
         }
       };
 
       btn.oncontextmenu = (e) => {
         e.preventDefault();
-        document.querySelectorAll('.tab-context-menu').forEach(m => m.remove());
-        
+        document.querySelectorAll('.tab-context-menu').forEach((m) => m.remove());
+
         const menu = document.createElement('div');
         menu.className = 'tab-context-menu';
         menu.style.position = 'fixed';
@@ -82,28 +94,25 @@ export function renderSubTabs(container, translations, currentLanguage, onTabCha
         menu.style.padding = '5px';
         menu.style.zIndex = '1000';
         menu.style.boxShadow = '0 10px 25px rgba(0,0,0,0.5)';
-        
+
         const renameItem = document.createElement('div');
         renameItem.textContent = t.renameItem || '✏️ Rename';
         renameItem.style.padding = '8px 12px';
         renameItem.style.cursor = 'pointer';
         renameItem.style.fontSize = '13px';
         renameItem.style.borderRadius = '4px';
-        renameItem.onmouseover = () => renameItem.style.background = 'rgba(255, 255, 255, 0.05)';
-        renameItem.onmouseout = () => renameItem.style.background = 'transparent';
-        
+        renameItem.onmouseover = () => (renameItem.style.background = 'rgba(255, 255, 255, 0.05)');
+        renameItem.onmouseout = () => (renameItem.style.background = 'transparent');
+
         renameItem.onclick = async () => {
           menu.remove();
           const newName = await showPrompt(t.renamePromptTitle || 'Rename subscription', name);
           if (newName && newName.trim() !== '') {
-            const sub = allSubscriptions.find(s => s.id === id);
+            const sub = allSubscriptions.find((s) => s.id === id);
             if (sub) {
               sub.name = newName.trim();
               await window.api.saveSubscriptions(allSubscriptions);
-              await loadSubscriptions(() => {
-                renderSubTabs(container, translations, currentLanguage, onTabChange, showPrompt, showConfirm, loadSubscriptions);
-                onTabChange();
-              });
+              await reload();
             }
           }
         };
@@ -115,28 +124,25 @@ export function renderSubTabs(container, translations, currentLanguage, onTabCha
         deleteItem.style.fontSize = '13px';
         deleteItem.style.borderRadius = '4px';
         deleteItem.style.color = 'var(--danger)';
-        
-        deleteItem.onmouseover = () => deleteItem.style.background = 'rgba(239, 68, 68, 0.1)';
-        deleteItem.onmouseout = () => deleteItem.style.background = 'transparent';
-        
+
+        deleteItem.onmouseover = () => (deleteItem.style.background = 'rgba(239, 68, 68, 0.1)');
+        deleteItem.onmouseout = () => (deleteItem.style.background = 'transparent');
+
         deleteItem.onclick = async () => {
           menu.remove();
           const confirmed = await showConfirm(t.deleteConfirm.replace('{name}', name));
           if (confirmed) {
-            allSubscriptions = allSubscriptions.filter(s => s.id !== id);
+            allSubscriptions = allSubscriptions.filter((s) => s.id !== id);
             await window.api.saveSubscriptions(allSubscriptions);
             if (currentActiveSubId === id) currentActiveSubId = 'all';
-            await loadSubscriptions(() => {
-              renderSubTabs(container, translations, currentLanguage, onTabChange, showPrompt, showConfirm, loadSubscriptions);
-              onTabChange();
-            });
+            await reload();
           }
         };
-        
+
         menu.appendChild(renameItem);
         menu.appendChild(deleteItem);
         document.body.appendChild(menu);
-        
+
         const closeMenu = () => {
           menu.remove();
           document.removeEventListener('click', closeMenu);
@@ -150,15 +156,15 @@ export function renderSubTabs(container, translations, currentLanguage, onTabCha
 
   container.appendChild(createTab('all', t.allServersTab));
   container.appendChild(createTab('favorites', t.favoritesTab));
-  allSubscriptions.forEach(sub => {
+  allSubscriptions.forEach((sub) => {
     container.appendChild(createTab(sub.id, sub.name));
   });
 }
 
-export function setActiveSubId(id) {
-    currentActiveSubId = id;
+export function setActiveSubId(id: SubscriptionTabId): void {
+  currentActiveSubId = id;
 }
 
-export function setSubscriptions(subs) {
-    allSubscriptions = subs;
+export function setSubscriptions(subs: Subscription[]): void {
+  allSubscriptions = subs;
 }

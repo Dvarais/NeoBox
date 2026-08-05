@@ -1,10 +1,28 @@
-export let pingData = {};
-export let currentSortMode = 'default';
+import type { Translations } from './translations';
+
+/**
+ * Замер задержки до сервера: число миллисекунд, -1 если измерить не удалось,
+ * либо 'pinging', пока замер идёт.
+ */
+export type PingValue = number | 'pinging';
+
+/** Разобранная из ссылки карточка сервера. Пустые строки — если разобрать не вышло. */
+export interface ServerInfo {
+  type: string;
+  name: string;
+  address: string;
+}
+
+export let pingData: Record<string, PingValue> = {};
+export let currentSortMode: SortMode = 'default';
+
+/** Порядок карточек в списке серверов. */
+export type SortMode = 'default' | 'ping' | 'name' | 'protocol';
 
 // ── Country flag detection ────────────────────────────────────────────────────
 // Maps common TLDs / hostname keywords to flag emojis.
 // Falls back to 🌐 for anything unrecognised.
-const COUNTRY_PATTERNS = [
+const COUNTRY_PATTERNS: Array<[RegExp, string]> = [
   [/\.ru$|russia|moscow/i, '🇷🇺'],
   [/\.us$|usa|united.?states|new.?york|los.?angeles|chicago|dallas|seattle/i, '🇺🇸'],
   [/\.de$|germany|berlin|frankfurt/i, '🇩🇪'],
@@ -52,7 +70,7 @@ const COUNTRY_PATTERNS = [
   [/\.ar$|argenti/i, '🇦🇷'],
 ];
 
-export function getCountryFlag(name, address) {
+export function getCountryFlag(name: string, address: string): string {
   const haystack = `${name} ${address}`.toLowerCase();
   for (const [pattern, flag] of COUNTRY_PATTERNS) {
     if (pattern.test(haystack)) return flag;
@@ -60,7 +78,7 @@ export function getCountryFlag(name, address) {
   return '🌐';
 }
 
-export function parseBasicInfo(link) {
+export function parseBasicInfo(link: string): ServerInfo {
   try {
     let protocol = '';
     let rest = '';
@@ -133,7 +151,7 @@ export function parseBasicInfo(link) {
     return {
       type: protocol === 'ss' ? 'ShadowSocks' : protocol,
       name: name,
-      address: address
+      address: address,
     };
   } catch (e) {
     // Left blank rather than filled with a placeholder: this module has no
@@ -142,14 +160,28 @@ export function parseBasicInfo(link) {
   }
 }
 
-export function sortServers(servers, sortMode, pingData) {
+/**
+ * latencyRank превращает замер в число, по которому сортируется список.
+ *
+ * Не измеренный и неизмеримый сервер уезжают в конец, но по-разному: -1 — это
+ * «пинг не прошёл», и такой узел должен стоять ниже того, который просто ещё не
+ * проверяли. Раньше здесь стояло `pingData[a] || 9999`, из-за чего сервер с
+ * задержкой 0 мс (локальный прокси) считался непроверенным.
+ */
+function latencyRank(value: PingValue | undefined): number {
+  if (value === -1) return 20000;
+  if (typeof value !== 'number') return 10000; // 'pinging' либо ещё не измеряли
+  return value;
+}
+
+export function sortServers(
+  servers: string[],
+  sortMode: SortMode,
+  pings: Record<string, PingValue>,
+): string[] {
   const sorted = [...servers];
   if (sortMode === 'ping') {
-    sorted.sort((a, b) => {
-      const valA = pingData[a] === -1 ? 10000 : (pingData[a] || 9999);
-      const valB = pingData[b] === -1 ? 10000 : (pingData[b] || 9999);
-      return valA - valB;
-    });
+    sorted.sort((a, b) => latencyRank(pings[a]) - latencyRank(pings[b]));
   } else if (sortMode === 'name') {
     sorted.sort((a, b) => {
       const infoA = parseBasicInfo(a);
@@ -157,24 +189,33 @@ export function sortServers(servers, sortMode, pingData) {
       return (infoA.name || infoA.address).localeCompare(infoB.name || infoB.address);
     });
   } else if (sortMode === 'protocol') {
-    sorted.sort((a, b) => {
-      return parseBasicInfo(a).type.localeCompare(parseBasicInfo(b).type);
-    });
+    sorted.sort((a, b) => parseBasicInfo(a).type.localeCompare(parseBasicInfo(b).type));
   }
   return sorted;
 }
 
-export function renderCards(container, servers, activeServerLink, pingData, sortMode, onServerSelect, searchQuery, favoriteLinks, onToggleFavorite, t = {}) {
+export function renderCards(
+  container: HTMLElement | null,
+  servers: string[],
+  activeServerLink: string | null,
+  pings: Record<string, PingValue>,
+  sortMode: SortMode,
+  onServerSelect: (link: string, name: string, type: string, address: string) => void,
+  searchQuery: string,
+  favoriteLinks: Set<string>,
+  onToggleFavorite: (link: string) => void,
+  t: Partial<Translations> = {},
+): void {
   if (!container) return;
   container.innerHTML = '';
 
   const uniqueServers = Array.from(new Set(servers));
-  let displayServers = sortServers(uniqueServers, sortMode, pingData);
+  let displayServers = sortServers(uniqueServers, sortMode, pings);
 
   // Apply search filter
   const q = (searchQuery || '').trim().toLowerCase();
   if (q) {
-    displayServers = displayServers.filter(link => {
+    displayServers = displayServers.filter((link) => {
       const info = parseBasicInfo(link);
       return (
         (info.name || '').toLowerCase().includes(q) ||
@@ -184,20 +225,19 @@ export function renderCards(container, servers, activeServerLink, pingData, sort
     });
   }
 
-  displayServers.forEach(link => {
+  displayServers.forEach((link) => {
     const info = parseBasicInfo(link);
     const card = document.createElement('div');
     card.className = `server-card ${activeServerLink === link ? 'selected' : ''}`;
 
-    let latency = pingData[link] === 'pinging' ? '...'
-                : pingData[link] === -1         ? 'Err'
-                : pingData[link]                ? `${pingData[link]}ms`
-                : '—';
+    const ping = pings[link];
+    const latency =
+      ping === 'pinging' ? '...' : ping === -1 ? 'Err' : typeof ping === 'number' ? `${ping}ms` : '—';
 
     // Colour-code latency
     let pingColor = 'var(--text-dim)';
-    if (typeof pingData[link] === 'number' && pingData[link] !== -1) {
-      pingColor = pingData[link] < 150 ? 'var(--success)' : pingData[link] < 400 ? '#f59e0b' : 'var(--danger)';
+    if (typeof ping === 'number' && ping !== -1) {
+      pingColor = ping < 150 ? 'var(--success)' : ping < 400 ? '#f59e0b' : 'var(--danger)';
     }
 
     const displayName = info.name || info.address || t.proxyFallbackName || 'Proxy';
@@ -217,7 +257,8 @@ export function renderCards(container, servers, activeServerLink, pingData, sort
 
     const protoTag = document.createElement('span');
     protoTag.className = 'protocol-tag';
-    protoTag.style.cssText = 'background:var(--accent-color); color:white; padding:2px 6px; border-radius:4px; font-size:10px; flex-shrink:0;';
+    protoTag.style.cssText =
+      'background:var(--accent-color); color:white; padding:2px 6px; border-radius:4px; font-size:10px; flex-shrink:0;';
     protoTag.textContent = displayType;
 
     const nameSpan = document.createElement('span');
@@ -244,13 +285,15 @@ export function renderCards(container, servers, activeServerLink, pingData, sort
 
     // Star toggle button
     const starBtn = document.createElement('button');
-    starBtn.style.cssText = 'background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:16px; padding:4px; display:flex; align-items:center; transition:color 0.2s;';
+    starBtn.style.cssText =
+      'background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:16px; padding:4px; display:flex; align-items:center; transition:color 0.2s;';
     const isFav = favoriteLinks && favoriteLinks.has(link);
-    starBtn.innerHTML = isFav ? '★' : '☆';
+    // Обе звёздочки — литералы без интерполяции, поэтому textContent, а не innerHTML.
+    starBtn.textContent = isFav ? '★' : '☆';
     if (isFav) starBtn.style.color = '#f59e0b';
     starBtn.title = isFav
-      ? (t.favoriteRemove || 'Remove from favorites')
-      : (t.favoriteAdd || 'Add to favorites');
+      ? t.favoriteRemove || 'Remove from favorites'
+      : t.favoriteAdd || 'Add to favorites';
 
     starBtn.onclick = (e) => {
       e.stopPropagation();
@@ -270,5 +313,10 @@ export function renderCards(container, servers, activeServerLink, pingData, sort
   });
 }
 
-export function setSortMode(mode) { currentSortMode = mode; }
-export function setPingData(link, latency) { pingData[link] = latency; }
+export function setSortMode(mode: SortMode): void {
+  currentSortMode = mode;
+}
+
+export function setPingData(link: string, latency: PingValue): void {
+  pingData[link] = latency;
+}

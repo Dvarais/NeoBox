@@ -1,57 +1,73 @@
 // Import Wails bindings
-import { 
+import {
   BringToFront,
-  CheckAdmin, 
-  CheckUpdates, 
+  CheckAdmin,
+  CheckUpdates,
   CheckTunStatus,
   DownloadAndInstallUpdate,
   FetchSubscription,
   GetAppVersion,
   GetSettings,
-  GetSubscriptions, 
-  ImportClipboard, 
+  GetSubscriptions,
+  ImportClipboard,
   NotifyWindowHidden,
-  NotifyWindowShown,
   OpenLogsFolder,
-  PingServer, 
-  RequestAdmin, 
+  PingServer,
+  RequestAdmin,
   RestartXray,
   SaveLogs,
-  SaveSettings, 
-  SaveSubscriptions, 
-  StartXray, 
-  StopXray 
-} from './wailsjs/go/service/AppService.js';
+  SaveSettings,
+  SaveSubscriptions,
+  StartXray,
+  StopXray,
+} from './wailsjs/go/service/AppService';
 
-import { EventsOn } from './wailsjs/runtime/runtime.js';
+import { EventsOn } from './wailsjs/runtime/runtime';
+
+import type {
+  AppSettings,
+  NeoBoxApi,
+  PingResult,
+  StoredSettings,
+  Subscription,
+  TrafficStats,
+  UpdateInfo,
+  XrayResult,
+} from './modules/api';
 
 // Global session bytes counters shared between modules
 window.sessionBytesDown = 0;
 window.sessionBytesUp = 0;
 
-// Expose them as window.api to maintain total compatibility with original renderer.js!
-window.api = {
+// Обработчики, которые вызываются напрямую, а не через шину событий Wails: в
+// варианте на Electron это были IPC-события, здесь достаточно вызова.
+let pingCallback: ((result: PingResult) => void) | null = null;
+let subResultCallback: ((links: string[]) => void) | null = null;
+
+// Аннотация типом NeoBoxApi — это то, ради чего затевался перевод на TS: она
+// сверяет реализацию с контрактом, который видят все остальные модули.
+const api: NeoBoxApi = {
   // Commands
   bringToFront: () => BringToFront(),
   checkTunStatus: () => CheckTunStatus(),
   startXray: async (link, useSystemProxy) => {
-    const settings = await window.api.getSettings();
-    const res = await StartXray(link, JSON.stringify(settings), useSystemProxy);
+    const settings = await api.getSettings();
+    const res = (await StartXray(link, JSON.stringify(settings), useSystemProxy)) as XrayResult;
     if (res && !res.success && res.error === 'admin_required') {
-      window.api.requestAdmin();
+      void api.requestAdmin();
     }
     return res;
   },
   restartXray: async (link, useSystemProxy) => {
-    const settings = await window.api.getSettings();
-    const res = await RestartXray(link, JSON.stringify(settings), useSystemProxy);
+    const settings = await api.getSettings();
+    const res = (await RestartXray(link, JSON.stringify(settings), useSystemProxy)) as XrayResult;
     if (res && !res.success && res.error === 'admin_required') {
-      window.api.requestAdmin();
+      void api.requestAdmin();
     }
     return res;
   },
   stopXray: async () => {
-    const res = await StopXray();
+    const res = (await StopXray()) as XrayResult;
     const container = document.getElementById('speedometerContainer');
     if (container) {
       container.style.display = 'none';
@@ -65,30 +81,30 @@ window.api = {
   pingServer: async (link) => {
     const latency = await PingServer(link);
     // Ping result was sent as an IPC event in Electron. We invoke the callback directly!
-    if (window.api._pingCallback) {
-      window.api._pingCallback({ link, latency });
+    if (pingCallback) {
+      pingCallback({ link, latency });
     }
   },
-  
+
   // Version reported by the Go backend — the single source of truth for the
   // number shown in the title bar.
   getAppVersion: () => GetAppVersion(),
 
   // Settings & Subscriptions
-  getSettings: async () => {
+  getSettings: async (): Promise<StoredSettings> => {
     try {
       const s = await GetSettings();
-      return JSON.parse(s);
+      return JSON.parse(s) as StoredSettings;
     } catch (e) {
       console.error('getSettings parse error:', e);
       return {};
     }
   },
-  saveSettings: (settings) => SaveSettings(JSON.stringify(settings)),
-  getSubscriptions: async () => {
+  saveSettings: (settings: AppSettings) => SaveSettings(JSON.stringify(settings)),
+  getSubscriptions: async (): Promise<Subscription[]> => {
     try {
       const s = await GetSubscriptions();
-      return JSON.parse(s);
+      return JSON.parse(s) as Subscription[];
     } catch (e) {
       console.error('getSubscriptions parse error:', e);
       return [];
@@ -102,11 +118,11 @@ window.api = {
     try {
       const text = await navigator.clipboard.readText();
       const links = await ImportClipboard(text);
-      if (window.api._subResultCallback) {
-        window.api._subResultCallback(links);
+      if (subResultCallback) {
+        subResultCallback(links);
       }
     } catch (e) {
-      console.error("Clipboard access failed:", e);
+      console.error('Clipboard access failed:', e);
     }
   },
 
@@ -127,10 +143,10 @@ window.api = {
   onStarted: (callback) => EventsOn('xray-started', callback),
   onStopped: (callback) => EventsOn('xray-stopped', callback),
   onSubscriptionResult: (callback) => {
-    window.api._subResultCallback = callback;
+    subResultCallback = callback;
   },
   onPingResult: (callback) => {
-    window.api._pingCallback = callback;
+    pingCallback = callback;
   },
   onTrayToggleConnection: (callback) => EventsOn('tray-toggle-connection', callback),
   onSubscriptionsUpdated: (callback) => EventsOn('subscriptions-updated', callback),
@@ -139,8 +155,9 @@ window.api = {
   onTrayRestart: (callback) => EventsOn('tray-restart', callback),
 
   // Auto update
-  checkUpdates: () => CheckUpdates(),
-  downloadAndInstallUpdate: (downloadURL, signatureHex) => DownloadAndInstallUpdate(downloadURL, signatureHex),
+  checkUpdates: () => CheckUpdates() as Promise<UpdateInfo>,
+  downloadAndInstallUpdate: (downloadURL, signatureHex) =>
+    DownloadAndInstallUpdate(downloadURL, signatureHex),
   openUpdateLink: (url) => {
     window.open(url, '_blank');
   },
@@ -173,7 +190,7 @@ window.api = {
   close: () => {
     if (window.runtime && window.runtime.WindowHide) {
       window.runtime.WindowHide();
-      NotifyWindowHidden();
+      void NotifyWindowHidden();
     }
   },
   // Emitted by the backend whenever the window goes to the tray, including the
@@ -182,13 +199,15 @@ window.api = {
   // minimise the app never initiated (taskbar, Win+D) is not covered, because
   // Wails hides the Win32 window without touching the WebView2 controller and
   // so the page is never told.
-  onWindowHidden: (callback) => EventsOn('window-hidden', callback),
+  onWindowHidden: (callback) => {
+    EventsOn('window-hidden', callback);
+  },
   onWindowRestored: (callback) => {
     EventsOn('window-restored', callback);
     EventsOn('wails:window-unminimise', callback);
     EventsOn('wails:window-restore', callback);
     EventsOn('wails:window-focus', callback);
-    
+
     // Add robust fallbacks using standard DOM focus and visibility APIs
     window.addEventListener('focus', callback);
     document.addEventListener('visibilitychange', () => {
@@ -196,11 +215,14 @@ window.api = {
         callback();
       }
     });
-  }
+  },
 };
 
+// Expose them as window.api to maintain total compatibility with original renderer.js!
+window.api = api;
+
 // Formatting helper for human-readable speed strings
-function formatSpeed(bytesPerSec) {
+function formatSpeed(bytesPerSec: number): string {
   if (!bytesPerSec || bytesPerSec <= 0) return '0.0 KB/s';
   const k = 1024;
   const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
@@ -209,7 +231,7 @@ function formatSpeed(bytesPerSec) {
 }
 
 // Global listener for the 'traffic-stats' event emitted by the Go backend
-EventsOn('traffic-stats', (data) => {
+EventsOn('traffic-stats', (data: TrafficStats) => {
   const container = document.getElementById('speedometerContainer');
   const speedDownload = document.getElementById('speedDownload');
   const speedUpload = document.getElementById('speedUpload');
@@ -225,15 +247,15 @@ EventsOn('traffic-stats', (data) => {
     // Итоги за сессию считает Go: пока окно в трее события сюда не приходят
     // вовсе, и суммирование на этой стороне потеряло бы весь этот трафик.
     window.sessionBytesDown = data.totalDown || 0;
-    window.sessionBytesUp   = data.totalUp   || 0;
+    window.sessionBytesUp = data.totalUp || 0;
 
     const totalContainer = document.getElementById('sessionTotalContainer');
     const totalDown = document.getElementById('sessionTotalDown');
-    const totalUp   = document.getElementById('sessionTotalUp');
+    const totalUp = document.getElementById('sessionTotalUp');
     if (totalContainer && totalDown && totalUp) {
       if (totalContainer.style.display === 'none') totalContainer.style.display = 'flex';
       totalDown.textContent = formatBytesLocal(window.sessionBytesDown);
-      totalUp.textContent   = formatBytesLocal(window.sessionBytesUp);
+      totalUp.textContent = formatBytesLocal(window.sessionBytesUp);
     }
 
     const speedTotalContainer = document.getElementById('speedometerTotalContainer');
@@ -245,11 +267,11 @@ EventsOn('traffic-stats', (data) => {
 
     // Игровой стиль прогресс-бара трафика
     const totalBytes = window.sessionBytesDown + window.sessionBytesUp;
-    
+
     // Вычисляем динамический лимит
     let limitBytes = 100 * 1024 * 1024; // 100 MB default
     let limitLabel = '100 MB';
-    
+
     if (totalBytes > 100 * 1024 * 1024) {
       if (totalBytes <= 1024 * 1024 * 1024) {
         limitBytes = 1024 * 1024 * 1024; // 1 GB
@@ -265,13 +287,13 @@ EventsOn('traffic-stats', (data) => {
         limitLabel = '1 TB';
       }
     }
-    
+
     const percentage = Math.min(100, Math.round((totalBytes / limitBytes) * 100));
-    
+
     const ratioEl = document.getElementById('trafficGameRatio');
     const fillEl = document.getElementById('trafficGameProgressFill');
     const totalLimitEl = document.getElementById('trafficGameTotalAndLimit');
-    
+
     if (ratioEl) ratioEl.textContent = `${percentage}%`;
     if (fillEl) fillEl.style.width = `${percentage}%`;
     if (totalLimitEl) {
@@ -281,7 +303,7 @@ EventsOn('traffic-stats', (data) => {
 });
 
 // Локальный formatBytes (без зависимости от renderer.js)
-function formatBytesLocal(bytes) {
+function formatBytesLocal(bytes: number): string {
   if (!bytes || bytes <= 0) return '0 B';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -289,7 +311,16 @@ function formatBytesLocal(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 2)) + ' ' + sizes[i];
 }
 
-// Reset speedometer when VPN engine stops
+// Reset speedometer when VPN engine stops.
+//
+// Счётчики трафика здесь НЕ обнуляются, хотя раньше обнулялись. На то же
+// событие подписан renderer, и его обработчик пишет завершившуюся сессию в
+// историю, читая как раз эти счётчики. index.html грузит этот модуль первым,
+// поэтому обнуление успевало произойти раньше — и каждая сессия, оборвавшаяся
+// сама (упал туннель, watchdog не смог восстановить связь), попадала в историю
+// с нулевым трафиком. Обнуление живёт в startSessionTracking() в renderer:
+// начало новой сессии — единственный момент, когда прошлые цифры больше не
+// нужны никому.
 EventsOn('xray-stopped', () => {
   const container = document.getElementById('speedometerContainer');
   if (container) container.style.display = 'none';
@@ -297,8 +328,4 @@ EventsOn('xray-stopped', () => {
   if (totalContainer) totalContainer.style.display = 'none';
   const speedTotalContainer = document.getElementById('speedometerTotalContainer');
   if (speedTotalContainer) speedTotalContainer.style.display = 'none';
-  // Сбрасываем счётчик
-  window.sessionBytesDown = 0;
-  window.sessionBytesUp = 0;
 });
-

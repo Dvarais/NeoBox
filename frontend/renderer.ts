@@ -1,63 +1,70 @@
-import { translations } from './modules/translations.js';
-import { fetchIP, showPrompt, showConfirm, showAlert } from './modules/ui-utils.js';
-import { 
-    allSubscriptions, 
-    currentActiveSubId, 
-    loadSubscriptions as loadSubsBase, 
-    renderSubTabs, 
+import { el, optionalEl, query } from './modules/dom';
+import { translations } from './modules/translations';
+import type { Language, Translations } from './modules/translations';
+import type { AppSettings, CustomRule, UpdateInfo } from './modules/api';
+import { fetchIP, showConfirm, showAlert } from './modules/ui-utils';
+import {
+    allSubscriptions,
+    currentActiveSubId,
+    loadSubscriptions as loadSubsBase,
+    renderSubTabs,
     setActiveSubId,
     setSubscriptions
-} from './modules/subscription-manager.js';
-import { 
-    renderCards, 
-    parseBasicInfo, 
-    pingData, 
-    currentSortMode, 
-    setSortMode, 
-    setPingData 
-} from './modules/server-manager.js';
+} from './modules/subscription-manager';
+import {
+    renderCards,
+    parseBasicInfo,
+    pingData,
+    currentSortMode,
+    setSortMode,
+    setPingData
+} from './modules/server-manager';
+import type { SortMode } from './modules/server-manager';
 
 // Элементы DOM
-const powerBtn = document.getElementById('powerBtn');
-const restartBtn = document.getElementById('restartBtn');
-const disconnectBtn = document.getElementById('disconnectBtn');
-const statusDot = document.getElementById('statusDot');
-const statusText = document.getElementById('statusText');
-const currentIp = document.getElementById('currentIp');
-const fullLogOutput = document.getElementById('fullLogOutput');
-const clearLogsBtn = document.getElementById('clearLogsBtn');
-const activeServerName = document.getElementById('activeServerName');
-const activeServerDetails = document.getElementById('activeServerDetails');
-const serversGrid = document.getElementById('serversGrid');
-const subTabsContainer = document.getElementById('subscription-tabs');
-const processListBlacklistEl = document.getElementById('processListBlacklist');
-const processListWhitelistEl = document.getElementById('processListWhitelist');
+const powerBtn = el('powerBtn');
+const restartBtn = el('restartBtn');
+const disconnectBtn = el('disconnectBtn');
+const statusDot = el('statusDot');
+const statusText = el('statusText');
+const currentIp = el('currentIp');
+const fullLogOutput = el('fullLogOutput');
+const clearLogsBtn = el('clearLogsBtn');
+const activeServerName = el('activeServerName');
+const activeServerDetails = el('activeServerDetails');
+const serversGrid = el('serversGrid');
+const subTabsContainer = el('subscription-tabs');
+const processListBlacklistEl = el<HTMLTextAreaElement>('processListBlacklist');
+const processListWhitelistEl = el<HTMLTextAreaElement>('processListWhitelist');
+
+/** Состояние соединения, каким его показывает интерфейс. */
+type AppState = 'off' | 'connecting' | 'on';
 
 // Состояние
-let activeServerLink = null;
-let currentLanguage = 'RU';
+let activeServerLink: string | null = null;
+let currentLanguage: Language = 'RU';
 let isRestarting = false;
-let appState = 'off';
-let tunStatusInterval = null;
+let appState: AppState = 'off';
+let tunStatusInterval: ReturnType<typeof setInterval> | null = null;
 
 // Сессионный счётчик трафика (привязаны к window для совместимости с wails-bridge.js)
 window.sessionBytesDown = 0;
 window.sessionBytesUp = 0;
-let sessionConnectedAt = null; // timestamp начала сессии
-let sessionTimerInterval = null;
+let sessionConnectedAt: number | null = null; // timestamp начала сессии
+let sessionTimerInterval: ReturnType<typeof setInterval> | null = null;
 let sessionTimerStart = 0; // отсчитываем от метки, а не от числа тиков
 // false, пока окно свёрнуто в трей: там UI никто не видит, а каждая его
 // «живая» деталь держит WebView2 в работе. См. setUiActive.
 let uiActive = true;
 
 // Favorites
-let favoriteLinks = new Set();
-let customRules = [];
+let favoriteLinks = new Set<string>();
+let customRules: CustomRule[] = [];
 
 // Search query for server filter
 let serverSearchQuery = '';
 
-function onToggleFavorite(link) {
+function onToggleFavorite(link: string) {
   if (favoriteLinks.has(link)) {
     favoriteLinks.delete(link);
   } else {
@@ -68,8 +75,8 @@ function onToggleFavorite(link) {
 }
 
 // Навигация
-const navItems = document.querySelectorAll('.nav-item');
-const views = document.querySelectorAll('.view');
+const navItems = document.querySelectorAll<HTMLElement>('.nav-item');
+const views = document.querySelectorAll<HTMLElement>('.view');
 
 // Инициализируем активную вкладку для кастомных стилей
 document.body.setAttribute('data-active-tab', 'view-home');
@@ -79,8 +86,8 @@ navItems.forEach(item => {
     navItems.forEach(i => i.classList.remove('active'));
     views.forEach(v => v.classList.remove('active'));
     item.classList.add('active');
-    const targetId = item.getAttribute('data-target');
-    const targetView = document.getElementById(targetId);
+    const targetId = item.getAttribute('data-target') ?? '';
+    const targetView = optionalEl(targetId);
     if (targetView) targetView.classList.add('active');
     
     // Устанавливаем атрибут активной вкладки для кастомных стилей и виджета скроллбара
@@ -95,7 +102,7 @@ navItems.forEach(item => {
 });
 
 function updateCards() {
-    let servers = [];
+    let servers: string[] = [];
     if (currentActiveSubId === 'all') {
         allSubscriptions.forEach(s => servers.push(...s.links));
     } else if (currentActiveSubId === 'favorites') {
@@ -121,21 +128,30 @@ async function loadSubscriptions() {
     await loadSubsBase(() => {
         renderSubTabs(subTabsContainer, translations, currentLanguage, () => {
             updateCards();
-        }, (title, def) => showPrompt('modalOverlay', 'modalTitle', 'modalInput', 'modalCancel', 'modalConfirm', title, def), (title) => showConfirm('modalOverlay', 'modalTitle', 'modalInput', 'modalCancel', 'modalConfirm', title), loadSubscriptions);
+        }, loadSubscriptions);
         updateCards();
     });
 }
 
+// translate достаёт подпись по ключу, который собирается на лету из
+// data-атрибута разметки (sortName, logWarn и подобные). Проверить такой ключ на
+// этапе компиляции нельзя, поэтому послабление типов признаётся здесь один раз,
+// а не приведением к any в каждой точке вызова. Неизвестный ключ возвращается
+// как есть — это заметно на экране и не роняет отрисовку.
+function translate(t: Translations, key: string): string {
+  return (t as unknown as Record<string, string>)[key] ?? key;
+}
+
 // applyLanguage touches a lot of nodes; these guarded helpers keep it readable and
 // tolerate elements that only exist in some states of the UI.
-const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
-const setTitle = (id, value) => { const el = document.getElementById(id); if (el) el.title = value; };
-const setPlaceholder = (id, value) => { const el = document.getElementById(id); if (el) el.placeholder = value; };
+const setText = (id: string, value: string) => { const node = optionalEl(id); if (node) node.textContent = value; };
+const setTitle = (id: string, value: string) => { const node = optionalEl(id); if (node) node.title = value; };
+const setPlaceholder = (id: string, value: string) => { const node = optionalEl<HTMLInputElement>(id); if (node) node.placeholder = value; };
 
 function applyLanguage() {
   const t = translations[currentLanguage];
 
-  document.querySelectorAll('.nav-item').forEach(item => {
+  document.querySelectorAll<HTMLElement>('.nav-item').forEach(item => {
     const target = item.getAttribute('data-target');
     if (target === 'view-home') item.title = t.home;
     if (target === 'view-servers') item.title = t.servers;
@@ -144,7 +160,7 @@ function applyLanguage() {
     if (target === 'view-settings') item.title = t.settings;
     if (target === 'view-logs') item.title = t.logs;
   });
-  document.getElementById('langToggle').textContent = currentLanguage;
+  el('langToggle').textContent = currentLanguage;
 
   // Window controls and the servers-tab scrollbar widget are icon-only, so their
   // tooltip is the only text they ever show.
@@ -169,127 +185,127 @@ function applyLanguage() {
     activeServerDetails.textContent = t.selectLocation;
   }
   
-  document.getElementById('restartBtnText').textContent = t.restartBtn;
-  document.getElementById('disconnectBtnText').textContent = t.disconnectBtn;
-  document.getElementById('speedDownloadLabel').textContent = t.downloadLabel;
-  document.getElementById('speedUploadLabel').textContent = t.uploadLabel;
-  const speedTotalLabel = document.getElementById('speedTotalLabel');
+  el('restartBtnText').textContent = t.restartBtn;
+  el('disconnectBtnText').textContent = t.disconnectBtn;
+  el('speedDownloadLabel').textContent = t.downloadLabel;
+  el('speedUploadLabel').textContent = t.uploadLabel;
+  const speedTotalLabel = optionalEl('speedTotalLabel');
   if (speedTotalLabel) speedTotalLabel.textContent = t.totalTrafficLabel;
 
   // Переводы для игрового спидометра
-  const trafficGameTitle = document.getElementById('trafficGameTitle');
+  const trafficGameTitle = optionalEl('trafficGameTitle');
   if (trafficGameTitle) trafficGameTitle.textContent = t.trafficGameTitle;
-  const trafficGameDownLabel = document.getElementById('trafficGameDownLabel');
+  const trafficGameDownLabel = optionalEl('trafficGameDownLabel');
   if (trafficGameDownLabel) trafficGameDownLabel.textContent = t.trafficGameDownLabel;
-  const trafficGameUpLabel = document.getElementById('trafficGameUpLabel');
+  const trafficGameUpLabel = optionalEl('trafficGameUpLabel');
   if (trafficGameUpLabel) trafficGameUpLabel.textContent = t.trafficGameUpLabel;
-  const trafficGameLimitLabel = document.getElementById('trafficGameLimitLabel');
+  const trafficGameLimitLabel = optionalEl('trafficGameLimitLabel');
   if (trafficGameLimitLabel) trafficGameLimitLabel.textContent = t.trafficGameLimitLabel;
 
-  document.getElementById('importQrBtn').textContent = t.importQrBtn;
-  document.getElementById('qrModalTitle').textContent = t.qrModalTitle;
-  document.getElementById('qrStartCameraBtn').textContent = t.qrStartCameraBtn;
-  document.getElementById('qrUploadFileBtn').textContent = t.qrUploadFileBtn;
-  document.getElementById('qrPlaceholderText').textContent = t.qrPlaceholderText;
-  document.getElementById('qrModalClose').textContent = t.errorDialogClose;
+  el('importQrBtn').textContent = t.importQrBtn;
+  el('qrModalTitle').textContent = t.qrModalTitle;
+  el('qrStartCameraBtn').textContent = t.qrStartCameraBtn;
+  el('qrUploadFileBtn').textContent = t.qrUploadFileBtn;
+  el('qrPlaceholderText').textContent = t.qrPlaceholderText;
+  el('qrModalClose').textContent = t.errorDialogClose;
 
-  document.getElementById('subManagementTitle').textContent = t.subManagement;
-  document.getElementById('subName').placeholder = t.subNamePlaceholder;
-  document.getElementById('subUrl').placeholder = t.subUrlPlaceholder;
-  document.getElementById('addSubBtn').textContent = t.addBtn;
-  document.getElementById('updateSubBtn').textContent = t.updateCurrentBtn;
+  el('subManagementTitle').textContent = t.subManagement;
+  el<HTMLInputElement>('subName').placeholder = t.subNamePlaceholder;
+  el<HTMLInputElement>('subUrl').placeholder = t.subUrlPlaceholder;
+  el('addSubBtn').textContent = t.addBtn;
+  el('updateSubBtn').textContent = t.updateCurrentBtn;
   setTitle('updateSubBtn', t.updateCurrentBtnTitle);
-  document.getElementById('importClipboardBtn').textContent = t.importClipboardBtn;
-  document.getElementById('myLocationsTitle').textContent = t.myLocations;
-  document.getElementById('pingAllBtn').textContent = t.pingAllBtn;
-  document.getElementById('sortBtnText').textContent = t.sortBtn;
+  el('importClipboardBtn').textContent = t.importClipboardBtn;
+  el('myLocationsTitle').textContent = t.myLocations;
+  el('pingAllBtn').textContent = t.pingAllBtn;
+  el('sortBtnText').textContent = t.sortBtn;
   setPlaceholder('serverSearchInput', t.serverSearchPlaceholder);
   setTitle('bestServerBtn', t.bestServerBtnTitle);
   setText('bestServerBtnText', t.bestServerBtn);
 
-  document.querySelectorAll('.sort-item').forEach(item => {
-    const mode = item.dataset.sort;
-    item.textContent = t[`sort${mode.charAt(0).toUpperCase() + mode.slice(1)}`];
+  document.querySelectorAll<HTMLElement>('.sort-item').forEach(item => {
+    const mode = item.dataset.sort ?? '';
+    item.textContent = translate(t, `sort${mode.charAt(0).toUpperCase() + mode.slice(1)}`);
   });
 
-  document.getElementById('routeSettingsTitle').textContent = t.routeSettings;
-  document.getElementById('directDomainsLabel').textContent = t.directDomainsLabel;
-  document.getElementById('bypassRuLabel').textContent = t.bypassRuLabel;
-  document.getElementById('splitTunnelingTitle').textContent = t.splitTunnelingTitle;
-  document.getElementById('splitTunnelingDesc').innerHTML = t.splitTunnelingDesc.replace('chrome.exe', '<b>chrome.exe</b>');
+  el('routeSettingsTitle').textContent = t.routeSettings;
+  el('directDomainsLabel').textContent = t.directDomainsLabel;
+  el('bypassRuLabel').textContent = t.bypassRuLabel;
+  el('splitTunnelingTitle').textContent = t.splitTunnelingTitle;
+  el('splitTunnelingDesc').innerHTML = t.splitTunnelingDesc.replace('chrome.exe', '<b>chrome.exe</b>');
   
-  document.querySelectorAll('.process-tab').forEach(tab => {
+  document.querySelectorAll<HTMLElement>('.process-tab').forEach(tab => {
     const mode = tab.dataset.mode;
     tab.textContent = mode === 'blacklist' ? t.blacklistTab : t.whitelistTab;
   });
-  document.getElementById('processListBlacklist').placeholder = t.blacklistPlaceholder;
-  document.getElementById('processListWhitelist').placeholder = t.whitelistPlaceholder;
+  el<HTMLTextAreaElement>('processListBlacklist').placeholder = t.blacklistPlaceholder;
+  el<HTMLTextAreaElement>('processListWhitelist').placeholder = t.whitelistPlaceholder;
 
-  const customRoutesTitle = document.getElementById('customRoutesTitle');
+  const customRoutesTitle = optionalEl('customRoutesTitle');
   if (customRoutesTitle) customRoutesTitle.textContent = t.customRoutesTitle;
-  const customRoutesDesc = document.getElementById('customRoutesDesc');
+  const customRoutesDesc = optionalEl('customRoutesDesc');
   if (customRoutesDesc) customRoutesDesc.textContent = t.customRoutesDesc;
-  const addCustomRuleBtn = document.getElementById('addCustomRuleBtn');
+  const addCustomRuleBtn = optionalEl('addCustomRuleBtn');
   if (addCustomRuleBtn) addCustomRuleBtn.textContent = t.addCustomRuleBtn;
-  const saveRoutesBtn2 = document.getElementById('saveRoutesBtn2');
+  const saveRoutesBtn2 = optionalEl('saveRoutesBtn2');
   if (saveRoutesBtn2) saveRoutesBtn2.textContent = t.saveRoutesBtn2;
-  const routesStatus2 = document.getElementById('routesStatus2');
+  const routesStatus2 = optionalEl('routesStatus2');
   if (routesStatus2) routesStatus2.textContent = t.statusDone;
   
-  const optActionDirect = document.getElementById('optActionDirect');
+  const optActionDirect = optionalEl('optActionDirect');
   if (optActionDirect) optActionDirect.textContent = t.actionDirectOption;
-  const optActionProxy = document.getElementById('optActionProxy');
+  const optActionProxy = optionalEl('optActionProxy');
   if (optActionProxy) optActionProxy.textContent = t.actionProxyOption;
-  const optActionBlock = document.getElementById('optActionBlock');
+  const optActionBlock = optionalEl('optActionBlock');
   if (optActionBlock) optActionBlock.textContent = t.actionBlockOption;
   
-  const optTypeSuffix = document.getElementById('optTypeSuffix');
+  const optTypeSuffix = optionalEl('optTypeSuffix');
   if (optTypeSuffix) optTypeSuffix.textContent = t.typeSuffixOption;
-  const optTypeDomain = document.getElementById('optTypeDomain');
+  const optTypeDomain = optionalEl('optTypeDomain');
   if (optTypeDomain) optTypeDomain.textContent = t.typeDomainOption;
-  const optTypeKeyword = document.getElementById('optTypeKeyword');
+  const optTypeKeyword = optionalEl('optTypeKeyword');
   if (optTypeKeyword) optTypeKeyword.textContent = t.typeKeywordOption;
-  const optTypeIp = document.getElementById('optTypeIp');
+  const optTypeIp = optionalEl('optTypeIp');
   if (optTypeIp) optTypeIp.textContent = t.typeIpOption;
   
-  const newRuleValue = document.getElementById('newRuleValue');
+  const newRuleValue = optionalEl<HTMLInputElement>('newRuleValue');
   if (newRuleValue) newRuleValue.placeholder = t.ruleValuePlaceholder;
   
   renderCustomRules();
 
-  document.getElementById('appSettingsTitle').textContent = t.appSettingsTitle;
-  document.getElementById('dnsServerLabel').textContent = t.dnsServerLabel;
-  document.querySelector('#dnsSelect option[value="custom"]').textContent = t.placeholderDns;
-  document.getElementById('tunModeLabel').textContent = t.tunModeLabel;
-  document.getElementById('tunModeDesc').textContent = t.tunModeDesc;
-  document.getElementById('systemProxyLabel').textContent = t.systemProxyLabel;
-  document.getElementById('autoConnectLabel').textContent = t.autoConnectLabel;
-  document.getElementById('autoUpdateSubsLabel').textContent = t.autoUpdateSubsLabel;
-  document.getElementById('rememberServerLabel').textContent = t.rememberServerLabel;
-  document.getElementById('openAtLoginLabel').textContent = t.openAtLoginLabel;
-  document.getElementById('startMinimizedLabel').textContent = t.startMinimizedLabel;
-  document.getElementById('securityTitle').textContent = t.securityTitle;
-  document.getElementById('killSwitchLabel').textContent = t.killSwitchLabel;
-  document.getElementById('killSwitchDesc').textContent = t.killSwitchDesc;
-  document.getElementById('dnsLeakLabel').textContent = t.dnsLeakLabel;
-  document.getElementById('ipv6LeakLabel').textContent = t.ipv6LeakLabel;
-  document.getElementById('fakeDnsLabel').textContent = t.fakeDnsLabel;
-  document.getElementById('fakeDnsDesc').textContent = t.fakeDnsDesc;
+  el('appSettingsTitle').textContent = t.appSettingsTitle;
+  el('dnsServerLabel').textContent = t.dnsServerLabel;
+  query('#dnsSelect option[value="custom"]').textContent = t.placeholderDns;
+  el('tunModeLabel').textContent = t.tunModeLabel;
+  el('tunModeDesc').textContent = t.tunModeDesc;
+  el('systemProxyLabel').textContent = t.systemProxyLabel;
+  el('autoConnectLabel').textContent = t.autoConnectLabel;
+  el('autoUpdateSubsLabel').textContent = t.autoUpdateSubsLabel;
+  el('rememberServerLabel').textContent = t.rememberServerLabel;
+  el('openAtLoginLabel').textContent = t.openAtLoginLabel;
+  el('startMinimizedLabel').textContent = t.startMinimizedLabel;
+  el('securityTitle').textContent = t.securityTitle;
+  el('killSwitchLabel').textContent = t.killSwitchLabel;
+  el('killSwitchDesc').textContent = t.killSwitchDesc;
+  el('dnsLeakLabel').textContent = t.dnsLeakLabel;
+  el('ipv6LeakLabel').textContent = t.ipv6LeakLabel;
+  el('fakeDnsLabel').textContent = t.fakeDnsLabel;
+  el('fakeDnsDesc').textContent = t.fakeDnsDesc;
   setText('verboseLoggingLabel', t.verboseLoggingLabel);
   setText('verboseLoggingDesc', t.verboseLoggingDesc);
-  document.getElementById('saveRoutesBtn').textContent = t.saveRoutesBtn;
-  document.getElementById('routesStatus').textContent = t.statusDone;
-  document.getElementById('saveAppsBtn').textContent = t.saveAppsBtn;
-  document.getElementById('appsStatus').textContent = t.statusDone;
-  document.getElementById('saveSettingsBtn').textContent = t.saveAllBtn;
-  document.getElementById('settingsStatus').textContent = t.statusDone;
-  document.getElementById('logsTitle').textContent = t.logsTitle;
-  document.getElementById('clearLogsBtn').textContent = t.logsClearBtn;
+  el('saveRoutesBtn').textContent = t.saveRoutesBtn;
+  el('routesStatus').textContent = t.statusDone;
+  el('saveAppsBtn').textContent = t.saveAppsBtn;
+  el('appsStatus').textContent = t.statusDone;
+  el('saveSettingsBtn').textContent = t.saveAllBtn;
+  el('settingsStatus').textContent = t.statusDone;
+  el('logsTitle').textContent = t.logsTitle;
+  el('clearLogsBtn').textContent = t.logsClearBtn;
   setText('saveLogsBtnText', t.saveLogsBtn);
   setTitle('saveLogsBtn', t.saveLogsBtnTitle);
-  document.querySelectorAll('.log-tab').forEach(tab => {
-    const filter = tab.dataset.filter;
-    tab.textContent = t[`log${filter.charAt(0) + filter.slice(1).toLowerCase()}`];
+  document.querySelectorAll<HTMLElement>('.log-tab').forEach(tab => {
+    const filter = tab.dataset.filter ?? '';
+    tab.textContent = translate(t, `log${filter.charAt(0) + filter.slice(1).toLowerCase()}`);
   });
 
   // History tab. The cards themselves are rebuilt by renderHistoryTab() below,
@@ -318,41 +334,41 @@ function applyLanguage() {
   setText('dnsLeakRetryBtnText', t.dnsLeakRetryBtn);
 
   // Update Modal translations
-  const updateModalTitleEl = document.getElementById('updateModalTitle');
+  const updateModalTitleEl = optionalEl('updateModalTitle');
   if (updateModalTitleEl) updateModalTitleEl.textContent = t.updateModalTitle;
   
-  const updateModalChangelogTitleEl = document.querySelector('.update-changelog-title');
+  const updateModalChangelogTitleEl = document.querySelector<HTMLElement>('.update-changelog-title');
   if (updateModalChangelogTitleEl) updateModalChangelogTitleEl.textContent = t.updateModalChangelogTitle;
   
-  const updateModalCancelEl = document.getElementById('updateModalCancel');
+  const updateModalCancelEl = optionalEl('updateModalCancel');
   if (updateModalCancelEl) updateModalCancelEl.textContent = t.updateModalCancel;
   
-  const updateModalConfirmEl = document.getElementById('updateModalConfirm');
+  const updateModalConfirmEl = optionalEl('updateModalConfirm');
   if (updateModalConfirmEl) updateModalConfirmEl.textContent = t.updateModalConfirm;
 
-  const tunStatusTitle = document.getElementById('tunStatusTitle');
+  const tunStatusTitle = optionalEl('tunStatusTitle');
   if (tunStatusTitle) tunStatusTitle.textContent = t.tunStatusTitle;
-  const restoreTunBtnText = document.getElementById('restoreTunBtnText');
+  const restoreTunBtnText = optionalEl('restoreTunBtnText');
   if (restoreTunBtnText) restoreTunBtnText.textContent = t.tunStatusRestoreBtn;
   // Placeholder until the async probe below reports back.
   setText('tunStatusText', t.tunStatusChecking);
   checkAndUpdateTunStatus();
 
-  renderSubTabs(subTabsContainer, translations, currentLanguage, updateCards, (title, def) => showPrompt('modalOverlay', 'modalTitle', 'modalInput', 'modalCancel', 'modalConfirm', title, def), (title) => showConfirm('modalOverlay', 'modalTitle', 'modalInput', 'modalCancel', 'modalConfirm', title), loadSubscriptions);
+  renderSubTabs(subTabsContainer, translations, currentLanguage, updateCards, loadSubscriptions);
   updateCards();
 }
 
-document.getElementById('langToggle').onclick = () => {
+el('langToggle').onclick = () => {
   currentLanguage = currentLanguage === 'RU' ? 'EN' : 'RU';
   applyLanguage();
   collectAndSaveSettings();
 };
 
 // Сортировка
-const sortDropdown = document.querySelector('.sort-dropdown');
-const sortMenu = document.querySelector('.sort-menu');
-const sortItems = document.querySelectorAll('.sort-item');
-let sortMenuTimeout;
+const sortDropdown = query('.sort-dropdown');
+const sortMenu = query('.sort-menu');
+const sortItems = document.querySelectorAll<HTMLElement>('.sort-item');
+let sortMenuTimeout: ReturnType<typeof setTimeout>;
 
 sortDropdown.addEventListener('mouseenter', () => {
   clearTimeout(sortMenuTimeout);
@@ -367,15 +383,15 @@ sortItems.forEach(item => {
   item.addEventListener('click', () => {
     sortItems.forEach(i => i.classList.remove('active'));
     item.classList.add('active');
-    setSortMode(item.dataset.sort);
+    setSortMode(item.dataset.sort as SortMode);
     updateCards();
     sortMenu.classList.remove('show');
   });
 });
 
 // Split Tunneling
-const processTabs = document.querySelectorAll('.process-tab');
-const processModeHidden = document.getElementById('processModeHidden');
+const processTabs = document.querySelectorAll<HTMLElement>('.process-tab');
+const processModeHidden = el<HTMLInputElement>('processModeHidden');
 
 processTabs.forEach(tab => {
   tab.addEventListener('click', (e) => {
@@ -385,12 +401,12 @@ processTabs.forEach(tab => {
       t.style.color = 'var(--text-main)';
       t.style.fontWeight = 'normal';
     });
-    const target = e.currentTarget;
+    const target = e.currentTarget as HTMLElement;
     target.classList.add('active');
     target.style.background = 'var(--accent-color)';
     target.style.color = '#000';
     target.style.fontWeight = 'bold';
-    processModeHidden.value = target.getAttribute('data-mode');
+    processModeHidden.value = target.getAttribute('data-mode') ?? 'blacklist';
 
     if (processModeHidden.value === 'blacklist') {
       processListBlacklistEl.style.display = 'block';
@@ -402,11 +418,21 @@ processTabs.forEach(tab => {
   });
 });
 
-function updateAppInterface(state) {
+// updateAppInterface перерисовывает интерфейс под состояние соединения.
+//
+// Функция вызывается в двух совершенно разных случаях: при фактической смене
+// состояния и при простой перерисовке — applyLanguage() зовёт её с текущим
+// состоянием, чтобы подписи сменили язык. Поэтому побочные эффекты входа в
+// состояние (начало отсчёта сессии, запрос IP) выполняются только когда
+// состояние действительно изменилось. Раньше они выполнялись всегда, и
+// переключение RU/EN на подключённом VPN обнуляло и таймер соединения, и
+// sessionConnectedAt — то есть портило длительность записи в истории.
+function updateAppInterface(state: AppState) {
+  const entered = appState !== state;
   appState = state;
   const t = translations[currentLanguage];
-  const timerBadge = document.getElementById('sessionTimerBadge');
-  const timerText = document.getElementById('sessionTimerText');
+  const timerBadge = el('sessionTimerBadge');
+  const timerText = el('sessionTimerText');
 
   if (state === 'on') {
     powerBtn.classList.add('on', 'pulse-animation');
@@ -415,12 +441,16 @@ function updateAppInterface(state) {
     statusText.style.color = 'var(--success)';
     restartBtn.style.display = 'flex';
     disconnectBtn.style.display = 'flex';
-    isRestarting = false;
-    setTimeout(() => fetchIP(currentIp, t), 2000);
-    startSessionTracking();
+    if (entered) {
+      isRestarting = false;
+      setTimeout(() => fetchIP(currentIp, t), 2000);
+      startSessionTracking();
+      sessionTimerStart = Date.now();
+    }
     // Start live connection timer
     if (timerBadge) timerBadge.style.display = 'flex';
-    sessionTimerStart = Date.now();
+    // Идемпотентно (сам снимает прошлые интервалы), поэтому вызывается и при
+    // перерисовке: иначе смена языка оставила бы таймер стоять.
     startLiveTimers();
   } else if (state === 'connecting') {
     powerBtn.classList.add('on');
@@ -432,9 +462,9 @@ function updateAppInterface(state) {
     restartBtn.style.display = 'none';
     disconnectBtn.style.display = 'flex';
 
-    clearInterval(tunStatusInterval);
+    clearInterval(tunStatusInterval ?? undefined);
     tunStatusInterval = null;
-    const tunStatusContainer = document.getElementById('tunStatusContainer');
+    const tunStatusContainer = optionalEl('tunStatusContainer');
     if (tunStatusContainer) tunStatusContainer.style.display = 'none';
   } else {
     powerBtn.classList.remove('on', 'pulse-animation');
@@ -444,12 +474,17 @@ function updateAppInterface(state) {
     restartBtn.style.display = 'none';
     disconnectBtn.style.display = 'none';
     currentIp.textContent = '—';
+    // Сюда приходит и неудавшийся перезапуск. Флаг обязан сброситься именно
+    // здесь: иначе он оставался бы поднятым навсегда, и следующий самопроизвольный
+    // обрыв туннеля прошёл бы мимо onStopped — интерфейс остался бы «подключено»,
+    // а сессия не попала бы в историю.
+    isRestarting = false;
     stopLiveTimers();
     sessionTimerStart = 0;
     if (timerBadge) timerBadge.style.display = 'none';
     if (timerText) timerText.textContent = '00:00:00';
 
-    const tunStatusContainer = document.getElementById('tunStatusContainer');
+    const tunStatusContainer = optionalEl('tunStatusContainer');
     if (tunStatusContainer) tunStatusContainer.style.display = 'none';
   }
 }
@@ -457,7 +492,7 @@ function updateAppInterface(state) {
 // Таймер считается от sessionTimerStart, а не накоплением тиков, — иначе после
 // паузы в трее он отстал бы ровно на время, что окно было скрыто.
 function renderSessionTimer() {
-  const timerText = document.getElementById('sessionTimerText');
+  const timerText = el('sessionTimerText');
   if (!timerText || !sessionTimerStart) return;
   const elapsed = Math.floor((Date.now() - sessionTimerStart) / 1000);
   const h = String(Math.floor(elapsed / 3600)).padStart(2, '0');
@@ -479,16 +514,16 @@ function startLiveTimers() {
 }
 
 function stopLiveTimers() {
-  clearInterval(sessionTimerInterval);
+  clearInterval(sessionTimerInterval ?? undefined);
   sessionTimerInterval = null;
-  clearInterval(tunStatusInterval);
+  clearInterval(tunStatusInterval ?? undefined);
   tunStatusInterval = null;
 }
 
 // setUiActive переводит интерфейс в простой, когда окно уходит в трей: гасит
 // опросы и через класс app-idle останавливает бесконечные CSS-анимации, которые
 // иначе держали бы композитор WebView2 занятым круглосуточно.
-function setUiActive(active) {
+function setUiActive(active: boolean) {
   if (uiActive === active) return;
   uiActive = active;
   document.body.classList.toggle('app-idle', !active);
@@ -500,8 +535,8 @@ function setUiActive(active) {
 }
 
 async function checkAndUpdateTunStatus() {
-  const isTunChecked = document.getElementById('tunModeCheckbox').checked;
-  const tunStatusContainer = document.getElementById('tunStatusContainer');
+  const isTunChecked = el<HTMLInputElement>('tunModeCheckbox').checked;
+  const tunStatusContainer = optionalEl('tunStatusContainer');
   if (!tunStatusContainer) return;
   
   if (appState === 'on' && isTunChecked) {
@@ -509,8 +544,8 @@ async function checkAndUpdateTunStatus() {
     try {
       const isActive = await window.api.checkTunStatus();
       const t = translations[currentLanguage];
-      const statusTextEl = document.getElementById('tunStatusText');
-      const statusIconEl = document.getElementById('tunStatusIcon');
+      const statusTextEl = optionalEl('tunStatusText');
+      const statusIconEl = el('tunStatusIcon');
       
       if (statusTextEl && statusIconEl) {
         if (isActive) {
@@ -531,7 +566,7 @@ async function checkAndUpdateTunStatus() {
   }
 }
 
-const restoreTunBtn = document.getElementById('restoreTunBtn');
+const restoreTunBtn = optionalEl('restoreTunBtn');
 if (restoreTunBtn) {
   restoreTunBtn.onclick = () => {
     if (restartBtn && restartBtn.style.display !== 'none') {
@@ -541,9 +576,22 @@ if (restoreTunBtn) {
 }
 
 // Логгер
+
+/** Уровень строки лога, как его определяет parseLogLine. */
+type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
+
+/** Активный фильтр вкладки «Логи»; ALL означает «показывать всё». */
+type LogFilter = LogLevel | 'ALL';
+
+/** Строка лога в буфере: только сырой текст и уровень — разметка строится при показе. */
+interface LogEntry {
+  level: LogLevel;
+  text: string;
+}
+
 const MAX_LOG_ENTRIES = 500;
-const logsArray = [];
-let currentLogFilter = 'ALL';
+const logsArray: LogEntry[] = [];
+let currentLogFilter: LogFilter = 'ALL';
 let isScrolledToBottom = true;
 // True when lines arrived while the Logs view was closed, so the panel needs a
 // full rebuild before it is shown again.
@@ -553,16 +601,17 @@ fullLogOutput.addEventListener('scroll', () => {
     isScrolledToBottom = Math.abs(fullLogOutput.scrollHeight - fullLogOutput.clientHeight - fullLogOutput.scrollTop) < 5;
 });
 
-document.querySelectorAll('.log-tab').forEach(tab => {
+document.querySelectorAll<HTMLElement>('.log-tab').forEach(tab => {
   tab.addEventListener('click', (e) => {
-      document.querySelectorAll('.log-tab').forEach(t => t.classList.remove('active'));
-      e.target.classList.add('active');
-      currentLogFilter = e.target.dataset.filter;
+      document.querySelectorAll<HTMLElement>('.log-tab').forEach(t => t.classList.remove('active'));
+      const tabEl = e.currentTarget as HTMLElement;
+      tabEl.classList.add('active');
+      currentLogFilter = tabEl.dataset.filter as LogFilter;
       renderLogs();
   });
 });
 
-function stripAnsi(str) {
+function stripAnsi(str: string) {
   return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
 }
 
@@ -572,7 +621,7 @@ function stripAnsi(str) {
 // Non-string input is coerced rather than allowed to throw: callers pass values
 // parsed out of proxy links and stored history, where a field can legitimately
 // be undefined, and a TypeError here would take out the whole render.
-function escapeHtml(str) {
+function escapeHtml(str: unknown) {
   return String(str ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -581,19 +630,62 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+// normalizeLevel сводит слово, которым ядро пометило строку, к одному из
+// четырёх уровней, которые понимают и вкладки фильтра, и стили значков.
+//
+// Раньше сюда приводилось только WARNING → WARN, а всё остальное попадало в
+// разметку как есть: строка уровня FATAL получала класс badge-fatal, которого
+// нет в стилях, и не совпадала ни с одной вкладкой фильтра — то есть исчезала
+// отовсюду, кроме «ВСЕ». Для фатальной ошибки это ровно противоположно нужному.
+function normalizeLevel(raw: string): LogLevel {
+  switch (raw.toUpperCase()) {
+    case 'WARN':
+    case 'WARNING':
+      return 'WARN';
+    case 'ERROR':
+    case 'FATAL':
+    case 'PANIC':
+      return 'ERROR';
+    case 'DEBUG':
+    case 'TRACE':
+      return 'DEBUG';
+    default:
+      return 'INFO';
+  }
+}
+
+// errorText вытаскивает читаемый текст из того, что прилетело в catch.
+//
+// Wails отклоняет вызов биндинга то объектом Error, то голой строкой, а под
+// strict пойманное значение имеет тип unknown — то есть обратиться к .message
+// напрямую нельзя. Разбор собран здесь один раз вместо приведения типа в каждом
+// catch.
+function errorText(e: unknown): string {
+  if (!e) return '';
+  if (typeof e === 'string') return e;
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
+
 // parseLogLine splits an already ANSI-stripped line into its parts. It runs on
 // every line that arrives, so it deliberately does no escaping or highlighting
 // — that work lives in renderLogHtml and only runs for lines actually going on
 // screen.
-function parseLogLine(clean) {
-  let level = 'INFO';
+function parseLogLine(clean: string): {
+  level: LogLevel;
+  timeStr: string;
+  contextStr: string;
+  messageStr: string;
+  isSuccess: boolean;
+} {
+  let level: LogLevel = 'INFO';
   let timeStr = '';
   let contextStr = '';
   let messageStr = clean;
 
   const match = clean.match(/^([A-Z]+)\[([0-9]+)\]\s+(?:\[([0-9\s.a-zA-Z]+)\]\s+)?(.*)$/);
   if (match) {
-    level = match[1];
+    level = normalizeLevel(match[1]);
     timeStr = match[2];
     contextStr = match[3] || '';
     messageStr = match[4];
@@ -608,8 +700,6 @@ function parseLogLine(clean) {
       level = 'DEBUG';
     }
   }
-
-  if (level === 'WARNING') level = 'WARN';
 
   // Fix the NOERROR -> ERROR bug
   let isSuccess = false;
@@ -626,7 +716,7 @@ function parseLogLine(clean) {
 
 // renderLogHtml turns a parsed line into markup. Only called for lines being
 // put into the DOM, which is why the log panel costs nothing while it is closed.
-function renderLogHtml({ level, timeStr, contextStr, messageStr, isSuccess }) {
+function renderLogHtml({ level, timeStr, contextStr, messageStr, isSuccess }: ReturnType<typeof parseLogLine>) {
   let html = '';
 
   // 1. Time badge
@@ -640,7 +730,7 @@ function renderLogHtml({ level, timeStr, contextStr, messageStr, isSuccess }) {
 
   // 2. Level badge
   let badgeClass = `badge-${level.toLowerCase()}`;
-  let displayLevel = level;
+  let displayLevel: string = level;
   if (isSuccess && level === 'INFO') {
     badgeClass = 'badge-success';
     displayLevel = 'SUCCESS';
@@ -678,11 +768,11 @@ function isLogsViewOpen() {
   return document.body.getAttribute('data-active-tab') === 'view-logs';
 }
 
-function makeLogElement(entry) {
-  const el = document.createElement('div');
-  el.className = `log-line log-${entry.level.toLowerCase()}`;
-  el.innerHTML = renderLogHtml(parseLogLine(entry.text));
-  return el;
+function makeLogElement(entry: LogEntry) {
+  const node = document.createElement('div');
+  node.className = `log-line log-${entry.level.toLowerCase()}`;
+  node.innerHTML = renderLogHtml(parseLogLine(entry.text));
+  return node;
 }
 
 function renderLogs() {
@@ -700,7 +790,7 @@ function renderLogs() {
 // addLogEntries takes a whole batch from the backend and touches the DOM once.
 // Entries keep only the raw line and its level: the markup is rebuilt on demand
 // in makeLogElement, which halves what a full buffer retains.
-function addLogEntries(lines) {
+function addLogEntries(lines: string[]) {
   if (!Array.isArray(lines) || lines.length === 0) return;
 
   const wasAtBottom = isScrolledToBottom;
@@ -717,10 +807,10 @@ function addLogEntries(lines) {
     if (text.includes('wsasend: An established connection was aborted')) continue;
     if (text.includes('connection was aborted by the software in your host machine')) continue;
 
-    const entry = { level: parseLogLine(text).level, text };
+    const entry: LogEntry = { level: parseLogLine(text).level, text };
     logsArray.push(entry);
 
-    if (viewOpen && (currentLogFilter === 'ALL' || currentLogFilter === entry.level)) {
+    if (fragment && (currentLogFilter === 'ALL' || currentLogFilter === entry.level)) {
       fragment.appendChild(makeLogElement(entry));
       appended++;
     }
@@ -730,12 +820,12 @@ function addLogEntries(lines) {
     logsArray.splice(0, logsArray.length - MAX_LOG_ENTRIES);
   }
 
-  if (!viewOpen) {
+  if (!fragment) {
     logsDomStale = true;
   } else if (appended > 0) {
     fullLogOutput.appendChild(fragment);
     const excess = fullLogOutput.childNodes.length - MAX_LOG_ENTRIES;
-    for (let i = 0; i < excess; i++) fullLogOutput.removeChild(fullLogOutput.firstChild);
+    for (let i = 0; i < excess && fullLogOutput.firstChild; i++) fullLogOutput.removeChild(fullLogOutput.firstChild);
     if (wasAtBottom) fullLogOutput.scrollTop = fullLogOutput.scrollHeight;
   }
 }
@@ -771,7 +861,7 @@ window.api.onPingResult((data) => {
 window.api.onTrayToggleConnection(() => powerBtn.click());
 window.api.onTrayRestart(() => restartBtn.click());
 
-window.api.onTrayServerSelected((link) => {
+window.api.onTrayServerSelected((link: string) => {
   activeServerLink = link;
   const info = parseBasicInfo(link);
   activeServerName.textContent = info.name;
@@ -800,7 +890,7 @@ window.api.onTrayStartReconnect((data) => {
         updateAppInterface('off');
       }
     } catch (e) {
-      showAlert(translations[currentLanguage].errorDialogTitle, e.message, true, translations[currentLanguage]);
+      showAlert(translations[currentLanguage].errorDialogTitle, errorText(e), true, translations[currentLanguage]);
       updateAppInterface('off');
     }
   })();
@@ -813,13 +903,13 @@ powerBtn.onclick = () => {
     updateAppInterface('connecting');
     (async () => {
       try {
-        const res = await window.api.startXray(activeServerLink, document.getElementById('systemProxyCheckbox').checked);
+        const res = await window.api.startXray(activeServerLink, el<HTMLInputElement>('systemProxyCheckbox').checked);
         if (res && !res.success) {
           showAlert(translations[currentLanguage].errorDialogTitle, res.error || 'Unknown error', true, translations[currentLanguage]);
           updateAppInterface('off');
         }
       } catch (e) {
-        showAlert(translations[currentLanguage].errorDialogTitle, e.message, true, translations[currentLanguage]);
+        showAlert(translations[currentLanguage].errorDialogTitle, errorText(e), true, translations[currentLanguage]);
         updateAppInterface('off');
       }
     })();
@@ -839,25 +929,25 @@ function startSessionTracking() {
   window.sessionBytesDown = 0;
   window.sessionBytesUp = 0;
   sessionConnectedAt = Date.now();
-  document.getElementById('sessionTotalDown').textContent = '0 B';
-  document.getElementById('sessionTotalUp').textContent = '0 B';
-  const speedTotal = document.getElementById('speedTotal');
+  el('sessionTotalDown').textContent = '0 B';
+  el('sessionTotalUp').textContent = '0 B';
+  const speedTotal = optionalEl('speedTotal');
   if (speedTotal) speedTotal.textContent = '0 B';
-  const speedometerTotalContainer = document.getElementById('speedometerTotalContainer');
+  const speedometerTotalContainer = optionalEl('speedometerTotalContainer');
   if (speedometerTotalContainer) speedometerTotalContainer.style.display = 'none';
-  document.getElementById('sessionTotalContainer').style.display = 'none'; // покажем после первого обновления
+  el('sessionTotalContainer').style.display = 'none'; // покажем после первого обновления
 
   // Сброс элементов игрового спидометра
-  const ratioEl = document.getElementById('trafficGameRatio');
-  const fillEl = document.getElementById('trafficGameProgressFill');
-  const totalLimitEl = document.getElementById('trafficGameTotalAndLimit');
+  const ratioEl = optionalEl('trafficGameRatio');
+  const fillEl = optionalEl('trafficGameProgressFill');
+  const totalLimitEl = optionalEl('trafficGameTotalAndLimit');
   if (ratioEl) ratioEl.textContent = '0%';
   if (fillEl) fillEl.style.width = '0%';
   if (totalLimitEl) totalLimitEl.textContent = '0 B / 100 MB';
 }
 
 // Форматирование байт в читаемый вид
-function formatBytes(bytes) {
+function formatBytes(bytes: number) {
   if (bytes === 0) return '0 B';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -866,7 +956,7 @@ function formatBytes(bytes) {
 }
 
 // Формат длительности сессии в человекоческий вид
-function formatDuration(seconds) {
+function formatDuration(seconds: number) {
   const t = translations[currentLanguage];
   if (seconds < 60) return `${seconds}${t.durationSec}`;
   const m = Math.floor(seconds / 60);
@@ -875,6 +965,24 @@ function formatDuration(seconds) {
   const h = Math.floor(m / 60);
   const rm = m % 60;
   return `${h}${t.durationHour} ${rm}${t.durationMin}`;
+}
+
+/**
+ * Одна завершившаяся сессия во вкладке «История». Хранится в localStorage, а не
+ * у бэкенда: это чисто интерфейсная сводка, credentials в ней нет — кроме link,
+ * который нужен для быстрого повторного подключения.
+ */
+interface HistoryEntry {
+  id: string;
+  server: string;
+  protocol: string;
+  address: string;
+  link: string | null;
+  connectedAt: number;
+  disconnectedAt: number;
+  durationSec: number;
+  bytesDown: number;
+  bytesUp: number;
 }
 
 // Запись сессии в историю
@@ -907,17 +1015,17 @@ function finishSessionHistory() {
   renderHistoryTab();
 }
 
-function loadHistory() {
+function loadHistory(): HistoryEntry[] {
   try { return JSON.parse(localStorage.getItem('neobox-connection-history') || '[]'); }
   catch { return []; }
 }
 
-function saveHistory(history) {
+function saveHistory(history: HistoryEntry[]) {
   localStorage.setItem('neobox-connection-history', JSON.stringify(history));
 }
 
 // Поиск ссылки сервера в подписках по метаданным (для обратной совместимости)
-function findServerLink(name, address, protocol) {
+function findServerLink(name: string, address: string, protocol: string) {
   if (!allSubscriptions) return null;
   for (const sub of allSubscriptions) {
     if (sub.links) {
@@ -933,7 +1041,7 @@ function findServerLink(name, address, protocol) {
 }
 
 // Установка активного сервера и запуск подключения
-async function selectAndConnectServer(link) {
+async function selectAndConnectServer(link: string) {
   if (!link) return;
   const info = parseBasicInfo(link);
   if (!info) return;
@@ -950,13 +1058,13 @@ async function selectAndConnectServer(link) {
   if (appState === 'off') {
     updateAppInterface('connecting');
     try {
-      const res = await window.api.startXray(activeServerLink, document.getElementById('systemProxyCheckbox').checked);
+      const res = await window.api.startXray(activeServerLink, el<HTMLInputElement>('systemProxyCheckbox').checked);
       if (res && !res.success) {
         showAlert(translations[currentLanguage].errorDialogTitle, res.error || 'Unknown error', true, translations[currentLanguage]);
         updateAppInterface('off');
       }
     } catch (e) {
-      showAlert(translations[currentLanguage].errorDialogTitle, e.message, true, translations[currentLanguage]);
+      showAlert(translations[currentLanguage].errorDialogTitle, errorText(e), true, translations[currentLanguage]);
       updateAppInterface('off');
     }
   } else {
@@ -964,7 +1072,7 @@ async function selectAndConnectServer(link) {
   }
 
   // Переключаем вкладку на Главную
-  const homeTab = document.querySelector('.nav-item[data-target="view-home"]');
+  const homeTab = document.querySelector<HTMLElement>('.nav-item[data-target="view-home"]');
   if (homeTab) {
     homeTab.click();
   }
@@ -987,9 +1095,9 @@ const YOUTUBE_ICON_SVG = `
 function renderHistoryTab() {
   const t = translations[currentLanguage];
   const history = loadHistory();
-  const list = document.getElementById('historyList');
-  const empty = document.getElementById('historyEmpty');
-  const statsRow = document.getElementById('historyStatsRow');
+  const list = optionalEl('historyList');
+  const empty = el('historyEmpty');
+  const statsRow = el('historyStatsRow');
 
   if (!list) return;
 
@@ -1004,13 +1112,13 @@ function renderHistoryTab() {
   statsRow.style.display = 'grid';
 
   // Сводная статистика
-  const totalDuration = history.reduce((a, e) => a + e.durationSec, 0);
-  const totalDown = history.reduce((a, e) => a + (e.bytesDown || 0), 0);
-  const totalUp = history.reduce((a, e) => a + (e.bytesUp || 0), 0);
-  document.getElementById('historyStatSessions').textContent = history.length;
-  document.getElementById('historyStatTime').textContent = formatDuration(totalDuration);
-  document.getElementById('historyStatDown').textContent = formatBytes(totalDown);
-  document.getElementById('historyStatUp').textContent = formatBytes(totalUp);
+  const totalDuration = history.reduce((sum, e) => sum + e.durationSec, 0);
+  const totalDown = history.reduce((sum, e) => sum + (e.bytesDown || 0), 0);
+  const totalUp = history.reduce((sum, e) => sum + (e.bytesUp || 0), 0);
+  el('historyStatSessions').textContent = String(history.length);
+  el('historyStatTime').textContent = formatDuration(totalDuration);
+  el('historyStatDown').textContent = formatBytes(totalDown);
+  el('historyStatUp').textContent = formatBytes(totalUp);
 
   // Карточки.
   //
@@ -1022,15 +1130,17 @@ function renderHistoryTab() {
   const protocolEmoji = { vless: '🟢', vmess: '🟡', trojan: '🔷', ss: '💜', tuic: '🟤', hysteria2: '🔵', hy2: '🔵', hysteria: '🔵', anytls: '🟠', wireguard: '⚪', wg: '⚪', socks: '⚫', socks5: '⚫', http: '⚫' };
   // Ключ ищем через hasOwnProperty: он тоже из ссылки, и protocolEmoji['constructor']
   // иначе вернул бы функцию из прототипа Object вместо эмодзи.
-  const emojiFor = (protocol) => {
+  const emojiFor = (protocol: string) => {
     const key = (protocol || '').toLowerCase();
-    return Object.prototype.hasOwnProperty.call(protocolEmoji, key) ? protocolEmoji[key] : '🌐';
+    return Object.prototype.hasOwnProperty.call(protocolEmoji, key)
+      ? (protocolEmoji as Record<string, string>)[key]
+      : '🌐';
   };
 
   list.innerHTML = '';
   const fragment = document.createDocumentFragment();
 
-  history.forEach(entry => {
+  history.forEach((entry: HistoryEntry) => {
     const date = new Date(entry.connectedAt);
     const dateStr = date.toLocaleDateString(t.dateLocale, { day: '2-digit', month: '2-digit' });
     const timeStr = date.toLocaleTimeString(t.dateLocale, { hour: '2-digit', minute: '2-digit' });
@@ -1119,7 +1229,7 @@ function renderHistoryTab() {
 
   // Обработчик клика по иконке запуска (через делегирование)
   list.onclick = (e) => {
-    const iconBtn = e.target.closest('.history-card-icon');
+    const iconBtn = (e.target as HTMLElement).closest('.history-card-icon');
     if (iconBtn) {
       const entryId = iconBtn.getAttribute('data-id');
       const hist = loadHistory();
@@ -1137,7 +1247,7 @@ function renderHistoryTab() {
 
   // Динамический Shift-пасхалка при движении мыши (для мгновенной реакции на зажатый Shift)
   list.onmousemove = (e) => {
-    const iconBtn = e.target.closest('.history-card-icon');
+    const iconBtn = (e.target as HTMLElement).closest('.history-card-icon');
     if (iconBtn) {
       const entryId = iconBtn.getAttribute('data-id');
       const hist = loadHistory();
@@ -1158,30 +1268,30 @@ function renderHistoryTab() {
   };
 }
 
-document.getElementById('clearHistoryBtn').onclick = () => {
+el('clearHistoryBtn').onclick = () => {
   saveHistory([]);
   renderHistoryTab();
 };
 
 // ── DNS Leak Test ────────────────────────────────────────────────────────────
-document.getElementById('dnsLeakBtn').onclick = () => runDnsLeakTest();
-document.getElementById('dnsLeakCloseBtn').onclick = () => {
-  document.getElementById('dnsLeakModalOverlay').style.display = 'none';
+el('dnsLeakBtn').onclick = () => runDnsLeakTest();
+el('dnsLeakCloseBtn').onclick = () => {
+  el('dnsLeakModalOverlay').style.display = 'none';
 };
-document.getElementById('dnsLeakRetryBtn').onclick = () => runDnsLeakTest();
+el('dnsLeakRetryBtn').onclick = () => runDnsLeakTest();
 
 async function runDnsLeakTest() {
   const t = translations[currentLanguage];
-  const overlay = document.getElementById('dnsLeakModalOverlay');
-  const loading = document.getElementById('dnsLeakLoading');
-  const result  = document.getElementById('dnsLeakResult');
-  const iconWrap = document.getElementById('dnsLeakIconWrap');
-  const banner   = document.getElementById('dnsLeakStatusBanner');
-  const statusTxt = document.getElementById('dnsLeakStatusText');
-  const statusIcon = document.getElementById('dnsLeakStatusIcon');
-  const ipEl     = document.getElementById('dnsLeakIp');
-  const dnsList  = document.getElementById('dnsLeakDnsList');
-  const retryBtn = document.getElementById('dnsLeakRetryBtn');
+  const overlay = el('dnsLeakModalOverlay');
+  const loading = el('dnsLeakLoading');
+  const result  = el('dnsLeakResult');
+  const iconWrap = el('dnsLeakIconWrap');
+  const banner   = el('dnsLeakStatusBanner');
+  const statusTxt = el('dnsLeakStatusText');
+  const statusIcon = el('dnsLeakStatusIcon');
+  const ipEl     = el('dnsLeakIp');
+  const dnsList  = el('dnsLeakDnsList');
+  const retryBtn = el('dnsLeakRetryBtn');
 
   // Показываем модалку, сбрасываем состояние
   overlay.style.display = 'flex';
@@ -1202,13 +1312,13 @@ async function runDnsLeakTest() {
       { headers: { 'Accept': 'application/dns-json' } }
     ).then(r => r.json());
 
-    const dnsServers = [];
+    const dnsServers: string[] = [];
     let remoteIp = '';
     let asn = '';
     let country = '';
 
     if (dohRes.Answer) {
-      dohRes.Answer.forEach(ans => {
+      dohRes.Answer.forEach((ans: { data?: string }) => {
         const val = ans.data?.replace(/"/g, '').trim();
         if (!val) return;
 
@@ -1239,7 +1349,7 @@ async function runDnsLeakTest() {
     //    then the whoami resolver IP should be a Cloudflare anycast address, or the ASN should belong to Cloudflare.
     //    Known Cloudflare resolver prefixes: 1.1.1., 1.0.0., 162.159., 172.64., 108.162., 2606:4700:
     //    If none of the detected resolvers are Cloudflare IPs and the ASN is not Cloudflare's, DNS is leaking.
-    const isCloudflareDns = (ip) =>
+    const isCloudflareDns = (ip: string) =>
       ip.startsWith('1.1.1.') ||
       ip.startsWith('1.0.0.') ||
       ip.startsWith('162.159.') ||
@@ -1307,7 +1417,7 @@ async function runDnsLeakTest() {
     const errDiv = document.createElement('div');
     errDiv.className = 'dns-leak-dns-entry';
     errDiv.style.color = 'var(--danger)';
-    errDiv.textContent = err.message || String(err);
+    errDiv.textContent = errorText(err);
     dnsList.appendChild(errDiv);
   }
 }
@@ -1318,13 +1428,13 @@ restartBtn.onclick = () => {
   updateAppInterface('connecting');
   (async () => {
     try {
-      const res = await window.api.restartXray(activeServerLink, document.getElementById('systemProxyCheckbox').checked);
+      const res = await window.api.restartXray(activeServerLink, el<HTMLInputElement>('systemProxyCheckbox').checked);
       if (res && !res.success) {
         showAlert(translations[currentLanguage].errorDialogTitle, res.error || 'Unknown error', true, translations[currentLanguage]);
         updateAppInterface('off');
       }
     } catch (e) {
-      showAlert(translations[currentLanguage].errorDialogTitle, e.message, true, translations[currentLanguage]);
+      showAlert(translations[currentLanguage].errorDialogTitle, errorText(e), true, translations[currentLanguage]);
       updateAppInterface('off');
     }
   })();
@@ -1332,24 +1442,29 @@ restartBtn.onclick = () => {
 
 // Настройки
 function collectAndSaveSettings() {
-  const settings = {
+  const settings: AppSettings = {
     language: currentLanguage,
-    dns: document.getElementById('dnsSelect').value === 'custom' ? document.getElementById('customDnsInput').value : document.getElementById('dnsSelect').value,
-    bypassRu: document.getElementById('bypassRuCheckbox').checked,
-    tunMode: document.getElementById('tunModeCheckbox').checked,
-    autoConnect: document.getElementById('autoConnectCheckbox').checked,
-    autoUpdateSubs: document.getElementById('autoUpdateSubsCheckbox').checked,
-    rememberServer: document.getElementById('rememberServerCheckbox').checked,
-    openAtLogin: document.getElementById('openAtLoginCheckbox').checked,
-    startMinimized: document.getElementById('startMinimizedCheckbox').checked,
-    killSwitch: document.getElementById('killSwitchCheckbox').checked,
-    dnsLeak: document.getElementById('dnsLeakCheckbox').checked,
-    ipv6Leak: document.getElementById('ipv6LeakCheckbox').checked,
-    fakeDns: document.getElementById('fakeDnsCheckbox').checked,
-    verboseLogging: document.getElementById('verboseLoggingCheckbox').checked,
+    dns: el<HTMLSelectElement>('dnsSelect').value === 'custom' ? el<HTMLInputElement>('customDnsInput').value : el<HTMLSelectElement>('dnsSelect').value,
+    bypassRu: el<HTMLInputElement>('bypassRuCheckbox').checked,
+    tunMode: el<HTMLInputElement>('tunModeCheckbox').checked,
+    // Обязательно сохранять: на это поле рассчитывают и подключение из трея
+    // (tray.go читает settings["systemProxy"]), и авто-выбор лучшего сервера.
+    // Пока его здесь не было, оба всегда получали undefined и подключались без
+    // системного прокси — при том что галка в интерфейсе стояла.
+    systemProxy: el<HTMLInputElement>('systemProxyCheckbox').checked,
+    autoConnect: el<HTMLInputElement>('autoConnectCheckbox').checked,
+    autoUpdateSubs: el<HTMLInputElement>('autoUpdateSubsCheckbox').checked,
+    rememberServer: el<HTMLInputElement>('rememberServerCheckbox').checked,
+    openAtLogin: el<HTMLInputElement>('openAtLoginCheckbox').checked,
+    startMinimized: el<HTMLInputElement>('startMinimizedCheckbox').checked,
+    killSwitch: el<HTMLInputElement>('killSwitchCheckbox').checked,
+    dnsLeak: el<HTMLInputElement>('dnsLeakCheckbox').checked,
+    ipv6Leak: el<HTMLInputElement>('ipv6LeakCheckbox').checked,
+    fakeDns: el<HTMLInputElement>('fakeDnsCheckbox').checked,
+    verboseLogging: el<HTMLInputElement>('verboseLoggingCheckbox').checked,
     lastSelectedServer: activeServerLink,
-    customDirect: document.getElementById('customDirect').value.split('\n').map(s => s.trim()).filter(s => s.length > 0),
-    processMode: processModeHidden.value,
+    customDirect: el<HTMLTextAreaElement>('customDirect').value.split('\n').map(s => s.trim()).filter(s => s.length > 0),
+    processMode: processModeHidden.value as AppSettings['processMode'],
     processListBlacklist: processListBlacklistEl.value.split('\n').map(s => s.trim()).filter(s => s.length > 0),
     processListWhitelist: processListWhitelistEl.value.split('\n').map(s => s.trim()).filter(s => s.length > 0),
     favoriteLinks: Array.from(favoriteLinks),
@@ -1358,29 +1473,29 @@ function collectAndSaveSettings() {
   return window.api.saveSettings(settings);
 }
 
-document.getElementById('saveRoutesBtn').onclick = async () => {
+el('saveRoutesBtn').onclick = async () => {
   await collectAndSaveSettings();
-  const status = document.getElementById('routesStatus');
+  const status = el('routesStatus');
   status.style.display = 'inline';
   setTimeout(() => status.style.display = 'none', 2000);
 };
 
-document.getElementById('saveAppsBtn').onclick = async () => {
+el('saveAppsBtn').onclick = async () => {
   await collectAndSaveSettings();
-  const status = document.getElementById('appsStatus');
+  const status = el('appsStatus');
   status.style.display = 'inline';
   setTimeout(() => status.style.display = 'none', 2000);
 };
 
-document.getElementById('saveSettingsBtn').onclick = () => {
+el('saveSettingsBtn').onclick = () => {
   collectAndSaveSettings();
-  const status = document.getElementById('settingsStatus');
+  const status = el('settingsStatus');
   status.style.display = 'inline';
   setTimeout(() => status.style.display = 'none', 2000);
 };
 
 // Управление окном
-async function animateAndAction(action) {
+async function animateAndAction(action: () => void) {
   document.body.classList.add('window-hidden');
   await new Promise(res => setTimeout(res, 250));
   action();
@@ -1389,8 +1504,8 @@ async function animateAndAction(action) {
   setUiActive(false);
 }
 
-document.getElementById('minimizeBtn').onclick = () => animateAndAction(() => window.api.minimize());
-document.getElementById('closeBtn').onclick = () => animateAndAction(() => window.api.close());
+el('minimizeBtn').onclick = () => animateAndAction(() => window.api.minimize());
+el('closeBtn').onclick = () => animateAndAction(() => window.api.close());
 
 window.api.onWindowHidden(() => setUiActive(false));
 
@@ -1399,18 +1514,18 @@ window.api.onWindowRestored(() => {
   setUiActive(true);
 });
 
-function showUpdateModal(update) {
-  return new Promise((resolve) => {
-    const overlay = document.getElementById('updateModalOverlay');
-    const versionEl = document.getElementById('updateModalVersion');
-    const changelogEl = document.getElementById('updateModalChangelog');
-    const cancelBtn = document.getElementById('updateModalCancel');
-    const confirmBtn = document.getElementById('updateModalConfirm');
-    const progressSection = document.getElementById('updateProgressSection');
-    const progressStatus = document.getElementById('updateProgressStatus');
-    const progressPercent = document.getElementById('updateProgressPercent');
-    const progressBar = document.getElementById('updateProgressBar');
-    const actions = document.getElementById('updateModalActions');
+function showUpdateModal(update: UpdateInfo): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const overlay = el('updateModalOverlay');
+    const versionEl = el('updateModalVersion');
+    const changelogEl = el('updateModalChangelog');
+    const cancelBtn = el<HTMLButtonElement>('updateModalCancel');
+    const confirmBtn = el<HTMLButtonElement>('updateModalConfirm');
+    const progressSection = el('updateProgressSection');
+    const progressStatus = el('updateProgressStatus');
+    const progressPercent = el('updateProgressPercent');
+    const progressBar = el('updateProgressBar');
+    const actions = el('updateModalActions');
     const t = translations[currentLanguage];
 
     // Set text contents
@@ -1442,7 +1557,10 @@ function showUpdateModal(update) {
     confirmBtn.onclick = async () => {
       // If we don't have downloadUrl for some reason (e.g. GitHub API didn't return a build), fall back to opening webpage
       if (!update.downloadUrl) {
-        window.api.openUpdateLink(update.url);
+        // Страницу релиза открываем, только если она вообще пришла в ответе:
+        // без downloadUrl и без url открывать нечего, но модалку всё равно надо
+        // закрыть, иначе она останется висеть на нерабочей кнопке.
+        if (update.url) window.api.openUpdateLink(update.url);
         overlay.style.display = 'none';
         resolve(true);
         return;
@@ -1454,9 +1572,9 @@ function showUpdateModal(update) {
       confirmBtn.textContent = currentLanguage === 'RU' ? 'Загрузка...' : 'Downloading...';
       progressSection.style.display = 'block';
 
-      const cleanupEvents = [];
+      const cleanupEvents: Array<() => void> = [];
 
-      const onProgress = (percent) => {
+      const onProgress = (percent: number) => {
         progressBar.style.width = `${percent}%`;
         progressPercent.textContent = `${percent}%`;
       };
@@ -1474,7 +1592,7 @@ function showUpdateModal(update) {
         }, 1500);
       };
 
-      const onError = (errMsg) => {
+      const onError = (errMsg: string) => {
         progressStatus.textContent = `${t.updateProgressStatusError || 'Update failed'}: ${errMsg}`;
         progressStatus.style.color = 'var(--danger)';
         
@@ -1496,29 +1614,38 @@ function showUpdateModal(update) {
         // Trigger download process in background Go service
         await window.api.downloadAndInstallUpdate(update.downloadUrl, update.signatureHex || "");
       } catch (err) {
-        onError(err.message || err);
+        onError(errorText(err));
       }
     };
   });
 }
 
-// Инициализация
-async function init() {
-  // The title bar reads the version from the backend rather than carrying its own
-  // copy, so it always matches the release the update check compares against.
-  // Runs before the update check, which can sit on an open modal for a while.
-  try {
-    const version = await window.api.getAppVersion();
-    if (version) setText('appVersion', `v${version}`);
-  } catch (e) { console.error('Version lookup failed:', e); }
-
-  // Проверка обновлений
+// checkForUpdates спрашивает бэкенд о новой версии и, если она есть, показывает
+// модальное окно.
+//
+// Запускается в фоне и намеренно НЕ ожидается инициализацией. Раньше init()
+// ждал и сам запрос (до ~10 секунд сетевых таймаутов: GitHub API плюс загрузка
+// подписи релиза), и закрытия модалки пользователем — а всё остальное, язык,
+// настройки, список серверов, история, автоподключение, стояло за ней в
+// очереди. Пользователь видел интерфейс на языке по умолчанию с пустым списком
+// серверов, пока не закроет окно обновления.
+async function checkForUpdates() {
   try {
     const update = await window.api.checkUpdates();
     if (update && update.available) {
       await showUpdateModal(update);
     }
   } catch (e) { console.error('Update check failed:', e); }
+}
+
+// Инициализация
+async function init() {
+  // The title bar reads the version from the backend rather than carrying its own
+  // copy, so it always matches the release the update check compares against.
+  try {
+    const version = await window.api.getAppVersion();
+    if (version) setText('appVersion', `v${version}`);
+  } catch (e) { console.error('Version lookup failed:', e); }
 
   const settings = await window.api.getSettings();
   if (settings) {
@@ -1533,11 +1660,11 @@ async function init() {
        activeServerDetails.textContent = `${info.type.toUpperCase()} • ${info.address}`;
     }
     
-    document.getElementById('bypassRuCheckbox').checked = !!settings.bypassRu;
+    el<HTMLInputElement>('bypassRuCheckbox').checked = !!settings.bypassRu;
     
     // Load and select the correct DNS server option on startup
     if (settings.dns) {
-      const select = document.getElementById('dnsSelect');
+      const select = optionalEl<HTMLSelectElement>('dnsSelect');
       if (select) {
         let found = false;
         for (let i = 0; i < select.options.length; i++) {
@@ -1549,7 +1676,7 @@ async function init() {
         }
         if (!found && settings.dns !== "") {
           select.value = 'custom';
-          const customDnsInput = document.getElementById('customDnsInput');
+          const customDnsInput = optionalEl<HTMLInputElement>('customDnsInput');
           if (customDnsInput) {
             customDnsInput.value = settings.dns;
             customDnsInput.style.display = 'block';
@@ -1557,25 +1684,28 @@ async function init() {
         }
       }
     }
-    document.getElementById('tunModeCheckbox').checked = !!settings.tunMode;
-    document.getElementById('autoConnectCheckbox').checked = !!settings.autoConnect;
-    document.getElementById('autoUpdateSubsCheckbox').checked = !!settings.autoUpdateSubs;
-    document.getElementById('rememberServerCheckbox').checked = rememberServer;
-    document.getElementById('openAtLoginCheckbox').checked = !!settings.openAtLogin;
-    document.getElementById('startMinimizedCheckbox').checked = !!settings.startMinimized;
-    document.getElementById('killSwitchCheckbox').checked = !!settings.killSwitch;
-    document.getElementById('dnsLeakCheckbox').checked = settings.dnsLeak !== undefined ? !!settings.dnsLeak : true;
-    document.getElementById('ipv6LeakCheckbox').checked = settings.ipv6Leak !== undefined ? !!settings.ipv6Leak : true;
-    document.getElementById('fakeDnsCheckbox').checked = settings.fakeDns !== undefined ? !!settings.fakeDns : true;
-    document.getElementById('verboseLoggingCheckbox').checked = !!settings.verboseLogging;
-    if (settings.customDirect) document.getElementById('customDirect').value = settings.customDirect.join('\n');
+    el<HTMLInputElement>('tunModeCheckbox').checked = !!settings.tunMode;
+    // По умолчанию включён — так же, как атрибут checked в index.html.
+    el<HTMLInputElement>('systemProxyCheckbox').checked =
+      settings.systemProxy !== undefined ? !!settings.systemProxy : true;
+    el<HTMLInputElement>('autoConnectCheckbox').checked = !!settings.autoConnect;
+    el<HTMLInputElement>('autoUpdateSubsCheckbox').checked = !!settings.autoUpdateSubs;
+    el<HTMLInputElement>('rememberServerCheckbox').checked = rememberServer;
+    el<HTMLInputElement>('openAtLoginCheckbox').checked = !!settings.openAtLogin;
+    el<HTMLInputElement>('startMinimizedCheckbox').checked = !!settings.startMinimized;
+    el<HTMLInputElement>('killSwitchCheckbox').checked = !!settings.killSwitch;
+    el<HTMLInputElement>('dnsLeakCheckbox').checked = settings.dnsLeak !== undefined ? !!settings.dnsLeak : true;
+    el<HTMLInputElement>('ipv6LeakCheckbox').checked = settings.ipv6Leak !== undefined ? !!settings.ipv6Leak : true;
+    el<HTMLInputElement>('fakeDnsCheckbox').checked = settings.fakeDns !== undefined ? !!settings.fakeDns : true;
+    el<HTMLInputElement>('verboseLoggingCheckbox').checked = !!settings.verboseLogging;
+    if (settings.customDirect) el<HTMLTextAreaElement>('customDirect').value = settings.customDirect.join('\n');
     
     if (settings.processListBlacklist) processListBlacklistEl.value = settings.processListBlacklist.join('\n');
     if (settings.processListWhitelist) processListWhitelistEl.value = settings.processListWhitelist.join('\n');
     
     if (settings.processMode) {
       processModeHidden.value = settings.processMode;
-      const targetTab = document.querySelector(`.process-tab[data-mode="${settings.processMode}"]`);
+      const targetTab = document.querySelector<HTMLElement>(`.process-tab[data-mode="${settings.processMode}"]`);
       if (targetTab) targetTab.click();
     }
     
@@ -1637,11 +1767,15 @@ async function init() {
   makeSelectCustom('dnsSelect');
   makeSelectCustom('newRuleAction');
   makeSelectCustom('newRuleType');
+
+  // Последним и без await: интерфейс уже полностью собран и переведён, а окно
+  // обновления появится, когда придёт ответ от GitHub, ничего не задерживая.
+  void checkForUpdates();
 }
 
 // ── CUSTOM ROUTING RULES UI ──────────────────────────────────────────────────
 function renderCustomRules() {
-  const container = document.getElementById('customRulesList');
+  const container = optionalEl('customRulesList');
   if (!container) return;
   container.innerHTML = '';
   
@@ -1665,7 +1799,7 @@ function renderCustomRules() {
     else if (rule.action === 'proxy') actionBadge = '<span style="color:var(--accent-color); font-weight:bold;">🔵 Proxy</span>';
     else if (rule.action === 'block') actionBadge = '<span style="color:var(--danger); font-weight:bold;">🔴 Block</span>';
     
-    let typeName = rule.type;
+    let typeName: string = rule.type;
     if (rule.type === 'domain_suffix') typeName = 'Suffix';
     else if (rule.type === 'domain') typeName = 'Domain';
     else if (rule.type === 'domain_keyword') typeName = 'Keyword';
@@ -1692,12 +1826,12 @@ function renderCustomRules() {
   });
 }
 
-const addCustomRuleBtn = document.getElementById('addCustomRuleBtn');
+const addCustomRuleBtn = optionalEl('addCustomRuleBtn');
 if (addCustomRuleBtn) {
   addCustomRuleBtn.onclick = () => {
-    const action = document.getElementById('newRuleAction').value;
-    const type = document.getElementById('newRuleType').value;
-    const valInput = document.getElementById('newRuleValue');
+    const action = el<HTMLSelectElement>('newRuleAction').value as CustomRule['action'];
+    const type = el<HTMLSelectElement>('newRuleType').value as CustomRule['type'];
+    const valInput = el<HTMLInputElement>('newRuleValue');
     const value = valInput.value.trim();
     
     if (!value) return;
@@ -1709,11 +1843,11 @@ if (addCustomRuleBtn) {
   };
 }
 
-const saveRoutesBtn2 = document.getElementById('saveRoutesBtn2');
+const saveRoutesBtn2 = optionalEl('saveRoutesBtn2');
 if (saveRoutesBtn2) {
   saveRoutesBtn2.onclick = async () => {
     await collectAndSaveSettings();
-    const status = document.getElementById('routesStatus2');
+    const status = optionalEl('routesStatus2');
     if (status) {
       status.style.display = 'inline';
       setTimeout(() => status.style.display = 'none', 2000);
@@ -1722,19 +1856,19 @@ if (saveRoutesBtn2) {
 }
 
 // ── SEARCH LIVE FILTER ───────────────────────────────────────────────────────
-const serverSearchInput = document.getElementById('serverSearchInput');
+const serverSearchInput = optionalEl<HTMLInputElement>('serverSearchInput');
 if (serverSearchInput) {
   serverSearchInput.addEventListener('input', (e) => {
-    serverSearchQuery = e.target.value;
+    serverSearchQuery = (e.target as HTMLInputElement).value;
     updateCards();
   });
 }
 
 // ── AUTO-BEST SERVER ──────────────────────────────────────────────────────────
-const bestServerBtn = document.getElementById('bestServerBtn');
+const bestServerBtn = optionalEl<HTMLButtonElement>('bestServerBtn');
 if (bestServerBtn) {
   bestServerBtn.onclick = async () => {
-    let links = [];
+    const links: string[] = [];
     allSubscriptions.forEach(s => links.push(...s.links));
     const uniqueLinks = Array.from(new Set(links));
     if (uniqueLinks.length === 0) return;
@@ -1748,7 +1882,7 @@ if (bestServerBtn) {
     
     // Only the label span is swapped — writing to the button itself would drop
     // the lightning icon that sits next to it.
-    const bestServerBtnText = document.getElementById('bestServerBtnText');
+    const bestServerBtnText = el('bestServerBtnText');
     bestServerBtn.disabled = true;
     const originalText = bestServerBtnText.textContent;
     bestServerBtnText.textContent = currentLanguage === 'RU' ? 'Поиск...' : 'Finding...';
@@ -1805,7 +1939,7 @@ if (bestServerBtn) {
           const freshSettings = await window.api.getSettings();
           const useSystemProxy = freshSettings && freshSettings.systemProxy != null
             ? !!freshSettings.systemProxy
-            : document.getElementById('systemProxyCheckbox').checked;
+            : el<HTMLInputElement>('systemProxyCheckbox').checked;
           
           let res;
           if (wasActive) {
@@ -1819,7 +1953,7 @@ if (bestServerBtn) {
             updateAppInterface('off');
           }
         } catch (e) {
-          showAlert(translations[currentLanguage].errorDialogTitle, e.message, true, translations[currentLanguage]);
+          showAlert(translations[currentLanguage].errorDialogTitle, errorText(e), true, translations[currentLanguage]);
           updateAppInterface('off');
         }
       } else {
@@ -1830,7 +1964,7 @@ if (bestServerBtn) {
 }
 
 // ── SAVE LOGS ────────────────────────────────────────────────────────────────
-const saveLogsBtn = document.getElementById('saveLogsBtn');
+const saveLogsBtn = optionalEl('saveLogsBtn');
 if (saveLogsBtn) {
   saveLogsBtn.onclick = async () => {
     const rawLogs = logsArray.map(l => l.text).join('\n');
@@ -1891,20 +2025,20 @@ document.addEventListener('mousedown', () => {
 init();
 
 // --- Логика QR-сканера ---
-const importQrBtn = document.getElementById('importQrBtn');
-const qrModalOverlay = document.getElementById('qrModalOverlay');
-const qrModalClose = document.getElementById('qrModalClose');
-const qrStartCameraBtn = document.getElementById('qrStartCameraBtn');
-const qrUploadFileBtn = document.getElementById('qrUploadFileBtn');
-const qrFileInput = document.getElementById('qrFileInput');
-const qrVideo = document.getElementById('qrVideo');
-const qrCanvas = document.getElementById('qrCanvas');
-const qrPlaceholder = document.getElementById('qrScannerPlaceholder');
-const qrPlaceholderText = document.getElementById('qrPlaceholderText');
-const qrReticle = document.getElementById('qrScannerReticle');
+const importQrBtn = el('importQrBtn');
+const qrModalOverlay = el('qrModalOverlay');
+const qrModalClose = el('qrModalClose');
+const qrStartCameraBtn = el('qrStartCameraBtn');
+const qrUploadFileBtn = el('qrUploadFileBtn');
+const qrFileInput = el<HTMLInputElement>('qrFileInput');
+const qrVideo = el<HTMLVideoElement>('qrVideo');
+const qrCanvas = el<HTMLCanvasElement>('qrCanvas');
+const qrPlaceholder = el('qrScannerPlaceholder');
+const qrPlaceholderText = el('qrPlaceholderText');
+const qrReticle = el('qrScannerReticle');
 
-let qrStream = null;
-let qrAnimationId = null;
+let qrStream: MediaStream | null = null;
+let qrAnimationId: number | null = null;
 
 function stopQrCamera() {
   if (qrAnimationId) {
@@ -1941,7 +2075,8 @@ qrUploadFileBtn.onclick = () => {
 };
 
 qrFileInput.onchange = (e) => {
-  const file = e.target.files[0];
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
   if (!file) return;
 
   const t = translations[currentLanguage];
@@ -1950,7 +2085,7 @@ qrFileInput.onchange = (e) => {
     const img = new Image();
     img.onload = async () => {
       const tempCanvas = document.createElement('canvas');
-      const ctx = tempCanvas.getContext('2d');
+      const ctx = tempCanvas.getContext('2d')!;
       tempCanvas.width = img.width;
       tempCanvas.height = img.height;
       ctx.drawImage(img, 0, 0);
@@ -1967,10 +2102,10 @@ qrFileInput.onchange = (e) => {
         console.error("jsQR is not loaded yet");
       }
     };
-    img.src = event.target.result;
+    img.src = String(event.target?.result ?? '');
   };
   reader.readAsDataURL(file);
-  e.target.value = ''; // Reset file input
+  input.value = ''; // Reset file input
 };
 
 qrStartCameraBtn.onclick = async () => {
@@ -1982,7 +2117,7 @@ qrStartCameraBtn.onclick = async () => {
       video: { facingMode: 'environment' }
     });
     qrVideo.srcObject = qrStream;
-    qrVideo.setAttribute('playsinline', true);
+    qrVideo.setAttribute('playsinline', 'true');
     qrVideo.style.display = 'block';
     qrReticle.style.display = 'block';
     qrPlaceholder.style.display = 'none';
@@ -1997,7 +2132,7 @@ qrStartCameraBtn.onclick = async () => {
 
 function scanQrFrame() {
   if (qrVideo.readyState === qrVideo.HAVE_ENOUGH_DATA) {
-    const canvasCtx = qrCanvas.getContext('2d');
+    const canvasCtx = qrCanvas.getContext('2d')!;
     qrCanvas.width = qrVideo.videoWidth;
     qrCanvas.height = qrVideo.videoHeight;
     canvasCtx.drawImage(qrVideo, 0, 0, qrCanvas.width, qrCanvas.height);
@@ -2016,7 +2151,7 @@ function scanQrFrame() {
   }
 }
 
-async function handleQrImport(link) {
+async function handleQrImport(link: string) {
   const t = translations[currentLanguage];
   const trimmed = link.trim();
   
@@ -2074,8 +2209,8 @@ async function handleQrImport(link) {
   showAlert(t.errorDialogTitle, t.qrUnsupportedContent.replace('{content}', trimmed.slice(0, 120)), true, t);
 }
 
-document.getElementById('pingAllBtn').onclick = () => {
-  let links = [];
+el('pingAllBtn').onclick = () => {
+  const links: string[] = [];
   allSubscriptions.forEach(s => links.push(...s.links));
   Array.from(new Set(links)).forEach(l => {
     setPingData(l, 'pinging');
@@ -2084,12 +2219,13 @@ document.getElementById('pingAllBtn').onclick = () => {
   updateCards();
 };
 
-document.getElementById('dnsSelect').onchange = (e) => {
-    document.getElementById('customDnsInput').style.display = e.target.value === 'custom' ? 'block' : 'none';
+el<HTMLSelectElement>('dnsSelect').onchange = (e) => {
+    const selected = (e.target as HTMLSelectElement).value;
+    el<HTMLInputElement>('customDnsInput').style.display = selected === 'custom' ? 'block' : 'none';
 };
 
-document.getElementById('tunModeCheckbox').onchange = async (e) => {
-  if (e.target.checked) {
+el<HTMLInputElement>('tunModeCheckbox').onchange = async (e) => {
+  if ((e.target as HTMLInputElement).checked) {
     const isAdmin = await window.api.checkAdmin();
     if (!isAdmin) {
       // Save settings with tunMode: true first, so the elevated instance loads it checked
@@ -2108,16 +2244,15 @@ document.getElementById('tunModeCheckbox').onchange = async (e) => {
 // Wails rejects a bound call with the text of the Go error, sometimes wrapped
 // in an Error and sometimes as a bare string. The backend already translates
 // the message, so it goes straight to the user.
-function subscriptionErrorText(e) {
-  if (!e) return '';
-  return typeof e === 'string' ? e : (e.message || String(e));
+function subscriptionErrorText(e: unknown): string {
+  return errorText(e);
 }
 
 // Adds a subscription and fetches it in the background, showing the tab with a
 // spinner straight away. Shared by the "add" button and the QR import, since a
 // QR code carrying a subscription address has to end up in exactly the same
 // state as one typed by hand — auto-update included.
-async function addSubscriptionByUrl(name, url) {
+async function addSubscriptionByUrl(name: string, url: string) {
   const newSubId = Date.now().toString();
   const newSub = { id: newSubId, name, url, links: [], loading: true };
   allSubscriptions.push(newSub);
@@ -2153,9 +2288,9 @@ async function addSubscriptionByUrl(name, url) {
   })();
 }
 
-document.getElementById('addSubBtn').onclick = async () => {
-  const nameInput = document.getElementById('subName');
-  const urlInput = document.getElementById('subUrl');
+el('addSubBtn').onclick = async () => {
+  const nameInput = el<HTMLInputElement>('subName');
+  const urlInput = el<HTMLInputElement>('subUrl');
   const name = nameInput.value.trim();
   const url = urlInput.value.trim();
   if (!name || !url) return;
@@ -2166,14 +2301,14 @@ document.getElementById('addSubBtn').onclick = async () => {
   await addSubscriptionByUrl(name, url);
 };
 
-document.getElementById('importClipboardBtn').onclick = () => {
+el('importClipboardBtn').onclick = () => {
   window.api.importFromClipboard();
 };
 
-document.getElementById('updateSubBtn').onclick = async () => {
+el('updateSubBtn').onclick = async () => {
   const t = translations[currentLanguage];
-  const originalText = document.getElementById('updateSubBtn').textContent;
-  document.getElementById('updateSubBtn').textContent = currentLanguage === 'RU' ? 'Обновление...' : 'Updating...';
+  const originalText = el('updateSubBtn').textContent;
+  el('updateSubBtn').textContent = currentLanguage === 'RU' ? 'Обновление...' : 'Updating...';
   
   if (currentActiveSubId === 'all') {
     // Update all subscriptions. Failures are collected rather than reported one
@@ -2212,13 +2347,13 @@ document.getElementById('updateSubBtn').onclick = async () => {
       }
     }
   }
-  document.getElementById('updateSubBtn').textContent = originalText;
+  el('updateSubBtn').textContent = originalText;
 };
 
 // --- Вспомогательная функция дебаунса для автосохранения ---
-function debounce(func, wait) {
-  let timeout;
-  return function executedFunction(...args) {
+function debounce<A extends unknown[]>(func: (...args: A) => void, wait: number) {
+  let timeout: ReturnType<typeof setTimeout>;
+  return function executedFunction(...args: A) {
     const later = () => {
       clearTimeout(timeout);
       func(...args);
@@ -2229,11 +2364,15 @@ function debounce(func, wait) {
 }
 
 // --- Автосохранение при вводе в текстовые поля на лету ---
-document.getElementById('customDirect').oninput = debounce(() => {
+el<HTMLTextAreaElement>('customDirect').oninput = debounce(() => {
   collectAndSaveSettings();
 }, 500);
 
-document.getElementById('bypassRuCheckbox').onchange = () => {
+el<HTMLInputElement>('bypassRuCheckbox').onchange = () => {
+  collectAndSaveSettings();
+};
+
+el<HTMLInputElement>('systemProxyCheckbox').onchange = () => {
   collectAndSaveSettings();
 };
 
@@ -2250,12 +2389,12 @@ let isDraggingScroll = false;
 let startScrollY = 0;
 let startScrollTop = 0;
 
-const scrollWidget = document.getElementById('serversScrollWidget');
-const scrollTrack = document.getElementById('scrollTrack');
-const scrollThumb = document.getElementById('scrollThumb');
-const scrollUpBtn = document.getElementById('scrollUpBtn');
-const scrollDownBtn = document.getElementById('scrollDownBtn');
-const mainContainer = document.querySelector('main');
+const scrollWidget = el('serversScrollWidget');
+const scrollTrack = el('scrollTrack');
+const scrollThumb = el('scrollThumb');
+const scrollUpBtn = el('scrollUpBtn');
+const scrollDownBtn = el('scrollDownBtn');
+const mainContainer = query('main');
 
 function updateCustomScroll() {
   if (!scrollWidget || !mainContainer || !scrollTrack || !scrollThumb) return;
@@ -2369,8 +2508,8 @@ if (serversGrid) {
 }
 
 // Function to convert native <select> elements to custom glassmorphic dropdowns
-function makeSelectCustom(selectId) {
-  const select = document.getElementById(selectId);
+function makeSelectCustom(selectId: string) {
+  const select = optionalEl<HTMLSelectElement>(selectId);
   if (!select) return;
 
   // If already customized, skip but update trigger text
@@ -2390,7 +2529,7 @@ function makeSelectCustom(selectId) {
 
   // Hide the original select
   select.style.display = 'none';
-  select.parentNode.insertBefore(wrapper, select.nextSibling);
+  select.parentNode?.insertBefore(wrapper, select.nextSibling);
 
   // Create trigger
   const trigger = document.createElement('div');

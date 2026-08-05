@@ -1,0 +1,31 @@
+{
+  // Vite транспилирует .ts через esbuild и типы НЕ проверяет — проверка живёт
+  // отдельной командой `npm run typecheck`, которая встроена в `npm run build`.
+  // Отсюда noEmit: компилятор здесь только проверяет, файлы выпускает Vite.
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    "skipLibCheck": true,
+
+    // Vite компилирует каждый файл по отдельности, поэтому конструкции,
+    // требующие межфайлового контекста (const enum, реэкспорт типа без type),
+    // должны отвергаться здесь, а не ломаться молча в сборке.
+    "isolatedModules": true,
+
+    // Из .js остались только сгенерированные Wails биндинги в wailsjs/, к
+    // каждому из которых лежит свой .d.ts. Проверять их содержимое незачем —
+    // файлы переписываются генератором.
+    "allowJs": true,
+    "checkJs": false,
+
+    "strict": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  // Из wailsjs берутся только объявления: сами .js генерируются Wails и
+  // проверять их нечего — они переписываются при каждой сборке.
+  "include": ["*.ts", "modules/**/*", "types/**/*", "wailsjs/**/*.d.ts"],
+  "exclude": ["node_modules", "dist", "public"]
+}

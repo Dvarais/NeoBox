@@ -613,8 +613,8 @@
        renderer.js calls. If this file is ever replaced, recompute the SRI hash:
          openssl dgst -sha256 -binary public/lib/jsQR.js | openssl base64 -A -->
   <script src="lib/jsQR.js" integrity="sha256-vEDIoVGWI2sjFNsIVvcsoLSZgM1UE7jIUqc0n1/uCFk=" crossorigin="anonymous"></script>
-  <script type="module" src="wails-bridge.js"></script>
-  <script type="module" src="renderer.js"></script>
+  <script type="module" src="wails-bridge.ts"></script>
+  <script type="module" src="renderer.ts"></script>
 </body>
 </html>
 
