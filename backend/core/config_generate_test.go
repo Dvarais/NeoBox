@@ -464,28 +464,82 @@ func TestWhitelistProcessModeAddsCatchAll(t *testing.T) {
 		ProcessListWhitelist: []string{"browser.exe"},
 	}))
 
-	procIdx := indexOfRule(rules, func(r map[string]interface{}) bool {
-		return hasKeyValue(r, "process_name", []string{"browser.exe"}) &&
-			hasKeyValue(r, "outbound", "proxy")
-	})
+	procIdx := indexOfRule(rules, whitelistProcessRule)
 	if procIdx < 0 {
 		t.Fatal("whitelisted process is not routed through the proxy")
 	}
 
-	catchAll := -1
-	for i := procIdx + 1; i < len(rules); i++ {
-		_, hasDomain := rules[i]["domain"]
-		_, hasIP := rules[i]["ip_cidr"]
-		_, hasProc := rules[i]["process_name"]
-		_, hasPrivate := rules[i]["ip_is_private"]
-		if !hasDomain && !hasIP && !hasProc && !hasPrivate &&
-			hasKeyValue(rules[i], "outbound", "direct") {
-			catchAll = i
-			break
-		}
-	}
-	if catchAll < 0 {
+	if indexOfCatchAll(rules) < procIdx {
 		t.Error("whitelist mode has no direct catch-all after the process rule")
+	}
+}
+
+// whitelistProcessRule matches the rule sending the whitelisted process through
+// the proxy, as generated for ProcessListWhitelist{"browser.exe"}.
+func whitelistProcessRule(r map[string]interface{}) bool {
+	return hasKeyValue(r, "process_name", []string{"browser.exe"}) &&
+		hasKeyValue(r, "outbound", "proxy")
+}
+
+// indexOfCatchAll finds the unconditional "everything else goes direct" rule:
+// one that routes direct and constrains nothing at all. Every key that could
+// narrow a rule is checked, so a rule that merely happens to route direct — the
+// bypass-RU rule set, the private-address exemption — is not mistaken for it.
+func indexOfCatchAll(rules []map[string]interface{}) int {
+	return indexOfRule(rules, func(r map[string]interface{}) bool {
+		if !hasKeyValue(r, "outbound", "direct") {
+			return false
+		}
+		for _, key := range []string{
+			"domain", "domain_suffix", "domain_keyword", "ip_cidr", "ip_is_private",
+			"process_name", "rule_set", "port", "network", "protocol", "ip_version", "inbound",
+		} {
+			if _, narrowed := r[key]; narrowed {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+// The whitelist catch-all matches every packet, so whatever follows it can never
+// run. It used to be appended immediately after the process rule, which left the
+// fakeip route below it unreachable: synthetic 198.18.x.x addresses went direct
+// instead of into the tunnel and those connections simply failed.
+func TestWhitelistCatchAllComesAfterFakeIPRule(t *testing.T) {
+	rules := routeRules(t, generate(t, Settings{
+		TunMode:              true,
+		FakeDns:              true,
+		BypassRu:             true,
+		ProcessMode:          "whitelist",
+		ProcessListWhitelist: []string{"browser.exe"},
+	}))
+
+	catchAll := indexOfCatchAll(rules)
+	if catchAll < 0 {
+		t.Fatal("whitelist mode emitted no direct catch-all")
+	}
+	if catchAll != len(rules)-1 {
+		t.Errorf("the catch-all is rule %d of %d; it matches everything, so every rule after it is dead",
+			catchAll, len(rules))
+	}
+
+	for name, idx := range map[string]int{
+		"fakeip":            indexOfRule(rules, isFakeIPRoute),
+		"private addresses": indexOfRule(rules, func(r map[string]interface{}) bool { return hasKeyValue(r, "ip_is_private", true) }),
+		"bypass RU": indexOfRule(rules, func(r map[string]interface{}) bool {
+			return hasKeyValue(r, "rule_set", []string{"geoip-ru", "geosite-ru"})
+		}),
+		"whitelisted process": indexOfRule(rules, whitelistProcessRule),
+	} {
+		if idx < 0 {
+			t.Errorf("%s rule is missing", name)
+			continue
+		}
+		if idx > catchAll {
+			t.Errorf("the %s rule (index %d) sits after the catch-all (index %d) and can never match",
+				name, idx, catchAll)
+		}
 	}
 }
 

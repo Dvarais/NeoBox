@@ -1116,7 +1116,16 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		routeRules = append(routeRules, ruleEntry)
 	}
 
-	// Process routing (split tunneling)
+	// Process routing (split tunneling).
+	//
+	// Whitelist mode needs a catch-all that sends everything NOT named in the
+	// list straight out, but that rule matches every packet by definition, so
+	// wherever it sits it is the last rule that can ever match. It used to be
+	// appended right here, which left the private-address, bypass-RU and FakeIP
+	// rules below unreachable — whitelist plus FakeDNS routed the 198.18/15
+	// answers direct and the connections simply failed. So it is remembered here
+	// and appended once every other rule is in place.
+	whitelistCatchAll := false
 	if tunMode && len(processList) > 0 {
 		if processMode == "blacklist" {
 			routeRules = append(routeRules, map[string]interface{}{
@@ -1130,10 +1139,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 				"action":       "route",
 				"outbound":     outboundTag,
 			})
-			routeRules = append(routeRules, map[string]interface{}{
-				"action":   "route",
-				"outbound": "direct",
-			})
+			whitelistCatchAll = true
 		}
 	}
 
@@ -1159,6 +1165,15 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			"ip_cidr":  []string{"198.18.0.0/15"},
 			"action":   "route",
 			"outbound": outboundTag,
+		})
+	}
+
+	// Whitelist split tunneling: everything not named in the process list goes
+	// out untunnelled. Deliberately last — see whitelistCatchAll above.
+	if whitelistCatchAll {
+		routeRules = append(routeRules, map[string]interface{}{
+			"action":   "route",
+			"outbound": "direct",
 		})
 	}
 
