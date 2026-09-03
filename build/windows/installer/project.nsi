@@ -36,13 +36,12 @@ Unicode true
 
 # The version information for this two must consist of 4 parts.
 #
-# NeoBox versions already have four (1.7.5.1), so — unlike the stock Wails
-# template — nothing is appended here. The template's "${INFO_PRODUCTVERSION}.0"
-# assumes a three-part version; with ours it produces five parts and makensis
-# rejects the build. If the version ever drops back to three parts, put the
-# ".0" back.
-VIProductVersion "${INFO_PRODUCTVERSION}"
-VIFileVersion    "${INFO_PRODUCTVERSION}"
+# NeoBox's version is three parts (1.8.0), so — like the stock Wails
+# template — ".0" is appended here to make four. If the version ever grows
+# a fourth part of its own (e.g. 1.8.0.1), drop this ".0" instead, since
+# five parts makes makensis reject the build.
+VIProductVersion "${INFO_PRODUCTVERSION}.0"
+VIFileVersion    "${INFO_PRODUCTVERSION}.0"
 
 VIAddVersionKey "CompanyName"     "${INFO_COMPANYNAME}"
 VIAddVersionKey "FileDescription" "${INFO_PRODUCTNAME} Installer"
