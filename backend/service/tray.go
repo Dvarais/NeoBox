@@ -363,7 +363,23 @@ func (s *AppService) onWindowHidden() {
 }
 
 // NotifyWindowShown is called from the frontend when the window is shown.
+//
+// Уведомление проверяется по Windows, а не принимается на слово. Страница судит
+// о видимости по событию focus, а оно приходит с опозданием: закрытие окна
+// крестиком идёт с задержкой на анимацию, и focus от того же самого нажатия
+// успевает прийти уже после того, как окно спрятали. Go тогда снова считал окно
+// видимым, и в трее над спрятанным окном оставалось «Скрыть интерфейс».
+//
+// Один источник этих запоздалых событий — слушатель mousedown, звавший
+// bringToFront, — уже убран (см. renderer.ts возле init()). Но убирать их по
+// одному бессмысленно: focus в странице никогда и не был утверждением о том,
+// что окно на экране. Здесь стоит та же проверка, что и у пункта трея, —
+// isWindowVisible спрашивает у системы, и спурьёзное уведомление отбрасывается
+// независимо от того, что его породило.
 func (s *AppService) NotifyWindowShown() {
+	if !s.isWindowVisible() {
+		return
+	}
 	s.markWindowShown()
 	// Emit outside of lock to avoid holding mu while calling Wails runtime.
 	s.emitSafe("window-restored", nil)

@@ -3,6 +3,8 @@ package service
 import (
 	"strings"
 	"testing"
+
+	"NeoBox/backend/core"
 	"unicode/utf16"
 	"unicode/utf8"
 )
@@ -65,5 +67,48 @@ func TestClipTrayNameBudgetsUTF16Units(t *testing.T) {
 	// Короткое имя возвращается как есть, без многоточия.
 	if got := clipTrayName("Amsterdam 01"); got != "Amsterdam 01" {
 		t.Errorf("short name was altered: %q", got)
+	}
+}
+
+// Страница судит о видимости по событию focus, а оно опаздывает: закрытие окна
+// крестиком идёт с задержкой на анимацию, и focus от того же нажатия приходит
+// уже после сокрытия. Принятое на слово, такое уведомление снова помечало окно
+// видимым — и в трее над спрятанным окном оставалось «Скрыть интерфейс».
+func TestNotifyWindowShownIgnoresAStaleFocus(t *testing.T) {
+	s := &AppService{}
+
+	s.SetWindowVisible(true)
+	s.NotifyWindowHidden()
+
+	// Запоздалый focus от того же нажатия, что закрыло окно.
+	s.NotifyWindowShown()
+
+	if s.isWindowVisible() {
+		t.Fatal("спурьёзное уведомление снова пометило спрятанное окно видимым")
+	}
+}
+
+// Обратную сторону ломать нельзя: настоящий показ окна обязан доходить, иначе
+// Go до конца сессии считает окно скрытым и перестаёт слать события в страницу
+// — так замирал счётчик трафика.
+func TestNotifyWindowShownStillAcceptsARealShow(t *testing.T) {
+	// coreManager нужен потому, что принятое уведомление доходит до
+	// onWindowRestored, а тот спрашивает у ядра, идёт ли сессия.
+	s := &AppService{coreManager: core.NewCoreManager()}
+
+	s.SetWindowVisible(true)
+	s.NotifyWindowHidden()
+
+	// Что делает BringToFront, когда окно действительно вернулось на экран:
+	// системная половина требует живого контекста Wails, эта — нет.
+	s.markWindowShown()
+	if !s.isWindowVisible() {
+		t.Fatal("окно не помечено видимым после настоящего показа")
+	}
+
+	// И уведомление от страницы теперь проходит, а не отбрасывается.
+	s.NotifyWindowShown()
+	if !s.isWindowVisible() {
+		t.Fatal("уведомление о настоящем показе было отброшено")
 	}
 }
