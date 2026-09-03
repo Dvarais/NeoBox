@@ -2,6 +2,7 @@ package security
 
 import (
 	"net"
+	"net/netip"
 	"strings"
 	"testing"
 )
@@ -120,5 +121,89 @@ func TestRunNetshReportsFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "netsh") {
 		t.Errorf("the error should name the failing command, got: %v", err)
+	}
+}
+
+// Список разрешённых адресов Kill Switch.
+//
+// Проверять его отдельно приходится потому, что netsh разбирает remoteip
+// целиком: одна запись, которую он не принял, отменяет всё правило, а следом —
+// и подключение. Пользователь при этом видит только «Не удалось включить Kill
+// Switch», без указания на виновный адрес.
+//
+// Так и случилось с ::1: netsh отвергает адрес IPv6-петли в remoteip в любой
+// записи, и Kill Switch не включался вообще ни у кого.
+func TestKillSwitchLANListIsWellFormed(t *testing.T) {
+	entries := strings.Split(killSwitchLANRemoteIPs, ",")
+	if len(entries) == 0 {
+		t.Fatal("список разрешённых адресов пуст")
+	}
+
+	for _, entry := range entries {
+		if entry != strings.TrimSpace(entry) {
+			t.Errorf("%q содержит пробелы — netsh разбирает список по запятым без обрезки", entry)
+		}
+		if strings.Contains(entry, "/") {
+			if _, err := netip.ParsePrefix(entry); err != nil {
+				t.Errorf("%q не разбирается как подсеть: %v", entry, err)
+			}
+			continue
+		}
+		if _, err := netip.ParseAddr(entry); err != nil {
+			t.Errorf("%q не разбирается как адрес: %v", entry, err)
+		}
+	}
+}
+
+// netsh не принимает адрес IPv6-петли в remoteip ни в каком виде: ::1, ::1/128,
+// 0:0:0:0:0:0:0:1, диапазон ::1-::1 — на всё «Указан недопустимый IP-адрес».
+// Потери от его отсутствия нет: трафик петли брандмауэр Windows не фильтрует.
+func TestKillSwitchLANListHasNoIPv6Loopback(t *testing.T) {
+	for _, entry := range strings.Split(killSwitchLANRemoteIPs, ",") {
+		addr := entry
+		if i := strings.Index(addr, "/"); i >= 0 {
+			addr = addr[:i]
+		}
+		parsed, err := netip.ParseAddr(addr)
+		if err != nil {
+			continue // подсети проверяет тест выше
+		}
+		if parsed.Is6() && parsed.IsLoopback() {
+			t.Errorf("%q — адрес IPv6-петли; netsh отвергнет его и правило не создастся", entry)
+		}
+	}
+}
+
+// Канальные адреса занимают fe80::/10 (fe80–febf). Более узкая маска,
+// стоявшая здесь раньше, оставляла часть из них без разрешения.
+func TestKillSwitchLANListCoversLinkLocalAndULA(t *testing.T) {
+	// Представители диапазонов, которые правило обязано покрывать.
+	musts := map[string]string{
+		"канальный IPv6 вне fe80:":  "feb0::1",
+		"уникальный локальный IPv6": "fd12:3456::1",
+		"частная сеть 10/8":         "10.1.2.3",
+		"частная сеть 192.168/16":   "192.168.1.1",
+		"частная сеть 172.16/12":    "172.20.0.1",
+	}
+
+	var prefixes []netip.Prefix
+	for _, entry := range strings.Split(killSwitchLANRemoteIPs, ",") {
+		if p, err := netip.ParsePrefix(entry); err == nil {
+			prefixes = append(prefixes, p)
+		}
+	}
+
+	for name, sample := range musts {
+		addr := netip.MustParseAddr(sample)
+		covered := false
+		for _, p := range prefixes {
+			if p.Contains(addr) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			t.Errorf("%s (%s) не покрыт разрешающим правилом — такая сеть окажется отрезанной", name, sample)
+		}
 	}
 }

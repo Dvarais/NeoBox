@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows/registry"
+
+	"NeoBox/backend/core"
 )
 
 // hideWindow sets the SysProcAttr on Windows exec.Cmd to prevent flashing console windows.
@@ -23,6 +25,24 @@ func hideWindow(cmd *exec.Cmd) {
 // every user logon — exactly when the system tray (notification area) is already
 // up and ready to receive Shell_NotifyIcon(NIM_ADD).
 const autostartRunKey = `Software\Microsoft\Windows\CurrentVersion\Run`
+
+// safeAutostartName reduces a task name to characters that cannot alter the
+// shape of the registry value being written.
+//
+// One function rather than the three identical copies that were here, each
+// carrying a comment asking the next reader to keep it in step with the others.
+// Set, remove and query all address the same value, so a copy that drifted
+// would not fail loudly — it would write under one name and look for another,
+// leaving the autostart checkbox permanently disagreeing with the registry.
+func safeAutostartName(taskName string) string {
+	return strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == ' ' || r == '-' || r == '_' || r == '.' {
+			return r
+		}
+		return -1 // Remove disallowed characters
+	}, taskName)
+}
 
 // SetupAutostart registers NeoBox to launch at user logon via the per-user
 // registry Run key (HKCU\...\Run).
@@ -46,15 +66,7 @@ func SetupAutostart(taskName string, appPath string) error {
 	// implementation, which would otherwise launch a second instance at logon.
 	removeLegacyScheduledTask(taskName)
 
-	// taskName becomes a registry value name, so restrict it to characters that
-	// cannot alter the shape of the key being written.
-	safeName := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
-			r == ' ' || r == '-' || r == '_' || r == '.' {
-			return r
-		}
-		return -1 // Remove disallowed characters
-	}, taskName)
+	safeName := safeAutostartName(taskName)
 	if safeName == "" {
 		return fmt.Errorf("invalid task name: must contain only alphanumeric characters, spaces, hyphens, or underscores")
 	}
@@ -92,14 +104,7 @@ func SetupAutostart(taskName string, appPath string) error {
 func RemoveAutostart(taskName string) error {
 	removeLegacyScheduledTask(taskName)
 
-	// Same sanitisation as SetupAutostart, so the same value is addressed.
-	safeName := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
-			r == ' ' || r == '-' || r == '_' || r == '.' {
-			return r
-		}
-		return -1
-	}, taskName)
+	safeName := safeAutostartName(taskName)
 	if safeName == "" {
 		return nil // Nothing to remove for invalid name
 	}
@@ -114,27 +119,29 @@ func RemoveAutostart(taskName string) error {
 	return nil
 }
 
-// IsAutostartEnabled reports whether the Run-key value is present.
-func IsAutostartEnabled(taskName string) bool {
-	// Same sanitisation as SetupAutostart, so the same value is addressed.
-	safeName := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
-			r == ' ' || r == '-' || r == '_' || r == '.' {
-			return r
-		}
-		return -1
-	}, taskName)
+// AutostartTarget returns the command line currently registered under the Run
+// key, or "" when nothing is registered.
+//
+// The command line, not a bool. "Is a value there" cannot tell a working
+// autostart from one pointing at a path that no longer exists — a reinstall
+// into a different directory leaves exactly that behind, and the checkbox in
+// the window goes on claiming the app starts with Windows.
+func AutostartTarget(taskName string) string {
+	safeName := safeAutostartName(taskName)
 	if safeName == "" {
-		return false
+		return ""
 	}
 
 	k, err := registry.OpenKey(registry.CURRENT_USER, autostartRunKey, registry.QUERY_VALUE)
 	if err != nil {
-		return false
+		return ""
 	}
 	defer k.Close()
-	_, _, err = k.GetStringValue(safeName)
-	return err == nil
+	value, _, err := k.GetStringValue(safeName)
+	if err != nil {
+		return ""
+	}
+	return value
 }
 
 // removeLegacyScheduledTask deletes a Task Scheduler entry created by the old
@@ -157,6 +164,11 @@ func removeLegacyScheduledTask(taskName string) {
 // on some Windows locales mis-parses non-ASCII characters in the description
 // operand, which can cause the rule creation to silently fail.
 const killSwitchDesc = "NeoBox VPN Kill Switch - blocks traffic outside the VPN tunnel. Enabled by the user in NeoBox settings; removed automatically on disconnect."
+
+// killSwitchLANRemoteIPs — адреса, которым Kill Switch не мешает: петля и
+// локальные сети. Одна запись, которую не принимает netsh, роняет всё правило,
+// а с ним и подключение, поэтому список отдельной константой и под тестом.
+const killSwitchLANRemoteIPs = "127.0.0.1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,fe80::/10,fc00::/7"
 
 // EnableKillSwitch sets up Windows Firewall rules to block all WAN traffic
 // except to local LAN and the VPN server IP, preventing traffic leaks when the
@@ -190,11 +202,31 @@ func EnableKillSwitch(serverHost string) error {
 
 	// 1. Allow local loopback and LAN subnets (IPv4 + IPv6) FIRST.
 	// netsh accepts a mixed IPv4/IPv6 address list for one rule.
+	//
+	// Список вынесен в killSwitchLANRemoteIPs: его инварианты проверяются
+	// тестом, потому что одна неудачная запись роняет всё правило целиком, а
+	// вместе с ним и подключение.
+	//
+	// Здесь НЕТ ::1, и это не упущение. netsh отвергает адрес IPv6-петли в
+	// remoteip в любой записи — ::1, ::1/128, 0:0:0:0:0:0:0:1, диапазон ::1-::1
+	// дают «Указан недопустимый IP-адрес». Одного такого элемента хватало,
+	// чтобы правило не создалось целиком, а вместе с ним отваливался весь Kill
+	// Switch и отменялось подключение. Потери от отсутствия ::1 нет: брандмауэр
+	// Windows трафик петли не фильтрует вовсе, так что разрешать её нечем и
+	// незачем — 127.0.0.1 оставлен только потому, что принимается и безвреден.
+	//
+	// fe80::/10, а не /16: канальные адреса занимают именно /10 (fe80–febf), и
+	// узкая маска пропускала бы часть из них мимо разрешения.
+	//
+	// fc00::/7 — уникальные локальные адреса, IPv6-аналог 10/8 и 192.168/16.
+	// Без них домашняя сеть на IPv6 оказывалась отрезанной, хотя IPv4-половина
+	// того же правила её разрешала. Наружу такие адреса не маршрутизируются,
+	// поэтому разрешение не расширяет дыру в туннеле.
 	if err := runNetsh("advfirewall", "firewall", "add", "rule",
 		"name=NeoBox-KillSwitch-LAN",
 		"dir=out",
 		"action=allow",
-		"remoteip=127.0.0.1,::1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,fe80::/16",
+		"remoteip="+killSwitchLANRemoteIPs,
 		"profile=any",
 		"description="+killSwitchDesc,
 	); err != nil {
@@ -251,9 +283,13 @@ func resolveKillSwitchHost(serverHost string) ([]net.IP, error) {
 
 	// A domain name — resolve it with a timeout. This happens before the block
 	// rule exists, so DNS still works.
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	//
+	// core.ResolveHost, а не системный резолвер: исключение в firewall строится
+	// по адресу сервера, и подменённый провайдером ответ прописал бы в брандмауэр
+	// чужой адрес — kill switch встал бы охранять не ту дверь.
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
-	resolved, err := net.DefaultResolver.LookupIP(ctx, "ip", serverHost)
+	resolved, err := core.ResolveHost(ctx, serverHost)
 	if err != nil {
 		return nil, fmt.Errorf("cannot arm the kill switch: failed to resolve VPN server %q: %w", serverHost, err)
 	}

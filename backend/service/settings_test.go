@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
+	"slices"
 	"testing"
 	"time"
 
+	"NeoBox/backend/security"
 	"NeoBox/backend/storage"
 )
 
@@ -63,7 +64,7 @@ func settingsWith(selected string, favourites []string) string {
 		"language":           "EN",
 		"tunMode":            true,
 		"dns":                "1.1.1.1",
-		"customDirect":       []string{"example.com"},
+		"bypassRu":           true,
 		"lastSelectedServer": selected,
 		"favoriteLinks":      favourites,
 	}
@@ -140,6 +141,79 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 	if got["dns"] != "1.1.1.1" || got["language"] != "EN" {
 		t.Errorf("plain fields did not survive the round trip: %v", got)
+	}
+}
+
+// Поле «домены для прямого доступа» снято, но домены из него — это маршруты,
+// которые человек завёл руками. Миграция обязана перенести их в правила, и
+// перенести ПЕРЕД теми, что уже есть: в конфиге старое поле шло раньше правил.
+func TestMigrateCustomDirectFoldsDomainsIntoRules(t *testing.T) {
+	s := newSettingsService(t)
+
+	legacy := map[string]interface{}{
+		"tunMode":      true,
+		"customDirect": []string{"example.com", "  spaced.example  ", ""},
+		"customRules": []map[string]string{
+			{"action": "block", "type": "domain", "value": "ads.example"},
+		},
+		"profiles": []map[string]interface{}{
+			{"id": "p1", "name": "дома", "server": nil, "settings": map[string]interface{}{
+				"customDirect": []string{"profile.example"},
+			}},
+		},
+	}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("failed to encode legacy settings: %v", err)
+	}
+	if !s.SaveSettings(string(raw)) {
+		t.Fatal("SaveSettings returned false")
+	}
+
+	s.migrateCustomDirect()
+	s.migrateCustomDirect() // повторный старт не должен ничего удвоить
+
+	var got map[string]interface{}
+	if err := json.Unmarshal([]byte(s.GetSettings()), &got); err != nil {
+		t.Fatalf("GetSettings did not return valid JSON: %v", err)
+	}
+	if _, present := got["customDirect"]; present {
+		t.Error("customDirect survived the migration")
+	}
+
+	rules, _ := got["customRules"].([]interface{})
+	want := []map[string]interface{}{
+		{"action": "direct", "type": "domain_suffix", "value": "example.com"},
+		{"action": "direct", "type": "domain_suffix", "value": "spaced.example"},
+		{"action": "block", "type": "domain", "value": "ads.example"},
+	}
+	if len(rules) != len(want) {
+		t.Fatalf("customRules = %v, want %d rules", rules, len(want))
+	}
+	for i, expected := range want {
+		rule, _ := rules[i].(map[string]interface{})
+		for key, value := range expected {
+			if rule[key] != value {
+				t.Errorf("rule %d: %s = %v, want %v", i, key, rule[key], value)
+			}
+		}
+	}
+
+	profiles, _ := got["profiles"].([]interface{})
+	if len(profiles) != 1 {
+		t.Fatalf("profiles = %v, want the one that was saved", profiles)
+	}
+	profile, _ := profiles[0].(map[string]interface{})
+	nested, _ := profile["settings"].(map[string]interface{})
+	if _, present := nested["customDirect"]; present {
+		t.Error("customDirect survived the migration inside a profile")
+	}
+	profileRules, _ := nested["customRules"].([]interface{})
+	if len(profileRules) != 1 {
+		t.Fatalf("profile customRules = %v, want the folded domain", profileRules)
+	}
+	if rule, _ := profileRules[0].(map[string]interface{}); rule["value"] != "profile.example" {
+		t.Errorf("profile rule = %v, want profile.example routed direct", rule)
 	}
 }
 
@@ -341,13 +415,74 @@ func TestSaveSettingsWithLanguageChangeDoesNotDeadlock(t *testing.T) {
 	}
 }
 
-// Guards the intent of the split: every key named as secret must actually be one
-// the frontend sends, and the list must not quietly grow to cover fields users
-// are meant to edit by hand.
+// Guards the intent of the split: the list must not quietly grow to cover
+// fields users are meant to edit by hand in settings.json.
+//
+// The guard used to be a substring test — a key had to contain "server" or
+// "link" — and that broke the moment a legitimately secret field arrived under
+// a name that says nothing about links: "profiles", where a saved profile may
+// carry the server it was made with. The heuristic was only ever a stand-in for
+// the real rule, which is a judgement about content, so the list is now spelled
+// out here with the reason each entry earns its place. Adding a field to
+// secretSettingKeys now costs one line in this test, and that is the point: it
+// cannot happen without somebody saying out loud why.
 func TestSecretSettingKeysAreCredentialFields(t *testing.T) {
+	reasons := map[string]string{
+		"lastSelectedServer": "полная ссылка на прокси",
+		"favoriteLinks":      "список полных ссылок на прокси",
+		"profiles":           "профиль может нести ссылку на сервер, с которым его сохранили",
+	}
+
 	for _, key := range secretSettingKeys {
-		if !strings.Contains(strings.ToLower(key), "server") && !strings.Contains(strings.ToLower(key), "link") {
-			t.Errorf("secretSettingKeys contains %q, which does not look like a credential field", key)
+		if _, declared := reasons[key]; !declared {
+			t.Errorf("secretSettingKeys contains %q, which is not declared in this test — "+
+				"add it here together with the reason it must be encrypted", key)
 		}
+	}
+	for key := range reasons {
+		if !slices.Contains(secretSettingKeys, key) {
+			t.Errorf("%q is declared here but no longer in secretSettingKeys — "+
+				"if it stopped being secret, drop it from both", key)
+		}
+	}
+}
+
+// Автозапуск сверяется по всей строке запуска, а не по факту наличия значения.
+// Значение уезжает из-под приложения тремя способами (см. applyAutostart), и
+// каждый оставлял стоящую галку над автозапуском, которого нет.
+func TestApplyAutostartReconcilesTheRunKey(t *testing.T) {
+	if security.AutostartTarget(autostartName) != "" {
+		t.Skip("в реестре уже есть запись автозапуска NeoBox — тест её не тронет")
+	}
+	t.Cleanup(func() { _ = security.RemoveAutostart(autostartName) })
+
+	exePath, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	quoted := `"` + exePath + `"`
+
+	applyAutostart(true)
+	if got := security.AutostartTarget(autostartName); got != quoted {
+		t.Fatalf("после включения в реестре %q, ожидалось %q", got, quoted)
+	}
+
+	// Путь, оставшийся от установки в другой каталог: значение есть, но ведёт
+	// не туда. Раньше проверка «значение присутствует» считала это исправным.
+	stale := filepath.Join(t.TempDir(), "stale.exe")
+	if err := os.WriteFile(stale, []byte("MZ"), 0644); err != nil {
+		t.Fatalf("подготовка файла: %v", err)
+	}
+	if err := security.SetupAutostart(autostartName, stale); err != nil {
+		t.Fatalf("SetupAutostart: %v", err)
+	}
+	applyAutostart(true)
+	if got := security.AutostartTarget(autostartName); got != quoted {
+		t.Errorf("устаревший путь не переписан: %q", got)
+	}
+
+	applyAutostart(false)
+	if got := security.AutostartTarget(autostartName); got != "" {
+		t.Errorf("после выключения запись осталась: %q", got)
 	}
 }

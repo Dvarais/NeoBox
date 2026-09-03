@@ -12,15 +12,6 @@ declare global {
      * проверкой, как это делает wails-bridge.
      */
     runtime?: Partial<typeof WailsRuntime>;
-
-    /**
-     * Счётчики трафика текущей сессии. Живут на window, потому что их пишет
-     * обработчик traffic-stats в wails-bridge, а читает история в renderer.
-     * Суммирует их Go: пока окно свёрнуто в трей, события сюда не приходят
-     * вовсе, и сложение на этой стороне потеряло бы весь трафик за это время.
-     */
-    sessionBytesDown: number;
-    sessionBytesUp: number;
   }
 
   /**

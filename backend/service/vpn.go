@@ -24,7 +24,24 @@ import (
 // NOTE: settingsJSON is kept for API compatibility but is intentionally ignored —
 // settings are always read fresh from disk to prevent stale/empty frontend state
 // (e.g., after a DPAPI key change) from launching VPN with wrong configuration.
-func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[string]interface{} {
+//
+// This is the connection a person asked for, so it opens a new session: the
+// traffic totals start from zero. The watchdog reconnects through startCore
+// instead — see there.
+func (s *AppService) StartXray(link string, settingsJSON string, useSystemProxy bool) map[string]interface{} {
+	return s.startCore(link, settingsJSON, useSystemProxy, true)
+}
+
+// startCore is StartXray with the one decision the watchdog needs to make
+// differently: whether this is a new session or the continuation of one.
+//
+// «За сессию» is the user's session, not the core process's. The watchdog
+// restarts the core whenever the link drops, and folding that into StartXray
+// meant every automatic recovery silently reset the volume to zero — the tunnel
+// had a new process, but for the person watching nothing had ended. So the
+// reset moved to the paths a person actually initiates: connecting, and the
+// explicit Restart button.
+func (s *AppService) startCore(link string, _ string, useSystemProxy bool, newSession bool) map[string]interface{} {
 	response := map[string]interface{}{"success": false}
 
 	// 1. Read settings directly from disk (authoritative source)
@@ -84,9 +101,7 @@ func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[s
 	// 4. Start core manager
 	// Read wailsCtx under its lock: SetContext may write it concurrently.
 	var logWriter sclog.PlatformWriter
-	s.wailsCtxMu.RLock()
-	wCtx := s.wailsCtx
-	s.wailsCtxMu.RUnlock()
+	wCtx := s.context()
 	if wCtx != nil {
 		// A previous session's streamer may still be running — the watchdog
 		// reconnects by calling StartXray again — and overwriting the field
@@ -101,8 +116,11 @@ func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[s
 		logWriter = ls
 	}
 
-	// A new session starts its traffic counters from zero.
-	s.resetSessionTraffic()
+	// A new session starts its traffic counters from zero. A watchdog recovery
+	// is not a new session and keeps them running.
+	if newSession {
+		s.resetSessionTraffic()
+	}
 
 	if err := s.coreManager.Start(string(configBytes), logWriter); err != nil {
 		// The streamer was already running to catch startup output; wind it
@@ -155,9 +173,14 @@ func (s *AppService) StartXray(link string, _ string, useSystemProxy bool) map[s
 	monitorCtx, cancel := context.WithCancel(context.Background())
 	s.cancelMonitor = cancel
 	s.stateMu.Unlock()
+	// Каждый монитор подключается к своему ядру впервые — иначе он объявил бы
+	// «поток восстановлен» на обычном первом подключении.
+	s.trafficMu.Lock()
+	s.trafficStreamOpened = false
+	s.trafficMu.Unlock()
 	go s.startTrafficMonitor(monitorCtx)
 
-	s.setTrayStatus(i18n.TrayStatusConnected, parseServerNameFromLink(link))
+	s.setTrayConnected(true, parseServerNameFromLink(link))
 	// Notify user via Windows toast when connected (window may be hidden in tray)
 	go sendToast(i18n.T(i18n.ToastConnectedTitle), i18n.T(i18n.ToastConnectedBody, parseServerNameFromLink(link)))
 
@@ -198,14 +221,12 @@ func (s *AppService) StopXray() map[string]interface{} {
 	}
 	s.stopLogStream()
 
-	s.wailsCtxMu.RLock()
-	wCtxStop := s.wailsCtx
-	s.wailsCtxMu.RUnlock()
+	wCtxStop := s.context()
 	if wCtxStop != nil {
 		wailsruntime.EventsEmit(wCtxStop, "xray-stopped", nil)
 	}
 
-	s.setTrayStatus(i18n.TrayStatusDisconnected)
+	s.setTrayConnected(false, "")
 	// Notify user via Windows toast on disconnect
 	go sendToast(i18n.T(i18n.ToastDisconnectedTitle), i18n.T(i18n.ToastDisconnectedBody))
 
@@ -236,9 +257,7 @@ func (s *AppService) RestartXray(link string, settingsJSON string, useSystemProx
 	s.stopLogStream()
 
 	// Emit stopped event so UI knows the old session ended
-	s.wailsCtxMu.RLock()
-	wCtxRestart := s.wailsCtx
-	s.wailsCtxMu.RUnlock()
+	wCtxRestart := s.context()
 	if wCtxRestart != nil {
 		wailsruntime.EventsEmit(wCtxRestart, "xray-stopped", nil)
 	}
@@ -299,15 +318,64 @@ func (s *AppService) CheckTunStatus() bool {
 	return false
 }
 
-// startTrafficMonitor connects to sing-box clash_api /traffic endpoint
-// and streams real-time upload and download speeds to the Wails frontend.
-// The per-session clashSecret is sent as a Bearer token so only NeoBox
-// can consume the Clash API (security improvement #1).
-func (s *AppService) startTrafficMonitor(ctx context.Context) {
-	// Give clash_api half a second to bind and boot up
-	time.Sleep(500 * time.Millisecond)
+// Пауза перед повторной попыткой подключиться к потоку трафика. Начинается с
+// той же половины секунды, что раньше стояла одиноким Sleep'ом, и удваивается
+// до пяти: поток восстанавливают, а не долбят.
+const (
+	trafficRetryMin = 500 * time.Millisecond
+	trafficRetryMax = 5 * time.Second
+)
 
-	// Snapshot the current session secret (protected by mu)
+// startTrafficMonitor keeps the traffic counters fed for as long as the session
+// lasts, reconnecting to the sing-box clash_api /traffic stream whenever it
+// breaks. The per-session clashSecret goes out as a Bearer token so only NeoBox
+// can consume the Clash API.
+//
+// Раньше это была одна попытка без права на ошибку. Любая осечка — clash_api не
+// успел встать за отведённые ему полсекунды, оборвалось соединение, пришёл
+// нечитаемый кадр — заканчивала горутину навсегда и молча. Счётчик замирал (а
+// в случае стартовой гонки не оживал вовсе), и понять почему было нельзя: в
+// журнал не попадало ничего.
+//
+// Теперь отказ — это пауза, а не конец, и о нём говорят вслух. Заодно исчезла
+// сама стартовая гонка: фиксированный Sleep стал первой паузой цикла, а
+// проигранная гонка — обычной неудачной попыткой, за которой следует ещё одна.
+func (s *AppService) startTrafficMonitor(ctx context.Context) {
+	delay := trafficRetryMin
+	attempts := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+
+		attempts++
+		err := s.streamTraffic(ctx)
+		if ctx.Err() != nil {
+			// Сессия закончилась — это не отказ, а плановая остановка.
+			return
+		}
+
+		// Первую неудачу не показываем: подключиться к clash_api раньше, чем
+		// он успел открыть порт, — это норма запуска, и жаловаться на неё
+		// значит пугать пользователя штатным ходом дел.
+		if attempts == 2 {
+			s.logNotice("WARN", "traffic stream unavailable, retrying: %v", err)
+		}
+
+		delay *= 2
+		if delay > trafficRetryMax {
+			delay = trafficRetryMax
+		}
+	}
+}
+
+// streamTraffic runs one connection to the /traffic endpoint and returns when
+// it ends — because the session was cancelled, or because it broke.
+func (s *AppService) streamTraffic(ctx context.Context) error {
+	// Snapshot the current session secret (protected by stateMu)
 	s.stateMu.Lock()
 	secret := s.clashSecret
 	s.stateMu.Unlock()
@@ -315,7 +383,7 @@ func (s *AppService) startTrafficMonitor(ctx context.Context) {
 	client := &http.Client{Timeout: 0} // infinite timeout for stream
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://"+core.ClashAPIAddr+"/traffic", nil)
 	if err != nil {
-		return
+		return err
 	}
 	if secret != "" {
 		req.Header.Set("Authorization", "Bearer "+secret)
@@ -323,23 +391,38 @@ func (s *AppService) startTrafficMonitor(ctx context.Context) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return
+		return err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("clash api answered %s", resp.Status)
+	}
+
+	// Сюда доходят только когда поток действительно открыт. Если это не первое
+	// подключение за сессию, о восстановлении сообщаем: пользователь уже видел
+	// предупреждение выше и вправе узнать, чем дело кончилось.
+	s.trafficMu.Lock()
+	reconnected := s.trafficStreamOpened
+	s.trafficStreamOpened = true
+	s.trafficMu.Unlock()
+	if reconnected {
+		s.logNotice("INFO", "traffic stream restored")
+	}
 
 	dec := json.NewDecoder(resp.Body)
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		default:
 			var stats struct {
 				Up   int64 `json:"up"`
 				Down int64 `json:"down"`
 			}
 			if err := dec.Decode(&stats); err != nil {
-				// Exit if stream is broken or closed
-				return
+				// Поток кончился или сломался — наружу, там решат, ждать ли.
+				return err
 			}
 
 			// Keep draining the stream regardless of window state — stopping
@@ -349,6 +432,10 @@ func (s *AppService) startTrafficMonitor(ctx context.Context) {
 			// no events are delivered at all.
 			totalUp, totalDown := s.addSessionTraffic(stats.Up, stats.Down)
 
+			// Подсказка иконки обновляется до проверки видимости, а не после:
+			// пока окно в трее, это единственное место, где цифры ещё видно.
+			s.refreshTrayTooltip()
+
 			// While the window is hidden nobody can see the speedometer, and
 			// every event is a separate ExecuteScript into WebView2. Skip it;
 			// onWindowRestored sends one catch-up sample with the totals.
@@ -357,9 +444,7 @@ func (s *AppService) startTrafficMonitor(ctx context.Context) {
 			}
 
 			// Emit stats to the Wails frontend
-			s.wailsCtxMu.RLock()
-			wCtx := s.wailsCtx
-			s.wailsCtxMu.RUnlock()
+			wCtx := s.context()
 			if wCtx != nil {
 				wailsruntime.EventsEmit(wCtx, "traffic-stats", map[string]interface{}{
 					"up":        stats.Up,

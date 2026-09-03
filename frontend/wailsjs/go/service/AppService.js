@@ -18,8 +18,20 @@ export function CheckUpdates() {
   return window['go']['service']['AppService']['CheckUpdates']();
 }
 
+export function CloseConnection(arg1) {
+  return window['go']['service']['AppService']['CloseConnection'](arg1);
+}
+
+export function DNSResolverOwners() {
+  return window['go']['service']['AppService']['DNSResolverOwners']();
+}
+
 export function DownloadAndInstallUpdate(arg1, arg2) {
   return window['go']['service']['AppService']['DownloadAndInstallUpdate'](arg1, arg2);
+}
+
+export function ExportSettings() {
+  return window['go']['service']['AppService']['ExportSettings']();
 }
 
 export function FetchSubscription(arg1) {
@@ -28,6 +40,18 @@ export function FetchSubscription(arg1) {
 
 export function GetAppVersion() {
   return window['go']['service']['AppService']['GetAppVersion']();
+}
+
+export function GetConnections() {
+  return window['go']['service']['AppService']['GetConnections']();
+}
+
+export function GetHistory() {
+  return window['go']['service']['AppService']['GetHistory']();
+}
+
+export function GetKillSwitchState() {
+  return window['go']['service']['AppService']['GetKillSwitchState']();
 }
 
 export function GetSettings() {
@@ -42,12 +66,20 @@ export function ImportClipboard(arg1) {
   return window['go']['service']['AppService']['ImportClipboard'](arg1);
 }
 
+export function ImportSettings() {
+  return window['go']['service']['AppService']['ImportSettings']();
+}
+
 export function InitTray(arg1) {
   return window['go']['service']['AppService']['InitTray'](arg1);
 }
 
 export function IsQuitting() {
   return window['go']['service']['AppService']['IsQuitting']();
+}
+
+export function MutexHandle() {
+  return window['go']['service']['AppService']['MutexHandle']();
 }
 
 export function NotifyWindowHidden() {
@@ -70,8 +102,16 @@ export function Quit() {
   return window['go']['service']['AppService']['Quit']();
 }
 
+export function RebuildTrayProfiles() {
+  return window['go']['service']['AppService']['RebuildTrayProfiles']();
+}
+
 export function RebuildTrayServers() {
   return window['go']['service']['AppService']['RebuildTrayServers']();
+}
+
+export function RebuildTrayToggles() {
+  return window['go']['service']['AppService']['RebuildTrayToggles']();
 }
 
 export function RequestAdmin() {
@@ -82,8 +122,8 @@ export function RestartXray(arg1, arg2, arg3) {
   return window['go']['service']['AppService']['RestartXray'](arg1, arg2, arg3);
 }
 
-export function RunDiagnostics() {
-  return window['go']['service']['AppService']['RunDiagnostics']();
+export function SaveHistory(arg1) {
+  return window['go']['service']['AppService']['SaveHistory'](arg1);
 }
 
 export function SaveLogs(arg1) {
@@ -102,8 +142,16 @@ export function SelectAndConnectServer(arg1) {
   return window['go']['service']['AppService']['SelectAndConnectServer'](arg1);
 }
 
+export function SessionTraffic() {
+  return window['go']['service']['AppService']['SessionTraffic']();
+}
+
 export function SetContext(arg1) {
   return window['go']['service']['AppService']['SetContext'](arg1);
+}
+
+export function SetGlobalHotkeys(arg1, arg2, arg3) {
+  return window['go']['service']['AppService']['SetGlobalHotkeys'](arg1, arg2, arg3);
 }
 
 export function SetMutexHandle(arg1) {
@@ -138,10 +186,10 @@ export function StopXray() {
   return window['go']['service']['AppService']['StopXray']();
 }
 
-export function UpdateAllSubscriptions() {
-  return window['go']['service']['AppService']['UpdateAllSubscriptions']();
+export function UpdateSubscriptionNow(arg1) {
+  return window['go']['service']['AppService']['UpdateSubscriptionNow'](arg1);
 }
 
-export function UpdateTrayStatus(arg1) {
-  return window['go']['service']['AppService']['UpdateTrayStatus'](arg1);
+export function ValidateDNS(arg1) {
+  return window['go']['service']['AppService']['ValidateDNS'](arg1);
 }

@@ -1,23 +1,244 @@
+/* ─── Палитра ────────────────────────────────────────────────────────────────
+   Раньше здесь лежало восемь значений, а сам акцент был вписан по файлу
+   литералами сорок раз — в виде rgba(56, 189, 248, α) с десятью разными
+   альфами. Сменить акцент означало сорок правок, и каждая из них могла
+   разойтись с остальными.
+
+   Теперь два уровня. Внизу примитивы — только каналы, без прозрачности; из них
+   собирается всё остальное, поэтому смена цвета это одна строка. Выше роли:
+   что этот цвет означает, а не как он выглядит.
+
+   Синтаксис rgb(<каналы> / <альфа>) требует значений через пробел — иначе
+   подстановка переменной внутрь функции не сработает. */
 :root {
-  --bg-color: #0b0f19;
-  --card-bg: #161b2c;
-  --accent-color: #38bdf8;
+  /* ─── Градиент ─────────────────────────────────────────────────────────────
+     Мир приложения: почти чёрный слева, сливовый посередине, индиго справа.
+     Три стопа задаются здесь и нигде больше.
+
+     Раньше середина и правый край были взяты почти на пределе насыщенности
+     (#3b0447 при S 89% и #1c129b при S 79%), и правый край выходил в
+     одиннадцать раз светлее левого — 0.0305 против 0.0027. Читалось это как
+     подсвеченная лиловая плашка под интерфейсом: цвет спорил со стеклянными
+     панелями вместо того, чтобы лежать под ними.
+
+     Сейчас путь тот же — чёрный, слива, индиго, — но обе цветные точки
+     приглушены (S 59% и 52%) и опущены по светлоте. Перепад стал 4.9× вместо
+     11.4×, то есть фон почти ровный по всей ширине, и правая половина больше
+     не отбирает внимание у содержимого.
+
+     Побочный выигрыш: контраст вырос везде примерно на четверть. Ни одна роль
+     ниже от этого не сломалась — только получила запас. */
+  --grad-start: #080909;
+  --grad-mid: #2b0d33;
+  --grad-end: #1a1748;
+
+  /* Готовая заливка. Её задаёт body, и её же целиком переписывает движок тем
+     (modules/theme.ts), когда пользователь выбрал своё: тема меняет не только
+     цвета, но и форму — сплошной цвет, угол, радиальный градиент.
+
+     Голые проценты между стопами — подсказки интерполяции: точка, где смесь
+     соседних цветов становится ровно половинной. По умолчанию она стоит
+     посередине отрезка, и обе секции шли строго линейно — на стыке в 50%
+     возникал излом, а цвет начинал набираться сразу от левого края.
+
+     30% (вместо 25%) удерживает почти чёрный дольше, поэтому левая треть
+     остаётся тёмной опорой, а не сразу уходит в лиловое.
+     70% (вместо 75%) выводит индиго на место раньше, и правый край
+     доезжает полого, а не продолжает светлеть до последнего пикселя. */
+  --bg-image: linear-gradient(
+    to right,
+    var(--grad-start) 0%,
+    30%,
+    var(--grad-mid) 50%,
+    70%,
+    var(--grad-end) 100%
+  );
+
+  /* Примитивы */
+  --accent-rgb: 56 189 248;
+  --success-rgb: 34 197 94;
+  --warning-rgb: 234 179 8;
+  /* Подняты под яркий край градиента: прежние 239 68 68 и 168 85 247 давали
+     на нём 3.27:1 и 3.11:1 — ниже порога AA, который продукт обязался держать.
+     После того как градиент приглушили, они дают 4.11:1 и 3.91:1 — всё ещё
+     ниже 4.5, поэтому подъём остаётся в силе и откатывать его нельзя.
+     Здесь и ниже контраст меряется на самой невыгодной поверхности: правый
+     край градиента под плёнкой --glass-01. */
+  --danger-rgb: 244 124 124;
+  --debug-rgb: 191 129 249;
+  --panel-rgb: 26 16 36;
+  --bg-rgb: 8 9 9;
+  --surface-rgb: 255 255 255;
+  --shadow-rgb: 0 0 0;
+  /* Тёмная основа под цветными чипами. Прозрачная заливка вроде
+     rgb(var(--danger-rgb) / 0.1) пропускает яркий край градиента насквозь, и
+     текст на таком чипе терял контраст. Основа кладётся под заливку и
+     возвращает чипу собственную, предсказуемую подложку. */
+  --chip-rgb: 13 10 20;
+
+  /* Поверхности */
+  --bg-color: var(--grad-start);
+  --card-bg: rgb(var(--panel-rgb));
+  --panel-deep: #120a1a;  /* тёмный край радиального градиента в модалках */
+  --panel-solid: #17102a; /* непрозрачная шапка таблицы: под неё уезжают строки */
+  --chip-base: rgb(var(--chip-rgb) / 0.7);
+
+  /* Стеклянные плёнки: лестница белого поверх фона. Раньше тех же плёнок было
+     одиннадцать ступеней от 0.02 до 0.3 — разница между соседними составляла
+     два-три значения канала, то есть была неразличима. Свёрнуто в шесть. */
+  --glass-01: rgb(var(--surface-rgb) / 0.03);
+  --glass-02: rgb(var(--surface-rgb) / 0.05);
+  --glass-03: rgb(var(--surface-rgb) / 0.08);
+  --glass-04: rgb(var(--surface-rgb) / 0.1);
+  --glass-05: rgb(var(--surface-rgb) / 0.15);
+  --glass-06: rgb(var(--surface-rgb) / 0.2);
+  --glass-border: var(--glass-04);
+
+  /* Текст.
+     Три уровня раньше умещались над порогом AA впритык: на ярком крае
+     градиента --text-dim давал 4.81, а --text-faint пришлось поднять с
+     #7887a0 (3.39) до 4.61. После приглушения градиента это 6.03 и 5.78 —
+     запас появился, но откатывать --text-faint к #7887a0 всё равно нельзя:
+     на новом фоне он даёт 4.25, а под более плотными плёнками и того меньше.
+     Так что faint остаётся почти вровень с dim по светлоте, и разницу между
+     ними держит кегль: faint живёт на --fs-micro. */
   --text-main: #f1f5f9;
   --text-dim: #94a3b8;
-  --danger: #ef4444;
-  --success: #22c55e;
-  --glass-border: rgba(255, 255, 255, 0.1);
+  --text-faint: #939fb3;
+
+  /* Шеврон выпадающего списка. Цвет внутри — --text-faint, вписанный руками:
+     data-URI переменных не понимает. Значение по умолчанию держится здесь,
+     дальше его пересобирает движок тем. */
+  --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23939fb3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+
+  /* Действие и выделение */
+  --accent-color: rgb(var(--accent-rgb));
+  --accent-deep: #0ea5e9; /* низ градиентов */
+  --accent-soft: #7dd3fc; /* наведение на сплошной акцент */
+  --on-accent: #000;      /* текст поверх сплошного акцента */
+  --accent-wash: rgb(var(--accent-rgb) / 0.05);
+  --accent-tint: rgb(var(--accent-rgb) / 0.1);
+  --accent-fill: rgb(var(--accent-rgb) / 0.15);
+  --accent-edge: rgb(var(--accent-rgb) / 0.2);
+
+  /* Состояния */
+  --success: rgb(var(--success-rgb));
+  --warning: rgb(var(--warning-rgb));
+  --danger: rgb(var(--danger-rgb));
+  --debug: rgb(var(--debug-rgb));
+  --attention: #f59e0b;     /* средний пинг, звезда избранного */
+
+  /* Журнал и данные */
+  --log-msg: #cbd5e1;
+  --log-component: #f57fbd;
+  --traffic-down: #10b981;
+  --traffic-up: #c58efc;
+
+  /* ─── Шрифты ───────────────────────────────────────────────────────────────
+     Segoe UI остаётся намеренно: PRODUCT.md требует, чтобы приложение читалось
+     как программа для Windows, а Segoe UI и есть системная гарнитура Windows.
+     Подключать сюда веб-шрифт значило бы нарушить это обязательство и завести
+     внешний ресурс при жёсткой CSP. */
+  --font-ui: 'Segoe UI', system-ui, sans-serif;
+  /* Моноширинный стек был выписан пятью разными наборами запасных гарнитур.
+     Набор один. */
+  --font-mono: 'Consolas', 'Courier New', monospace;
+
+  /* ─── Шкала кеглей ─────────────────────────────────────────────────────────
+     Было одиннадцать ступеней от 9px до 22px, соседние отличались на пиксель:
+     это не шкала, а накопленные частные решения. Шесть ролей ниже покрывают
+     всё, и каждая отвечает на вопрос «что это за текст», а не «сколько в нём
+     пикселей».
+
+     Нижняя граница поднята до 11px: значения 9px и 10px читались на пределе,
+     а на светлом тексте по тёмному фону — за пределом. Шаг внизу нарочно
+     мелкий (11→12), потому что это плотные служебные роли; настоящий контраст
+     живёт выше, между телом и заголовком. */
+  --fs-micro: 11px;   /* бейджи, теги протокола, значение пинга */
+  --fs-label: 12px;   /* подписи, метаданные, плотные таблицы */
+  --fs-body: 14px;    /* базовый: элементы управления, поля, описания */
+  --fs-subhead: 16px; /* подзаголовок, имя сервера в карточке */
+  --fs-heading: 18px; /* заголовок диалога */
+  --fs-title: 24px;   /* заголовок раздела */
 }
 
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  /* -apple-system из запасного набора убран: приложение собирается только под
+     Windows, и эта гарнитура там не появится никогда. */
+  font-family: var(--font-ui);
+}
+
+/* Уровни заголовков раньше не были заданы вовсе и держались на умолчаниях
+   браузера — то есть иерархия зависела от того, что решит движок, а не от
+   проекта. Значения совпадают с тем, что отрисовывалось до сих пор (h2 — те же
+   24px), но теперь это решение, а не совпадение. */
+h1, h2, h3, h4 {
+  line-height: 1.25;
+}
+
+h2 { font-size: var(--fs-title); }
+h3 { font-size: var(--fs-heading); }
+h4 { font-size: var(--fs-subhead); }
+
+/* Проза. Светлый текст по тёмному фону требует чуть большего интерлиньяжа,
+   чем тёмный по светлому: иначе строки слипаются. Ограничение по длине строки
+   задано в блоке адаптации. */
+.view > p {
+  line-height: 1.55;
+}
+
+/* Выделение текста осталось системным — синим, из светлой темы Windows, и
+   поперёк всей палитры приложения. Пользователь выделяет здесь регулярно:
+   адреса серверов, строки журнала, тексты ошибок. */
+::selection {
+  background: var(--accent-color);
+  color: var(--on-accent);
+}
+
+/* Двенадцать флажков в «Настройках» и «Маршрутах» не имели ни одного правила:
+   браузер рисовал их своей светлой галочкой поверх тёмного стекла. accent-color
+   красит их в акцент средствами платформы — то есть без подмены элемента на
+   собственную вёрстку, которая сломала бы и клавиатуру, и режим высокой
+   контрастности. */
+input[type="checkbox"] {
+  accent-color: var(--accent-color);
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+/* Числа, которые обновляются на месте: пинг, трафик, длительность, счётчики
+   соединений. Без табличных цифр строка дёргается по горизонтали при каждом
+   обновлении, потому что «1» уже «8». */
+.ping,
+.conn-table,
+.history-stat-value,
+.history-traffic-down,
+.history-traffic-up,
+#connectionsCount,
+#sessionTimerText,
+#currentIp {
+  font-variant-numeric: tabular-nums;
 }
 
 body {
+  /* Градиент от почти чёрного слева к индиго справа — мир приложения.
+     Сплошной цвет под ним оставлен на случай, если градиент не отрисуется:
+     без него страница окажется белой.
+
+     fixed важен: main прокручивается собственным содержимым, и без этого
+     градиент уезжал бы вместе с ним. */
   background-color: var(--bg-color);
+  /* Вся заливка — один токен, потому что тема пользователя меняет не только
+     цвета стопов, но и саму форму: сплошной цвет, линейный градиент под любым
+     углом, радиальный. Собрать это из трёх переменных нельзя, а значение по
+     умолчанию в --bg-image остаётся тем же градиентом, что был здесь всегда. */
+  background-image: var(--bg-image);
+  background-attachment: fixed;
   color: var(--text-main);
   height: 100vh;
   overflow: hidden;
@@ -39,6 +260,137 @@ body.app-idle *::after {
   animation-play-state: paused !important;
 }
 
+/* ─── Доступность ────────────────────────────────────────────────────────────
+   Пункты рейла, кнопка питания, элементы сортировки и стрелки прокрутки были
+   <div> с обработчиком клика — с клавиатуры до них было не добраться. Теперь
+   это <button>, и здесь снимается всё, что браузер рисует у кнопки по
+   умолчанию: собственный фон, рамка, кегль и выравнивание текста. Внешний вид
+   при этом не меняется ни на пиксель — оформление по-прежнему задают классы
+   ниже. */
+.nav-item,
+.sort-item,
+.scroll-arrow,
+.power-btn {
+  font: inherit;
+  text-align: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.nav-item,
+.sort-item {
+  background: none;
+  border: none;
+  color: inherit;
+}
+
+.sort-item {
+  width: 100%;
+  display: block;
+}
+
+/* Рейл: раньше отступ в 30px задавался gap самого <aside>. Теперь между
+   пунктами стоит обёртка nav > [role=tablist], и тот же ритм живёт здесь. */
+.nav-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.nav-tabs {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 30px;
+}
+
+.nav-spacer {
+  flex: 1;
+}
+
+/* Видимо только скринридеру. Заголовок «Главная» нужен, чтобы уровни шли
+   подряд, но на экране его место занимает сама панель состояния. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Один индикатор фокуса на всё приложение. :focus-visible, а не :focus, —
+   поэтому кольцо появляется при работе с клавиатуры и не мешает при клике
+   мышью. Смещение в 2px не даёт кольцу слиться с собственной рамкой элемента.
+
+   border-radius здесь не задаётся намеренно: кольцо и так повторяет скругление
+   самого элемента, а жёсткое значение перекроило бы на фокусе и поля ввода
+   (10px), и круглую кнопку питания. */
+:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+/* У полей ввода уже есть авторская подсветка фокуса (рамка + свечение ниже по
+   файлу), но она гасит outline. Возвращаем кольцо с тем же приоритетом. */
+input[type="text"]:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+/* Кнопка питания большая, и кольцо вплотную к её рамке в 4px читается как
+   часть самой рамки. Отодвигаем. */
+.power-btn:focus-visible {
+  outline-offset: 6px;
+}
+
+/* Режим высокой контрастности Windows. Приложение живёт на Windows, так что
+   это не абстрактный сценарий: система там отбрасывает авторские фоны, и
+   активная вкладка, отличавшаяся только заливкой, становилась неотличимой от
+   прочих. Состояние берёт на себя рамка системным цветом. */
+@media (forced-colors: active) {
+  :focus-visible,
+  input[type="text"]:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline-color: Highlight;
+  }
+
+  .nav-item.active,
+  .log-tab.active,
+  .process-tab.active,
+  .sort-item.active,
+  .server-card.selected,
+  .theme-mode[aria-checked="true"],
+  .theme-swatch[aria-checked="true"] {
+    border: 2px solid Highlight;
+  }
+
+  /* Точка состояния — единственное место, где цвет несёт смысл рядом с
+     текстом; оставляем ей собственную палитру. */
+  .status-dot {
+    forced-color-adjust: none;
+  }
+
+  /* Плитка пресета — это и есть цвет: показать её, отбросив заливку, значит не
+     показать ничего. Единственное место в приложении, которому режим высокой
+     контрастности приходится отключать целиком.
+
+     Выбор в таком режиме читается рамкой Highlight из правила выше, поэтому
+     сам он от этого не страдает. */
+  .theme-swatch,
+  .theme-swatch-accent,
+  .color-well {
+    forced-color-adjust: none;
+  }
+}
+
 /* Window Header */
 .window-header {
   position: fixed;
@@ -49,7 +401,7 @@ body.app-idle *::after {
   justify-content: space-between;
   align-items: center;
   padding: 10px 20px;
-  background: rgba(22, 27, 44, 0.4);
+  background: rgb(var(--panel-rgb) / 0.4);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--glass-border);
   -webkit-app-region: drag;
@@ -60,7 +412,7 @@ body.app-idle *::after {
 }
 
 .window-title {
-  font-size: 12px;
+  font-size: var(--fs-label);
   font-weight: 600;
   color: var(--text-dim);
   text-transform: uppercase;
@@ -93,7 +445,7 @@ body.app-idle *::after {
 }
 
 .control-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--glass-04);
   color: var(--text-main);
 }
 
@@ -114,7 +466,7 @@ body.app-idle *::after {
    — это отдельная render surface плюс буфер размытия в памяти GPU. */
 aside {
   width: 70px;
-  background: rgba(22, 27, 44, 0.5);
+  background: rgb(var(--panel-rgb) / 0.5);
   border-right: 1px solid var(--glass-border);
   display: flex;
   flex-direction: column;
@@ -144,7 +496,7 @@ aside {
 }
 
 .nav-item:hover, .nav-item.active {
-  background: rgba(56, 189, 248, 0.15);
+  background: var(--accent-fill);
   color: var(--accent-color);
 }
 
@@ -158,8 +510,95 @@ main {
   flex: 1;
   position: relative;
   overflow-y: auto;
-  padding: 65px 30px 30px 30px; /* Отступ сверху 65px, чтобы контент не перекрывался фиксированной шапкой */
+  /* Отступ сверху 65px, чтобы контент не перекрывался фиксированной шапкой.
+     По бокам базовое значение рассчитано на минимальные 800px ширины окна;
+     при просторном окне оно возвращается к прежним 30px (см. медиазапрос по
+     min-width ниже). */
+  padding: 65px 18px 30px 18px;
 }
+
+/* ─── Раскладка панелей ──────────────────────────────────────────────────────
+   Ряды заголовков, кнопок и полей раньше собирались инлайновым
+   style="display: flex …" прямо в разметке. Инлайновый стиль сильнее любого
+   правила таблицы, поэтому перенос по ширине им не управлялся в принципе:
+   при узком окне ряд просто выезжал за край. Теперь раскладка живёт здесь и
+   переносится. */
+.sub-add-row,
+.sub-actions-row,
+.section-toolbar,
+.section-toolbar-group,
+.section-toolbar-actions,
+.search-row,
+.save-row,
+.check-row {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.sub-add-row {
+  gap: 10px;
+}
+
+/* Поля делят строку поровну и уходят на следующую, когда каждому остаётся
+   меньше 200px. min-width: 0 обязателен: без него flex-элемент не сжимается
+   ниже собственной ширины по умолчанию, и перенос не срабатывает. */
+.sub-add-row input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.sub-actions-row {
+  gap: 10px;
+  margin-top: 15px;
+}
+
+.section-toolbar {
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.section-toolbar--baseline { align-items: flex-end; }
+.section-toolbar--loose { margin-bottom: 25px; }
+.section-toolbar--tight { margin-bottom: 6px; }
+
+.section-toolbar-group { align-items: center; gap: 15px; }
+.section-toolbar-actions { align-items: center; gap: 8px; }
+
+.search-row {
+  gap: 10px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+
+.search-field {
+  flex: 1 1 220px;
+  position: relative;
+  min-width: 0;
+}
+
+.save-row {
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 25px;
+}
+
+.save-row--top {
+  margin-top: 15px;
+  margin-bottom: 0;
+}
+
+/* Строка «чекбокс + подпись + пояснение». Пояснения вроде «(Блокировать
+   интернет вне VPN через Windows Firewall)» длиннее самой подписи, и при
+   узком окне ряд обязан переноситься. */
+.check-row {
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.form-group .check-row { margin-bottom: 12px; }
 
 .view {
   display: none;
@@ -186,9 +625,9 @@ main {
 .status-badge {
   padding: 6px 16px;
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--glass-02);
   border: 1px solid var(--glass-border);
-  font-size: 14px;
+  font-size: var(--fs-body);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -210,14 +649,50 @@ main {
   100% { opacity: 1; }
 }
 
-@keyframes pulse {
-  0% { box-shadow: 0 0 20px rgba(56, 189, 248, 0.3); }
-  50% { box-shadow: 0 0 50px rgba(56, 189, 248, 0.6); }
-  100% { box-shadow: 0 0 20px rgba(56, 189, 248, 0.3); }
+/* Кольцо состояния кнопки питания.
+   ─────────────────────────────────
+   Здесь раньше бесконечно анимировалась box-shadow: блюр ходил с 20px на 50px
+   два раза в секунду, пока VPN подключён. Две беды разом. Дорого — размытую
+   тень такого радиуса композитор перерисовывает каждый кадр, и это самая
+   тяжёлая анимация в приложении. И неверно по смыслу: непрерывное движение
+   означает «что-то происходит», а подключённый туннель — состояние покоя.
+
+   Бюджет перераспределён. Движение достаётся переходному состоянию, покой —
+   стабильному:
+
+     подключение → кольцо расходится импульсами, «идёт установка»;
+     подключено  → один разлёт кольца в момент прибытия, дальше тишина;
+     отключено   → без церемоний.
+
+   Работают только transform и opacity на псевдоэлементе, то есть слой уезжает
+   в композитор и layout не трогает. */
+.power-btn::after {
+  content: '';
+  position: absolute;
+  inset: -4px; /* по внешнему краю четырёхпиксельной рамки кнопки */
+  border-radius: 50%;
+  border: 2px solid var(--accent-color);
+  opacity: 0;
+  pointer-events: none;
 }
 
-.pulse-animation {
-  animation: pulse 2s infinite ease-in-out;
+.power-btn.connecting::after {
+  animation: power-reach 1.6s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.power-btn.arrived::after {
+  animation: power-arrive 620ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes power-reach {
+  0%   { opacity: 0.65; transform: scale(1); }
+  70%  { opacity: 0;    transform: scale(1.22); }
+  100% { opacity: 0;    transform: scale(1.22); }
+}
+
+@keyframes power-arrive {
+  from { opacity: 0.9; transform: scale(1); }
+  to   { opacity: 0;   transform: scale(1.3); }
 }
 
 .power-container {
@@ -238,7 +713,13 @@ main {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  /* Было `all 0.4s` с перелётом. Перечисление вместо all — чтобы переход не
+     цеплял свойства, которые меняются мгновенно; кривая — экспоненциальное
+     замедление вместо отскока: реальные предметы к покою приходят, а не
+     проскакивают его. */
+  transition: border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
 }
 
@@ -250,7 +731,7 @@ main {
 
 .power-btn.on {
   border-color: var(--accent-color);
-  box-shadow: 0 0 40px rgba(56, 189, 248, 0.3);
+  box-shadow: 0 0 40px rgb(var(--accent-rgb) / 0.3);
 }
 
 .power-btn.on svg {
@@ -259,32 +740,79 @@ main {
 
 .power-btn:active { transform: scale(0.95); }
 
+/* Кнопка питания и столбец карточек под ней — разные вещи, и расстояние это
+   говорит: между карточками 20px, до кнопки 30px. */
+.power-btn { margin-bottom: 10px; }
+
+/* Три блока «Главной» — сервер, передача данных, TUN-интерфейс — это одна
+   карточка в трёх экземплярах. Ширина, радиус, поверхность и отступ заданы
+   здесь один раз, поэтому столбец читается как столбец, а не как три случайно
+   оказавшихся рядом элемента.
+
+   Отступ был у каждого свой: 30px у сервера, 14px у таблицы трафика, 20px
+   инлайном у TUN. Теперь один — расстояние между карточками должно быть
+   расстоянием, а не тремя разными мнениями о нём. */
 .current-server-card {
   width: 100%;
   max-width: 400px;
-  background: var(--card-bg);
+  /* Стекло, а не сплошная заливка: карточка стоит на градиенте, и он должен
+     сквозь неё просвечивать — тогда экран читается как одна стена с
+     плавающими панелями. */
+  background: var(--glass-01);
   border: 1px solid var(--glass-border);
   border-radius: 16px;
   padding: 20px;
   display: flex;
   align-items: center;
   gap: 15px;
-  margin-top: 30px;
+  margin-top: 20px;
+}
+
+/* Карточка, у которой содержимое не строка, а шапка и блок под ней. */
+.card--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.card-head h3 {
+  font-size: var(--fs-subhead);
 }
 
 .server-icon {
   width: 40px;
   height: 40px;
-  background: rgba(56, 189, 248, 0.1);
+  background: var(--accent-tint);
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  /* Акцент, а не цвет текста: плитка уже стоит на подложке из акцента, и
+     рисунок принадлежит ей, а не строке рядом. */
+  color: var(--accent-color);
 }
 
-.server-info h3 { font-size: 16px; margin-bottom: 4px; }
-.server-info p { font-size: 12px; color: var(--text-dim); }
+/* Состояние TUN-интерфейса. Было двумя инлайновыми правками background из
+   renderer — и красило только подложку, оставляя рисунок акцентным поверх
+   красного. Классом красится и то и другое, разом и согласованно. */
+.server-icon--ok {
+  background: rgb(var(--success-rgb) / 0.12);
+  color: var(--success);
+}
+
+.server-icon--bad {
+  background: rgb(var(--danger-rgb) / 0.12);
+  color: var(--danger);
+}
+
+.server-info h3 { font-size: var(--fs-subhead); margin-bottom: 4px; }
+.server-info p { font-size: var(--fs-label); color: var(--text-dim); }
 
 .controls {
   margin-top: 40px;
@@ -293,21 +821,29 @@ main {
 }
 
 .btn-glass {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--glass-02);
   border: 1px solid var(--glass-border);
   color: var(--text-main);
   padding: 10px 20px;
   border-radius: 10px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--fs-body);
   transition: all 0.2s;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.btn-glass:hover { background: rgba(255, 255, 255, 0.1); }
+.btn-glass:hover { background: var(--glass-04); }
 .btn-glass:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Отклик на нажатие. Он был только у кнопки питания и у бегунка прокрутки, а
+   .btn-glass — самый частый элемент управления в приложении — отвечал на
+   нажатие ничем. Смещение на пиксель, без масштабирования: кнопки стоят в
+   рядах, и подпрыгивающая ширина ломала бы ряд. */
+.btn-glass:not(:disabled):active {
+  transform: translateY(1px);
+}
 
 /* Servers View */
 .server-grid {
@@ -318,7 +854,11 @@ main {
 }
 
 .server-card {
-  background: var(--card-bg);
+  /* Стекло, а не сплошная заливка: карточка стоит на градиенте, и он должен
+     сквозь неё просвечивать — тогда экран читается как одна стена с
+     плавающими панелями, а не как набор непрозрачных плашек. Та же
+     поверхность, что у таблицы «Передача данных». */
+  background: var(--glass-01);
   border: 1px solid var(--glass-border);
   border-radius: 12px;
   padding: 16px;
@@ -330,14 +870,55 @@ main {
 }
 
 .server-card:hover { border-color: var(--accent-color); transform: translateY(-2px); }
-.server-card.selected { border-color: var(--accent-color); background: rgba(56, 189, 248, 0.05); }
+.server-card.selected { border-color: var(--accent-color); background: var(--accent-wash); }
 
-.server-card .details { display: flex; align-items: center; gap: 12px; }
-.server-card .ping { font-size: 12px; color: var(--text-dim); }
+.server-card .details { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.server-card .ping { font-size: var(--fs-label); color: var(--text-dim); flex-shrink: 0; }
+
+/* Кликабельная часть карточки. Кнопка занимает всю карточку кроме звёздочки и
+   не имеет собственного вида: фон, рамку и отступы по-прежнему рисует
+   .server-card. */
+.server-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.server-card-main:focus-visible {
+  outline-offset: 4px;
+}
+
+.server-star {
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+/* Имя сервера приходит из подписки и длину не гарантирует: встречаются строки
+   с рекламой, эмодзи и полным адресом. Без обрезки такая карточка растягивала
+   колонку сетки и ломала ряд. */
+.server-card .details > div { min-width: 0; }
+.server-card .details h4 { min-width: 0; }
+
+.server-name-text,
+.server-card .details p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .protocol-tag {
-  font-size: 10px;
-  background: rgba(56, 189, 248, 0.15);
+  font-size: var(--fs-micro);
+  background: var(--accent-fill);
   color: var(--accent-color);
   padding: 2px 6px;
   border-radius: 4px;
@@ -350,27 +931,32 @@ main {
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+::-webkit-scrollbar-thumb { background: var(--glass-04); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: var(--glass-06); }
 
 /* Settings Form */
 .form-group { margin-bottom: 20px; }
-.form-group label { display: block; margin-bottom: 8px; font-size: 14px; color: var(--text-dim); }
+.form-group label { display: block; margin-bottom: 8px; font-size: var(--fs-body); color: var(--text-dim); }
 input[type="text"], select, textarea {
   width: 100%;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--glass-02);
   border: 1px solid var(--glass-border);
   padding: 12px;
   border-radius: 10px;
   color: var(--text-main);
   outline: none;
   transition: all 0.2s;
-  font-size: 14px;
+  font-size: var(--fs-body);
 }
 
 select {
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  /* Шеврон живёт в токене, а не здесь. Цвет внутри data-URI подставить
+     переменной нельзя — фоновая картинка не наследует currentColor, — а он
+     единственный во всём файле цвет, который иначе не подчинялся бы теме:
+     на светлом фоне серая стрелка осталась бы серой. Токен собирает движок
+     тем, вписывая в него цвет --text-faint. */
+  background-image: var(--select-chevron);
   background-repeat: no-repeat;
   background-position: right 10px center;
   background-size: 16px;
@@ -384,60 +970,29 @@ option {
 
 input[type="text"]:focus, select:focus, textarea:focus {
   border-color: var(--accent-color);
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 0 15px rgba(56, 189, 248, 0.1);
+  background: var(--glass-03);
+  box-shadow: 0 0 15px var(--accent-tint);
 }
-
-.log-panel {
-  position: fixed;
-  bottom: 0;
-  right: 0;
-  width: 350px;
-  height: 200px;
-  background: rgba(0, 0, 0, 0.8);
-  border-top: 1px solid var(--glass-border);
-  border-left: 1px solid var(--glass-border);
-  padding: 10px;
-  font-family: monospace;
-  font-size: 11px;
-  color: #a6e3a1;
-  overflow-y: auto;
-  display: none;
-}
-
-.terminal-view {
-  width: 100%;
-  height: calc(100vh - 150px);
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid var(--glass-border);
-  border-radius: 12px;
-  padding: 15px;
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #a6e3a1;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
 
 .log-viewer {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: rgba(22, 27, 44, 0.4);
+  background: rgb(var(--panel-rgb) / 0.4);
   border: 1px solid var(--glass-border);
-  color: #e2e8f0;
-  font-family: 'Consolas', 'Courier New', monospace;
+  /* Был отдельный почти-белый #e2e8f0, хотя сами строки красит --log-msg, а
+     наследованный цвет доставался только неразмеченному тексту. Второй
+     почти-белый роли не нёс. */
+  color: var(--log-msg);
+  font-family: var(--font-mono);
   border-radius: 16px;
   overflow: hidden;
-  box-shadow: inset 0 4px 30px rgba(0, 0, 0, 0.2);
+  box-shadow: inset 0 4px 30px rgb(var(--shadow-rgb) / 0.2);
 }
 
 .log-tabs {
   display: flex;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--glass-01);
   border-bottom: 1px solid var(--glass-border);
   padding: 5px;
   gap: 5px;
@@ -450,30 +1005,31 @@ input[type="text"]:focus, select:focus, textarea:focus {
   color: var(--text-dim);
   padding: 8px 0;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--fs-body);
   font-weight: 600;
   border-radius: 8px;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  outline: none;
+  /* outline здесь больше не гасится: это настоящая кнопка, она получает фокус,
+     и без кольца было не видно, где он находится. */
 }
 
 .log-tab:hover {
   color: var(--text-main);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--glass-02);
 }
 
 .log-tab.active {
-  color: #000;
+  color: var(--on-accent);
   background: var(--accent-color);
   font-weight: 700;
-  box-shadow: 0 4px 15px rgba(56, 189, 248, 0.2);
+  box-shadow: 0 4px 15px var(--accent-edge);
 }
 
 .log-output {
   flex: 1;
   overflow-y: auto;
   padding: 15px;
-  font-size: 12px;
+  font-size: var(--fs-label);
   line-height: 1.6;
   scroll-behavior: smooth; 
   height: 500px; /* fallback height */
@@ -486,11 +1042,11 @@ input[type="text"]:focus, select:focus, textarea:focus {
   background: transparent;
 }
 .log-output::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--glass-04);
   border-radius: 10px;
 }
 .log-output::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--glass-06);
 }
 
 .log-line {
@@ -502,8 +1058,8 @@ input[type="text"]:focus, select:focus, textarea:focus {
   white-space: pre-wrap;
   margin-bottom: 6px;
   padding-bottom: 6px;
-  border-bottom: 1px dashed rgba(255, 255, 255, 0.03);
-  font-family: 'Consolas', 'Fira Code', monospace;
+  border-bottom: 1px dashed var(--glass-01);
+  font-family: var(--font-mono);
 }
 .log-line:last-child {
   border-bottom: none;
@@ -511,12 +1067,17 @@ input[type="text"]:focus, select:focus, textarea:focus {
 
 /* Badges and Log Parts */
 .log-time {
-  color: #64748b;
+  color: var(--text-faint);
   font-weight: 500;
 }
 
 .log-badge {
-  font-size: 9px;
+  /* Тёмная основа под цветной заливкой. Без неё чип прозрачен насквозь, и на
+     ярком крае градиента текст на нём терял контраст: у danger было 3.35:1,
+     у debug 2.99:1. Оттенок каждый модификатор кладёт сверху через
+     background-image, поэтому эта строка их не перебивает. */
+  background-color: var(--chip-base);
+  font-size: var(--fs-micro);
   font-weight: 700;
   padding: 2px 8px;
   border-radius: 20px;
@@ -527,77 +1088,77 @@ input[type="text"]:focus, select:focus, textarea:focus {
 }
 
 .badge-info {
-  background: rgba(56, 189, 248, 0.1);
-  color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.2);
+  background-image: linear-gradient(var(--accent-tint), var(--accent-tint));
+  color: var(--accent-color);
+  border: 1px solid var(--accent-edge);
 }
 
 .badge-debug {
-  background: rgba(168, 85, 247, 0.1);
-  color: #a855f7;
-  border: 1px solid rgba(168, 85, 247, 0.2);
+  background-image: linear-gradient(rgb(var(--debug-rgb) / 0.12), rgb(var(--debug-rgb) / 0.12));
+  color: var(--debug);
+  border: 1px solid rgb(var(--debug-rgb) / 0.25);
 }
 
 .badge-warn {
-  background: rgba(234, 179, 8, 0.1);
-  color: #eab308;
-  border: 1px solid rgba(234, 179, 8, 0.2);
+  background-image: linear-gradient(rgb(var(--warning-rgb) / 0.12), rgb(var(--warning-rgb) / 0.12));
+  color: var(--warning);
+  border: 1px solid rgb(var(--warning-rgb) / 0.25);
 }
 
 .badge-error {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  background-image: linear-gradient(rgb(var(--danger-rgb) / 0.12), rgb(var(--danger-rgb) / 0.12));
+  color: var(--danger);
+  border: 1px solid rgb(var(--danger-rgb) / 0.25);
   font-weight: 800;
 }
 
 .badge-success {
-  background: rgba(34, 197, 94, 0.1);
-  color: #22c55e;
-  border: 1px solid rgba(34, 197, 94, 0.2);
+  background-image: linear-gradient(rgb(var(--success-rgb) / 0.12), rgb(var(--success-rgb) / 0.12));
+  color: var(--success);
+  border: 1px solid rgb(var(--success-rgb) / 0.25);
 }
 
 .log-context {
-  color: #94a3b8;
-  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-dim);
+  background: var(--glass-01);
   padding: 1px 6px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: var(--fs-micro);
 }
 
 .log-msg {
-  color: #cbd5e1;
+  color: var(--log-msg);
   flex: 1;
   min-width: 250px;
 }
 
 .log-domain {
-  color: #38bdf8;
+  color: var(--accent-color);
   font-weight: 600;
 }
 
 .log-component {
-  color: #f472b6;
+  color: var(--log-component);
   font-weight: 500;
 }
 
 .log-status-success {
-  color: #22c55e;
+  color: var(--success);
   font-weight: 600;
 }
 
 .log-status-warn {
-  color: #fbbf24;
+  color: var(--warning);
   font-weight: 600;
 }
 
 .log-status-error {
-  color: #f87171;
+  color: var(--danger);
   font-weight: 700;
 }
 
 .log-status-dim {
-  color: #64748b;
+  color: var(--text-faint);
   font-style: italic;
 }
 
@@ -617,7 +1178,7 @@ input[type="text"]:focus, select:focus, textarea:focus {
   padding: 5px;
   min-width: 160px;
   z-index: 500;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+  box-shadow: 0 10px 25px rgb(var(--shadow-rgb) / 0.5);
   margin-top: 5px;
   
   /* Анимация появления/исчезновения */
@@ -634,22 +1195,48 @@ input[type="text"]:focus, select:focus, textarea:focus {
   pointer-events: auto;
 }
 
+/* Меню открывалось только по наведению мыши. Фокус внутри группы держит его
+   открытым, поэтому пройти по пунктам с клавиатуры теперь можно, и меню не
+   схлопывается под руками на первом же Tab. */
+.sort-dropdown:focus-within .sort-menu {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
 .sort-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
   padding: 8px 12px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
+/* Иконка тусклее подписи, пока пункт не выбран: в меню читают слова, а рисунок
+   помогает найти строку взглядом, а не перебивает её. У активного и у пункта
+   под курсором цвет наследуется от самого пункта. */
+.sort-item svg {
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+
+.sort-item:hover svg,
+.sort-item.active svg {
+  color: inherit;
+}
+
 .sort-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--glass-02);
   color: var(--accent-color);
 }
 
 .sort-item.active {
   color: var(--accent-color);
-  background: rgba(56, 189, 248, 0.1);
+  background: var(--accent-tint);
 }
 
 /* Modal Overlay */
@@ -659,7 +1246,7 @@ input[type="text"]:focus, select:focus, textarea:focus {
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgb(var(--shadow-rgb) / 0.6);
   backdrop-filter: blur(8px);
   display: none;
   align-items: center;
@@ -669,18 +1256,20 @@ input[type="text"]:focus, select:focus, textarea:focus {
 }
 
 .modal-content {
+  /* Здесь, в отличие от карточек, заливка сплошная: модалка обязана
+     отделяться от страницы под собой, а не показывать её сквозь себя. */
   background: var(--card-bg);
   border: 1px solid var(--glass-border);
   padding: 30px;
   border-radius: 20px;
   width: 90%;
   max-width: 400px;
-  box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+  box-shadow: 0 20px 50px rgb(var(--shadow-rgb) / 0.5);
 }
 
 .modal-content h3 {
   margin-bottom: 20px;
-  font-size: 18px;
+  font-size: var(--fs-heading);
 }
 
 .modal-content input {
@@ -696,7 +1285,7 @@ input[type="text"]:focus, select:focus, textarea:focus {
 /* Drag and Drop Tabs reordering */
 .btn-glass.dragging {
   border: 1px dashed var(--accent-color) !important;
-  background: rgba(56, 189, 248, 0.05) !important;
+  background: var(--accent-wash) !important;
   transform: scale(0.95);
   transition: transform 0.2s ease, opacity 0.2s ease;
 }
@@ -721,10 +1310,10 @@ input[type="text"]:focus, select:focus, textarea:focus {
 
 /* При наведении на саму область скролла */
 .custom-scroll-widget:hover {
-  background: rgba(11, 15, 25, 0.7);
+  background: rgb(var(--bg-rgb) / 0.7);
   backdrop-filter: blur(12px);
   border-left: 1px solid var(--glass-border);
-  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+  box-shadow: -10px 0 30px rgb(var(--shadow-rgb) / 0.5);
   width: 48px;
 }
 
@@ -743,7 +1332,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--glass-01);
   border: 1px solid var(--glass-border);
   display: flex;
   align-items: center;
@@ -762,7 +1351,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 
 .scroll-arrow:hover {
   background: var(--accent-color);
-  color: #000 !important;
+  color: var(--on-accent) !important;
   box-shadow: 0 0 12px var(--accent-color);
   transform: scale(1.1);
   opacity: 1 !important;
@@ -779,7 +1368,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 .scroll-track {
   flex: 1;
   width: 4px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--glass-02);
   border-radius: 4px;
   position: relative;
   cursor: pointer;
@@ -789,7 +1378,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 
 .custom-scroll-widget:hover .scroll-track {
   width: 8px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--glass-04);
 }
 
 /* Бегунок скроллбара */
@@ -799,20 +1388,23 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   left: 0;
   width: 100%;
   height: 60px; /* Будет вычисляться динамически в JS */
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--glass-05);
   border-radius: 6px;
   cursor: grab;
-  transition: background 0.2s, box-shadow 0.2s, width 0.3s;
+  /* width из перехода убран: ширина бегунка фиксирована (100% дорожки), JS
+     задаёт только height и transform. Переход анимировал свойство, которое
+     никогда не менялось. */
+  transition: background 0.2s, box-shadow 0.2s;
 }
 
 /* Показываем бегунок ярче при наведении на виджет */
 .custom-scroll-widget:hover .scroll-thumb {
-  background: linear-gradient(to bottom, var(--accent-color), #0ea5e9);
-  box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+  background: linear-gradient(to bottom, var(--accent-color), var(--accent-deep));
+  box-shadow: 0 0 10px rgb(var(--accent-rgb) / 0.4);
 }
 
 .scroll-thumb:hover {
-  background: linear-gradient(to bottom, var(--accent-color), #38bdf8) !important;
+  background: var(--accent-color) !important;
   box-shadow: 0 0 15px var(--accent-color) !important;
 }
 
@@ -822,97 +1414,6 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   box-shadow: 0 0 20px var(--text-main) !important;
 }
 
-/* Спидометр на главной странице */
-.speedometer-container {
-  display: flex;
-  justify-content: space-between;
-  gap: 15px;
-  width: 100%;
-  max-width: 360px;
-  margin: 15px auto 10px auto;
-  animation: fadeInSpeed 0.3s ease-out;
-}
-
-.speedometer-total-container {
-  display: flex;
-  width: 100%;
-  max-width: 360px;
-  margin: 0 auto 15px auto;
-  animation: fadeInSpeed 0.35s ease-out;
-}
-
-.speedometer-total-container .speed-badge.total {
-  width: 100%;
-  justify-content: flex-start;
-}
-
-@keyframes fadeInSpeed {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.speed-badge {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 15px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--glass-border);
-  border-radius: 12px;
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s ease;
-}
-
-.speed-badge:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.2);
-  transform: translateY(-2px);
-}
-
-.speed-icon {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  transition: transform 0.2s ease;
-}
-
-.speed-badge.download .speed-icon,
-.speed-badge.download .speed-value {
-  color: #10B981; /* Зелёный (Загрузка) */
-}
-
-.speed-badge.upload .speed-icon,
-.speed-badge.upload .speed-value {
-  color: #C084FC; /* Фиолетовый (Выгрузка) */
-}
-
-.speed-badge.total .speed-icon,
-.speed-badge.total .speed-value {
-  color: var(--accent-color); /* Голубой (Общий трафик) */
-}
-
-.speed-info {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  overflow: hidden;
-}
-
-.speed-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  opacity: 0.5;
-  margin-bottom: 2px;
-}
-
-.speed-value {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-  white-space: nowrap;
-}
 
 /* Custom Alert / Error Modal Styles */
 .alert-modal-overlay {
@@ -920,16 +1421,16 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .alert-modal-content {
-  background: rgba(22, 27, 44, 0.7) !important;
+  background: rgb(var(--panel-rgb) / 0.7) !important;
   backdrop-filter: blur(20px);
   border: 1px solid var(--glass-border);
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(56, 189, 248, 0.1);
+  box-shadow: 0 25px 60px rgb(var(--shadow-rgb) / 0.6), 0 0 40px var(--accent-tint);
   max-width: 480px !important;
   text-align: center;
   position: relative;
   overflow: hidden;
-  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  animation: modalScaleUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: modalScaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @keyframes modalScaleUp {
@@ -938,30 +1439,30 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 #alertOverlay.error-mode .alert-modal-content {
-  border-color: rgba(239, 68, 68, 0.3);
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 50px rgba(239, 68, 68, 0.15);
+  border-color: rgb(var(--danger-rgb) / 0.3);
+  box-shadow: 0 25px 60px rgb(var(--shadow-rgb) / 0.6), 0 0 50px rgb(var(--danger-rgb) / 0.15);
 }
 
 .alert-icon-container {
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: rgba(56, 189, 248, 0.15);
+  background: var(--accent-fill);
   color: var(--accent-color);
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0 auto 20px auto;
-  border: 1px solid rgba(56, 189, 248, 0.2);
-  box-shadow: 0 0 20px rgba(56, 189, 248, 0.1);
+  border: 1px solid var(--accent-edge);
+  box-shadow: 0 0 20px var(--accent-tint);
   transition: all 0.3s ease;
 }
 
 .alert-icon-container.error {
-  background: rgba(239, 68, 68, 0.15);
+  background: rgb(var(--danger-rgb) / 0.15);
   color: var(--danger);
-  border-color: rgba(239, 68, 68, 0.25);
-  box-shadow: 0 0 20px rgba(239, 68, 68, 0.25);
+  border-color: rgb(var(--danger-rgb) / 0.25);
+  box-shadow: 0 0 20px rgb(var(--danger-rgb) / 0.25);
 }
 
 .alert-svg {
@@ -970,7 +1471,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 #alertTitleText {
-  font-size: 20px;
+  font-size: var(--fs-heading);
   font-weight: 700;
   margin-bottom: 12px;
   letter-spacing: 0.5px;
@@ -978,11 +1479,11 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 
 #alertOverlay.error-mode #alertTitleText {
   color: var(--danger);
-  text-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
+  text-shadow: 0 0 10px rgb(var(--danger-rgb) / 0.2);
 }
 
 .alert-message-content {
-  font-size: 14px;
+  font-size: var(--fs-body);
   color: var(--text-main);
   line-height: 1.6;
   margin-bottom: 16px;
@@ -991,23 +1492,23 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 
 #errorTerminalContainer {
   width: 100%;
-  background: rgba(0, 0, 0, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgb(var(--shadow-rgb) / 0.45);
+  border: 1px solid var(--glass-02);
   border-radius: 12px;
   padding: 12px;
   margin: 15px 0;
   text-align: left;
-  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.8);
+  box-shadow: inset 0 0 10px rgb(var(--shadow-rgb) / 0.8);
 }
 
 #alertOverlay.error-mode #errorTerminalContainer {
-  border-color: rgba(239, 68, 68, 0.2);
+  border-color: rgb(var(--danger-rgb) / 0.2);
 }
 
 #errorTerminalText {
-  font-family: 'Consolas', 'Courier New', monospace;
-  font-size: 12px;
-  color: #cc666e;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--danger);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
@@ -1024,20 +1525,20 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   background: transparent;
 }
 #errorTerminalText::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--glass-05);
   border-radius: 4px;
 }
 #errorTerminalText::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--glass-06);
 }
 
 /* Update Modal Custom Styles */
 .update-modal-content {
   max-width: 480px !important;
-  background: radial-gradient(circle at top left, var(--card-bg), #0f1322) !important;
-  border: 1px solid rgba(56, 189, 248, 0.2) !important;
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(56, 189, 248, 0.05) !important;
-  animation: modalScaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+  background: radial-gradient(circle at top left, var(--card-bg), var(--panel-deep)) !important;
+  border: 1px solid var(--accent-edge) !important;
+  box-shadow: 0 25px 60px rgb(var(--shadow-rgb) / 0.6), 0 0 40px var(--accent-wash) !important;
+  animation: modalScaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
   padding: 32px !important;
 }
 
@@ -1054,15 +1555,21 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .update-icon-wrapper {
-  background: rgba(56, 189, 248, 0.1);
-  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: var(--accent-tint);
+  border: 1px solid rgb(var(--accent-rgb) / 0.3);
   color: var(--accent-color);
   padding: 12px;
   border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 15px rgba(56, 189, 248, 0.15);
+  box-shadow: 0 0 15px var(--accent-fill);
+}
+
+/* Иконка крутилась всё время, пока открыто окно обновления, — то есть и тогда,
+   когда приложение всего лишь спрашивает разрешения и ничего не делает.
+   Вращение оставлено там, где оно что-то означает: во время самой загрузки. */
+.update-modal-content.downloading .update-icon-wrapper {
   animation: updateSpin 3s linear infinite;
 }
 
@@ -1080,15 +1587,15 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 
 .update-title-area h3 {
   margin: 0 !important;
-  font-size: 20px !important;
+  font-size: var(--fs-heading) !important;
   font-weight: 700 !important;
   letter-spacing: -0.5px;
 }
 
 .update-badge {
   background: var(--accent-color);
-  color: #0b0f19;
-  font-size: 11px;
+  color: var(--bg-color);
+  font-size: var(--fs-micro);
   font-weight: 800;
   padding: 2px 8px;
   border-radius: 20px;
@@ -1102,7 +1609,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .update-changelog-title {
-  font-size: 13px;
+  font-size: var(--fs-label);
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -1111,13 +1618,13 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .update-changelog {
-  background: rgba(0, 0, 0, 0.25);
+  background: rgb(var(--shadow-rgb) / 0.25);
   border: 1px solid var(--glass-border);
   border-radius: 12px;
   padding: 16px;
   max-height: 180px;
   overflow-y: auto;
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.6;
   color: var(--text-main);
   white-space: pre-wrap;
@@ -1132,15 +1639,15 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   background: transparent;
 }
 .update-changelog::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--glass-04);
   border-radius: 3px;
 }
 .update-changelog::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--glass-06);
 }
 
 .update-progress-section {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--glass-01);
   border: 1px solid var(--glass-border);
   border-radius: 12px;
   padding: 16px;
@@ -1151,7 +1658,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 .progress-info {
   display: flex;
   justify-content: space-between;
-  font-size: 13px;
+  font-size: var(--fs-label);
   margin-bottom: 8px;
 }
 
@@ -1165,92 +1672,43 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .progress-bar-container {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--glass-02);
   height: 8px;
   border-radius: 4px;
   overflow: hidden;
   position: relative;
 }
 
+/* Полоса скачивания обновления.
+   Заполнение задаётся scaleX, а не width: прогресс приходит частыми тиками, и
+   каждая правка width — это пересчёт раскладки, тогда как transform уходит в
+   композитор. Ширина фиксирована в 100%, масштаб растёт от левого края. */
 .progress-bar {
-  background: linear-gradient(90deg, #38bdf8, #0ea5e9);
+  background: linear-gradient(90deg, var(--accent-color), var(--accent-deep));
   height: 100%;
+  width: 100%;
   border-radius: 4px;
-  transition: width 0.1s ease;
-  box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.1s linear;
+  box-shadow: 0 0 10px rgb(var(--accent-rgb) / 0.5);
 }
 
 .btn-primary-premium {
   background: var(--accent-color) !important;
-  color: #0b0f19 !important;
+  color: var(--bg-color) !important;
   border: none !important;
   font-weight: bold !important;
-  box-shadow: 0 4px 15px rgba(56, 189, 248, 0.3) !important;
+  box-shadow: 0 4px 15px rgb(var(--accent-rgb) / 0.3) !important;
 }
 
 .btn-primary-premium:hover {
-  background: #7dd3fc !important;
-  box-shadow: 0 4px 20px rgba(56, 189, 248, 0.5) !important;
+  background: var(--accent-soft) !important;
+  box-shadow: 0 4px 20px rgb(var(--accent-rgb) / 0.5) !important;
   transform: translateY(-1px);
 }
 
 
-/* ── Session Total Traffic (chevron widget) ─────────────────────────────────── */
-.session-total-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0;
-  width: 100%;
-  max-width: 360px;
-  margin: 0 auto;
-  animation: fadeInSpeed 0.35s ease-out;
-}
-
-.session-chevron {
-  color: var(--text-dim);
-  opacity: 0.45;
-  line-height: 1;
-  margin-bottom: -2px;
-}
-
-.session-total-badge {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  background: rgba(255,255,255,0.02);
-  border: 1px solid var(--glass-border);
-  border-radius: 12px;
-  padding: 10px 18px;
-  transition: all 0.25s ease;
-}
-
-.session-total-badge:hover {
-  background: rgba(255,255,255,0.04);
-  border-color: rgba(255,255,255,0.18);
-}
-
-.session-total-label {
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--text-dim);
-  opacity: 0.7;
-}
-
-.session-total-values {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.session-down { color: #10B981; }
-.session-up   { color: #C084FC; }
-.session-sep  { color: var(--text-dim); opacity: 0.4; }
 
 /* ── History Tab ────────────────────────────────────────────────────────────── */
 .history-stats-row {
@@ -1261,7 +1719,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .history-stat-card {
-  background: rgba(255,255,255,0.03);
+  background: var(--glass-01);
   border: 1px solid var(--glass-border);
   border-radius: 14px;
   padding: 16px 12px;
@@ -1272,15 +1730,17 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .history-stat-card:hover {
-  background: rgba(255,255,255,0.06);
-  border-color: rgba(255,255,255,0.2);
+  background: var(--glass-02);
+  border-color: var(--glass-06);
   transform: translateY(-2px);
 }
 
 .history-stat-icon {
-  font-size: 22px;
-  line-height: 1;
+  display: flex;
   flex-shrink: 0;
+  /* Иконка сводки подчинена числу рядом и берёт его цвет: она подписывает
+     величину, а не спорит с ней за внимание. */
+  color: var(--text-faint);
 }
 
 .history-stat-info {
@@ -1290,14 +1750,14 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .history-stat-value {
-  font-size: 16px;
+  font-size: var(--fs-subhead);
   font-weight: 700;
   color: var(--accent-color);
   line-height: 1.2;
 }
 
 .history-stat-label {
-  font-size: 10px;
+  font-size: var(--fs-micro);
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.4px;
@@ -1310,7 +1770,11 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .history-card {
-  background: var(--card-bg);
+  /* Стекло, а не сплошная заливка: карточка стоит на градиенте, и он должен
+     сквозь неё просвечивать — тогда экран читается как одна стена с
+     плавающими панелями, а не как набор непрозрачных плашек. Та же
+     поверхность, что у таблицы «Передача данных». */
+  background: var(--glass-01);
   border: 1px solid var(--glass-border);
   border-radius: 14px;
   padding: 16px 20px;
@@ -1322,8 +1786,8 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .history-card:hover {
-  border-color: rgba(56,189,248,0.3);
-  background: rgba(56,189,248,0.03);
+  border-color: rgb(var(--accent-rgb) / 0.3);
+  background: rgb(var(--accent-rgb) / 0.03);
   transform: translateX(3px);
 }
 
@@ -1331,12 +1795,14 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  background: rgba(56,189,248,0.1);
-  border: 1px solid rgba(56,189,248,0.15);
+  background: var(--accent-tint);
+  border: 1px solid var(--accent-fill);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  /* Кегль задавал размер эмодзи-глифа; теперь внутри рисунок со своими
+     размерами, а цвет он берёт отсюда — как у .server-icon. */
+  color: var(--accent-color);
   flex-shrink: 0;
   position: relative;
   transition: all 0.2s ease;
@@ -1344,24 +1810,24 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 
 .history-card-icon:hover {
   cursor: pointer;
-  background: rgba(56, 189, 248, 0.15);
-  border-color: rgba(56, 189, 248, 0.4);
+  background: var(--accent-fill);
+  border-color: rgb(var(--accent-rgb) / 0.4);
   color: var(--accent-color);
   transform: scale(1.05);
 }
 
 .history-card-icon.youtube-easter-egg:hover {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.4);
+  background: rgb(var(--danger-rgb) / 0.15);
+  border-color: rgb(var(--danger-rgb) / 0.4);
 }
 
-.history-icon-emoji {
+.history-icon-mark {
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.history-card-icon:hover .history-icon-emoji {
+.history-card-icon:hover .history-icon-mark {
   display: none;
 }
 
@@ -1391,7 +1857,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .history-card-server {
-  font-size: 14px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text-main);
   white-space: nowrap;
@@ -1407,7 +1873,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .history-meta-item {
-  font-size: 11px;
+  font-size: var(--fs-micro);
   color: var(--text-dim);
   display: flex;
   align-items: center;
@@ -1423,17 +1889,21 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .history-traffic-down {
-  font-size: 11px;
+  font-size: var(--fs-micro);
   font-weight: 600;
-  color: #10B981;
+  color: var(--traffic-down);
 }
 
 .history-traffic-up {
-  font-size: 11px;
+  font-size: var(--fs-micro);
   font-weight: 600;
-  color: #C084FC;
+  color: var(--traffic-up);
 }
 
+/* Общий вид пустого состояния. Раньше правило было только у «Истории»; теперь
+   тем же классом пользуется и список серверов, чтобы два пустых экрана в одном
+   приложении не выглядели по-разному. */
+.empty-state,
 .history-empty {
   display: flex;
   flex-direction: column;
@@ -1447,9 +1917,9 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 /* ── DNS Leak Modal ──────────────────────────────────────────────────────────── */
 .dns-leak-modal {
   max-width: 460px !important;
-  background: radial-gradient(circle at top left, var(--card-bg), #0f1322) !important;
-  border: 1px solid rgba(56,189,248,0.2) !important;
-  animation: modalScaleUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+  background: radial-gradient(circle at top left, var(--card-bg), var(--panel-deep)) !important;
+  border: 1px solid var(--accent-edge) !important;
+  animation: modalScaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
 .dns-leak-header {
@@ -1463,29 +1933,29 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   width: 52px;
   height: 52px;
   border-radius: 14px;
-  background: rgba(56,189,248,0.1);
-  border: 1px solid rgba(56,189,248,0.25);
+  background: var(--accent-tint);
+  border: 1px solid rgb(var(--accent-rgb) / 0.25);
   color: var(--accent-color);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   transition: all 0.4s ease;
-  box-shadow: 0 0 20px rgba(56,189,248,0.1);
+  box-shadow: 0 0 20px var(--accent-tint);
 }
 
 .dns-leak-icon-wrap.leak {
-  background: rgba(239,68,68,0.12);
-  border-color: rgba(239,68,68,0.3);
+  background: rgb(var(--danger-rgb) / 0.12);
+  border-color: rgb(var(--danger-rgb) / 0.3);
   color: var(--danger);
-  box-shadow: 0 0 20px rgba(239,68,68,0.15);
+  box-shadow: 0 0 20px rgb(var(--danger-rgb) / 0.15);
 }
 
 .dns-leak-icon-wrap.safe {
-  background: rgba(34,197,94,0.12);
-  border-color: rgba(34,197,94,0.3);
+  background: rgb(var(--success-rgb) / 0.12);
+  border-color: rgb(var(--success-rgb) / 0.3);
   color: var(--success);
-  box-shadow: 0 0 20px rgba(34,197,94,0.15);
+  box-shadow: 0 0 20px rgb(var(--success-rgb) / 0.15);
 }
 
 .dns-leak-loading {
@@ -1499,7 +1969,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 .dns-leak-spinner {
   width: 36px;
   height: 36px;
-  border: 3px solid rgba(56,189,248,0.15);
+  border: 3px solid var(--accent-fill);
   border-top-color: var(--accent-color);
   border-radius: 50%;
   animation: spinLoader 0.8s linear infinite;
@@ -1509,24 +1979,31 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   to { transform: rotate(360deg); }
 }
 
+/* Рисунок исхода проверки. Флекс, чтобы он стоял по центру строки, а не на
+   базовой линии текста, как стоял бы глиф. */
+#dnsLeakStatusIcon {
+  display: flex;
+  flex-shrink: 0;
+}
+
 .dns-leak-status-banner {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 12px 18px;
   border-radius: 12px;
-  font-size: 15px;
+  font-size: var(--fs-subhead);
   font-weight: 700;
   margin-bottom: 20px;
-  background: rgba(34,197,94,0.1);
-  border: 1px solid rgba(34,197,94,0.25);
+  background: rgb(var(--success-rgb) / 0.1);
+  border: 1px solid rgb(var(--success-rgb) / 0.25);
   color: var(--success);
   animation: fadeIn 0.3s ease;
 }
 
 .dns-leak-status-banner.leak {
-  background: rgba(239,68,68,0.1);
-  border-color: rgba(239,68,68,0.25);
+  background: rgb(var(--danger-rgb) / 0.1);
+  border-color: rgb(var(--danger-rgb) / 0.25);
   color: var(--danger);
 }
 
@@ -1537,7 +2014,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .dns-leak-info-item {
-  background: rgba(255,255,255,0.03);
+  background: var(--glass-01);
   border: 1px solid var(--glass-border);
   border-radius: 10px;
   padding: 12px 16px;
@@ -1545,7 +2022,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 
 .dns-leak-info-label {
   display: block;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.6px;
   color: var(--text-dim);
@@ -1553,10 +2030,10 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .dns-leak-info-value {
-  font-size: 14px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--accent-color);
-  font-family: 'Consolas', monospace;
+  font-family: var(--font-mono);
 }
 
 .dns-leak-dns-list {
@@ -1566,168 +2043,13 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .dns-leak-dns-entry {
-  font-size: 13px;
+  font-size: var(--fs-label);
   font-weight: 600;
   color: var(--text-main);
-  font-family: 'Consolas', monospace;
+  font-family: var(--font-mono);
   padding: 3px 0;
 }
 
-/* ── Игровой Спидометр Трафика (Traffic Game Launcher Style) ───────────────── */
-.traffic-game-container {
-  display: flex;
-  width: 100%;
-  max-width: 360px;
-  margin: 15px auto 5px auto;
-  animation: fadeInSpeed 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.traffic-game-card {
-  width: 100%;
-  background: rgba(10, 15, 30, 0.35);
-  border: 1px solid rgba(56, 189, 248, 0.15);
-  border-radius: 16px;
-  padding: 15px 18px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4),
-              inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  transition: all 0.3s ease;
-  overflow: hidden;
-  position: relative;
-}
-
-.traffic-game-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--accent-color), transparent);
-  opacity: 0.5;
-}
-
-.traffic-game-card:hover {
-  border-color: rgba(56, 189, 248, 0.3);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5),
-              0 0 15px rgba(56, 189, 248, 0.1),
-              inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  transform: translateY(-2px);
-}
-
-.traffic-game-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.traffic-game-title {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  color: var(--text-dim);
-  opacity: 0.85;
-}
-
-.traffic-game-ratio {
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--accent-color);
-  font-family: 'Courier New', monospace;
-  text-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
-}
-
-.traffic-game-progress-bar {
-  width: 100%;
-  height: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 4px;
-  overflow: hidden;
-  margin-bottom: 12px;
-  position: relative;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6);
-}
-
-.traffic-game-progress-fill {
-  height: 100%;
-  width: 0%;
-  background: linear-gradient(90deg, #10B981, var(--accent-color), #C084FC);
-  border-radius: 3px;
-  position: relative;
-  transition: width 0.4s cubic-bezier(0.1, 0.8, 0.3, 1);
-  box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
-}
-
-.traffic-game-progress-glow {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.4) 50%,
-    rgba(255, 255, 255, 0) 100%
-  );
-  background-size: 200% 100%;
-  animation: progressShimmer 1.8s infinite linear;
-}
-
-@keyframes progressShimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
-.traffic-game-stats {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-
-.traffic-stat-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.traffic-stat-label {
-  font-size: 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--text-dim);
-  opacity: 0.6;
-  margin-bottom: 3px;
-}
-
-.traffic-stat-val {
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.traffic-stat-val.down {
-  color: #10B981;
-}
-
-.traffic-stat-val.up {
-  color: #C084FC;
-}
-
-.traffic-stat-val.limit {
-  color: var(--text-main);
-  opacity: 0.9;
-}
-
-.traffic-stat-divider {
-  width: 1px;
-  height: 20px;
-  background: rgba(255, 255, 255, 0.08);
-}
 
 /* Custom Select Dropdown Styling */
 .custom-select-wrapper {
@@ -1740,12 +2062,12 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   justify-content: space-between;
   align-items: center;
   width: 100%;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--glass-02);
   border: 1px solid var(--glass-border);
   padding: 12px;
   border-radius: 10px;
   color: var(--text-main);
-  font-size: 14px;
+  font-size: var(--fs-body);
   cursor: pointer;
   transition: all 0.2s;
   user-select: none;
@@ -1769,7 +2091,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 
 .custom-select-wrapper.open .custom-select-trigger {
   border-color: var(--accent-color);
-  box-shadow: 0 0 15px rgba(56, 189, 248, 0.1);
+  box-shadow: 0 0 15px var(--accent-tint);
 }
 
 .custom-select-options {
@@ -1777,7 +2099,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   top: calc(100% + 5px);
   left: 0;
   right: 0;
-  background: rgba(22, 27, 44, 0.95);
+  background: rgb(var(--panel-rgb) / 0.95);
   backdrop-filter: blur(15px);
   border: 1px solid var(--glass-border);
   border-radius: 10px;
@@ -1788,7 +2110,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   visibility: hidden;
   transform: translateY(-10px);
   transition: all 0.2s ease-in-out;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 10px 25px rgb(var(--shadow-rgb) / 0.3);
 }
 
 .custom-select-wrapper.open .custom-select-options {
@@ -1800,18 +2122,1682 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 .custom-select-option {
   padding: 10px 12px;
   color: var(--text-main);
-  font-size: 14px;
+  font-size: var(--fs-body);
   cursor: pointer;
   transition: background 0.2s;
 }
 
 .custom-select-option:hover {
-  background: rgba(56, 189, 248, 0.15);
+  background: var(--accent-fill);
   color: var(--accent-color);
 }
 
 .custom-select-option.selected {
-  background: rgba(56, 189, 248, 0.1);
+  background: var(--accent-tint);
   color: var(--accent-color);
   font-weight: 600;
+}
+
+/* ── Соединения ─────────────────────────────────────────────────────────── */
+
+.conn-panel {
+  background: rgb(var(--panel-rgb) / 0.4);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: inset 0 4px 30px rgb(var(--shadow-rgb) / 0.2);
+  position: relative;
+}
+
+.conn-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Оверлей накрывает и залипшую шапку таблицы — отступ сдвигает надпись под неё. */
+  padding-top: 38px;
+  color: var(--text-dim);
+  font-size: var(--fs-body);
+  font-style: italic;
+  pointer-events: none;
+}
+
+.conn-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-label);
+}
+
+.conn-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 10px 12px;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  /* Непрозрачный фон: строки уезжают под шапку при прокрутке. */
+  background: var(--panel-solid);
+  border-bottom: 1px solid var(--glass-border);
+  white-space: nowrap;
+}
+
+.conn-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--glass-02);
+  vertical-align: middle;
+}
+
+.conn-row:hover td {
+  background: var(--glass-01);
+}
+
+/* Хост и процесс — единственные колонки переменной ширины, и обе приходят из
+   сети: длинное имя должно обрезаться, а не растягивать таблицу вбок. */
+.conn-cell-host,
+.conn-cell-process,
+.conn-cell-rule {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conn-cell-host {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.conn-cell-dest,
+.conn-cell-traffic,
+.conn-cell-age {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.conn-cell-rule {
+  color: var(--text-dim);
+}
+
+.conn-cell-actions {
+  white-space: nowrap;
+}
+
+.conn-action {
+  padding: 3px 7px;
+  margin-right: 4px;
+  font-size: var(--fs-micro);
+  line-height: 1.4;
+  border-radius: 6px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-02);
+  color: var(--text-main);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.conn-action:hover:not(:disabled) {
+  background: var(--glass-04);
+}
+
+.conn-action:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.conn-action-direct:hover:not(:disabled) {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.conn-action-proxy:hover:not(:disabled) {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+.conn-action-block:hover:not(:disabled),
+/* Кнопка разрыва соединения несёт рисунок, а не букву, поэтому её содержимое
+   центрируется флексом — у остальных кнопок строки там текст. */
+.conn-action-close {
+  display: inline-flex;
+  align-items: center;
+}
+
+.conn-action-close:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ── Значок действия правила ─────────────────────────────────────────────────
+   Стрелка насквозь, щит, перечёркнутый круг. Три формы различаются сами по
+   себе, цвет только усиливает уже сказанное — раньше здесь стояли цветные
+   кружки, и различал их ровно цвет. */
+.rule-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+}
+
+.rule-action--direct { color: var(--success); }
+.rule-action--proxy { color: var(--accent-color); }
+.rule-action--block { color: var(--danger); }
+
+/* ── Плашка «правила изменены» ──────────────────────────────────────────── */
+
+.rules-pending-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  font-size: var(--fs-body);
+  color: var(--text-main);
+  background: rgb(var(--accent-rgb) / 0.08);
+  border: 1px solid rgb(var(--accent-rgb) / 0.25);
+  border-radius: 10px;
+}
+
+.rules-pending-apply {
+  padding: 5px 12px;
+  font-size: var(--fs-label);
+  white-space: nowrap;
+  background: var(--accent-color);
+  color: var(--on-accent);
+  font-weight: bold;
+}
+
+/* ─── Пониженная требовательность к движению ─────────────────────────────────
+   prefers-reduced-motion: reduce
+
+   Здесь намеренно нет глобального `animation: none` и обнуления всех
+   переходов. Такой выключатель снимает не только украшения, но и обратную
+   связь, а в этом приложении по движению читается сразу два состояния: идёт
+   подключение и идёт загрузка обновления. Уходит перемещение, остаётся смысл.
+
+   Блок стоит в конце файла осознанно: медиазапрос не добавляет специфичности,
+   и переопределения ниже работают только потому, что идут последними. */
+@media (prefers-reduced-motion: reduce) {
+  /* 1. Общие сценарии появления. Ключевые кадры переопределяются под тем же
+        именем, поэтому сдвиг на 10px и наплыв масштабом исчезают сразу у всех
+        потребителей — у разделов, оверлеев, модалок и списков, — а затухание
+        остаётся и по-прежнему объясняет, что на экране появилось новое. */
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  @keyframes modalScaleUp {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  @keyframes modalScaleIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  /* 2. Кнопка питания. Расходящееся кольцо заменяется неподвижным: состояние
+        «идёт подключение» остаётся видимым, но ничего не движется. Момент
+        прибытия при этом теряет смысл — гасим его совсем, состояние и так
+        читается по цвету рамки, подписи и таймеру. */
+  .power-btn.connecting::after {
+    animation: none;
+    opacity: 0.65;
+  }
+
+  .power-btn.arrived::after {
+    animation: none;
+  }
+
+  /* 3. Точка состояния перестаёт мигать. Рядом стоит подпись «Подключение…»,
+        так что сигнал не теряется. */
+  .status-dot.connecting {
+    animation: none;
+  }
+
+  /* 4. Наведение больше ничего не смещает: цвет рамки и фон справляются с
+        подсветкой сами. */
+  .server-card:hover,
+  .scroll-arrow:hover {
+    transform: none;
+  }
+
+  body.window-hidden {
+    transform: none;
+  }
+
+  /* 5. Индикаторы занятости продолжают вращаться — намеренно. Это
+        единственный признак того, что работа идёт, а небольшой вращающийся
+        круг не даёт вестибулярной нагрузки в отличие от разлётов и сдвигов.
+        Скорость снижена, чтобы движение не притягивало взгляд. */
+  .dns-leak-spinner {
+    animation-duration: 1.4s;
+  }
+
+  .update-modal-content.downloading .update-icon-wrapper {
+    animation-duration: 6s;
+  }
+}
+
+/* ─── Диапазон размеров окна ─────────────────────────────────────────────────
+   main.go задаёт окну минимум 800×600 при исходных 950×700, и оно
+   разворачивается на весь монитор. Телефонных брейкпоинтов здесь быть не
+   может: уже 800px окно не бывает никогда, и правило под 320–767px было бы
+   мёртвым кодом. Вся работа идёт между «тесно» и «очень широко».
+
+   Основная нагрузка снята переносом рядов выше — он не требует ни одного
+   медиазапроса и работает на любой промежуточной ширине. Ниже только то,
+   чего переносом не решить. */
+
+/* Панель состояния на «Главной»: три плашки должны переноситься, а не
+   сжиматься до нечитаемого. */
+.status-header {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* Сводка «Истории» была прибита к четырём колонкам. При 800px на карточку
+   оставалось около 150px, и это при том, что английские подписи длиннее
+   русских. Теперь колонки считаются от доступной ширины. */
+.history-stats-row {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+/* Таблица соединений — семь колонок. У её контейнера была только вертикальная
+   прокрутка, поэтому в узком окне содержимое не прокручивалось, а обрезалось.
+   min-width задаёт порог, ниже которого колонки перестают сжиматься и
+   появляется горизонтальная прокрутка. */
+.conn-scroll { overflow-x: auto; }
+.conn-table { min-width: 620px; }
+
+/* Развёрнутое окно. «Настройки» и «Маршруты» — формы: строка настройки во всю
+   ширину 27-дюймового монитора нечитаема. Данные — сетка серверов, таблица
+   соединений, журнал и история — наоборот, выигрывают от каждой лишней
+   колонки и ограничения не получают. Ограничение задано без медиазапроса:
+   max-width сам ничего не делает, пока места не станет больше. */
+#view-settings,
+#view-routes {
+  max-width: 900px;
+}
+
+/* Описания разделов держат разумную длину строки и там, где сам раздел
+   занимает всю ширину. */
+#view-connections > p,
+.view > h2 + p {
+  max-width: 75ch;
+}
+
+/* Боковые отступы возвращаются к исходным 30px, как только окно перестаёт
+   быть тесным. Порог взят от содержимого и от фактических размеров окна, а не
+   из каталога устройств: узкие отступы нужны только в диапазоне 800–899px,
+   а штатное окно (950px по main.go) обязано выглядеть ровно как прежде.
+   Поставить порог выше — значит изменить вид размера по умолчанию. */
+@media (min-width: 900px) {
+  main {
+    padding-left: 30px;
+    padding-right: 30px;
+  }
+}
+
+/* Сенсорный экран. Windows-ноутбуки и планшеты с тачем этот клиент запускают,
+   а указатель там грубее мышиного: цель в 32px по нему промахивается.
+   Запрос по типу указателя, а не по ширине окна, — размер экрана о способе
+   ввода ничего не сообщает. */
+@media (pointer: coarse) {
+  .control-btn { width: 40px; height: 40px; }
+  .scroll-arrow { width: 36px; height: 36px; }
+  .sort-item { padding: 12px; }
+  .log-tab { padding: 12px 0; }
+  .server-star { padding: 10px; }
+}
+
+/* ─── Соединения: сгруппированный вид ────────────────────────────────────────
+   Два среза одних и тех же соединений — по сайту и по программе. Раскрываемые
+   папки, а не таблица: это панель управления, с которой отправляют домен или
+   программу мимо VPN, а разбор построчно остался плоскому виду. */
+
+.conn-view-switch {
+  display: flex;
+  gap: 4px;
+  background: var(--glass-02);
+  padding: 3px;
+  border-radius: 8px;
+}
+
+.conn-view-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-label);
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+
+.conn-view-btn:hover { color: var(--text-main); }
+
+.conn-view-btn.active {
+  background: var(--accent-fill);
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
+.conn-groups {
+  padding: 4px 0;
+}
+
+.conn-section + .conn-section {
+  margin-top: 8px;
+  border-top: 1px solid var(--glass-border);
+  padding-top: 8px;
+}
+
+.conn-section-title {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 8px 14px 6px;
+}
+
+.conn-section-empty {
+  font-size: var(--fs-label);
+  color: var(--text-faint);
+  padding: 4px 14px 10px;
+  font-style: italic;
+}
+
+.conn-group {
+  border-bottom: 1px solid var(--glass-01);
+}
+
+/* Шапка папки. Кнопка раскрытия занимает всю свободную ширину, а действия
+   стоят рядом отдельными кнопками: вложить кнопку в кнопку нельзя. */
+.conn-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+}
+
+.conn-group-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.conn-group-toggle:hover .conn-group-key { color: var(--accent-color); }
+
+/* Треугольник раскрытия. Поворот вместо двух разных глифов: одна фигура,
+   которая явно показывает переход между состояниями. */
+.conn-group-chevron {
+  flex-shrink: 0;
+  width: 10px;
+  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  color: var(--text-faint);
+}
+
+.conn-group[data-expanded="true"] .conn-group-chevron {
+  transform: rotate(90deg);
+}
+
+.conn-group-key {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-body);
+  transition: color 0.2s;
+}
+
+.conn-group-count {
+  flex-shrink: 0;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  /* Тёмная основа, а не стеклянная плёнка: сквозь glass-02 светит яркий край
+     градиента, и подпись на нём давала 4.41 — ниже порога. */
+  background: var(--chip-base);
+  padding: 1px 7px;
+  border-radius: 10px;
+}
+
+.conn-group-traffic {
+  flex-shrink: 0;
+  font-size: var(--fs-label);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.conn-group-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* Вложенные соединения. Отступ слева выравнивает их под именем папки, а не под
+   треугольником, чтобы вложенность читалась без линий-направляющих. */
+.conn-group-members {
+  padding: 0 14px 8px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.conn-member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--fs-label);
+  color: var(--text-dim);
+  padding: 3px 0;
+}
+
+.conn-member-host {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conn-member-meta {
+  flex-shrink: 0;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (forced-colors: active) {
+  .conn-view-btn.active { border: 2px solid Highlight; }
+}
+
+/* Действия внутри раскрытой папки. Те же кнопки, что и на её шапке, но тише:
+   групповое действие — основное, построчное — уточняющее, и одинаковый вес
+   у них сбивал бы приоритет. Проявляются при наведении на строку и всегда
+   видимы с клавиатуры. */
+.conn-group-actions--compact {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.conn-member:hover .conn-group-actions--compact,
+.conn-group-actions--compact:focus-within {
+  opacity: 1;
+}
+
+.conn-group-actions--compact .conn-action {
+  padding: 1px 6px;
+  margin-right: 2px;
+}
+
+/* Без наведения мыши подсказывать нечем — показываем действия сразу. */
+@media (hover: none) {
+  .conn-group-actions--compact { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conn-group-actions--compact { transition: none; }
+}
+
+/* Плашка Kill Switch. Предупреждающая, а не тревожная: сам по себе включённый
+   Kill Switch — нормальное состояние, знать о нём надо только чтобы понимать,
+   почему без туннеля пропадает сеть. Красной она становится, когда правила
+   действительно заперли машину. */
+.status-badge--warning {
+  background: rgb(var(--warning-rgb) / 0.1);
+  color: var(--warning);
+}
+
+.status-badge--danger {
+  background: rgb(var(--danger-rgb) / 0.12);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* Поиск по журналу. Компактнее обычного поля: он стоит в панели заголовка
+   рядом с кнопками, а не в форме. */
+.log-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.log-search svg {
+  position: absolute;
+  left: 9px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.log-search input {
+  width: 200px;
+  padding: 5px 10px 5px 28px;
+  font-size: var(--fs-label);
+  border-radius: 8px;
+}
+
+/* Системный крестик очистки в Chromium светлый и на тёмном стекле выглядит
+   инородно. Прячем — очистить поле можно выделением или Esc. */
+.log-search input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.log-empty {
+  padding: 16px 14px;
+  font-size: var(--fs-label);
+  color: var(--text-faint);
+  font-style: italic;
+  text-align: center;
+}
+
+/* ─── Трафик на «Главной» ────────────────────────────────────────────────────
+   Скорость сейчас и объём за сессию в одном объекте, а не двумя карточками:
+   это одна тема в двух масштабах времени, и разносить их значило бы заставлять
+   глаз прыгать. Столбец = направление, строка = масштаб; выравнивание по
+   столбцам и делает связь читаемой.
+
+   Стекло, рамку и радиус даёт карточка вокруг (.current-server-card): у самой
+   таблицы их больше нет. Раньше были — и именно поэтому блок выпадал из
+   столбца: таблица сжимается по содержимому, то есть выходила уже соседних
+   карточек, да ещё и со своим радиусом в 12px против их 16.
+
+   table-layout: fixed — чтобы столбцы стояли на месте. Без него ширина колонки
+   зависит от того, что в ней написано, и «3.5 MB/s» против «144 KB/s» сдвигало
+   бы соседний столбец на каждом обновлении. */
+.traffic-meter {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.traffic-meter th,
+.traffic-meter td {
+  /* Горизонтальных отступов у крайних ячеек нет: их держит padding карточки,
+     и второй слой отступа сдвинул бы числа внутрь относительно заголовка. */
+  padding: 7px 0;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Ширина столбцов. При table-layout: fixed её задаёт первая строка, и задать
+   надо: иначе три столбца делятся поровну и подпись «За сессию» получает треть
+   карточки, отобрав её у чисел — а сравнивают глазом именно числа. */
+.traffic-meter thead td { width: 36%; }
+.traffic-meter thead th { width: 32%; }
+
+/* Подпись строки. Левый столбец — единственный, где текст выключен влево:
+   он именует строку, а не участвует в сравнении чисел. */
+.traffic-meter tbody th {
+  text-align: left;
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  color: var(--text-faint);
+  letter-spacing: 0.03em;
+}
+
+/* Шапка со стрелками. Тонкая линия под ней отделяет заголовки от данных, не
+   вводя ещё одну рамку. Сверху отступа нет: над шапкой уже стоит промежуток
+   карточки, и второй сложился бы с ним в провал.
+
+   Линию несёт и пустая ячейка над подписями строк: без неё черта начиналась
+   с середины карточки и читалась как обрывок, а не как разделитель. */
+.traffic-meter thead th,
+.traffic-meter thead td {
+  padding-top: 0;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.traffic-arrow {
+  width: 12px;
+  height: 12px;
+  vertical-align: middle;
+}
+
+/* Направления различаются цветом один раз — в шапке. Дублировать его на всех
+   четырёх числах значило бы раскрасить таблицу без нужды: столбец уже
+   подписан. */
+.traffic-meter thead th:nth-child(2) .traffic-arrow { color: var(--accent-color); }
+.traffic-meter thead th:nth-child(3) .traffic-arrow { color: var(--text-main); }
+
+.traffic-value {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Единица подчинена числу: мельче и тусклее, но на той же строке — пара
+   читается как одна величина, а не как «число и подпись». */
+.traffic-unit {
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  letter-spacing: 0.02em;
+}
+
+/* Скорость — то, на что смотрят; объём за сессию справочен. Разница в весе, а
+   не в цвете: два одинаково ярких ряда спорили бы за внимание. */
+.traffic-row--rate .traffic-value {
+  font-size: var(--fs-subhead);
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.traffic-row--total .traffic-value {
+  font-size: var(--fs-body);
+  color: var(--text-dim);
+}
+
+.traffic-row--total td,
+.traffic-row--total th {
+  padding-top: 3px;
+  /* Низ держит padding карточки — свой добавил бы карточке лишний воздух под
+     последней строкой и сломал бы её симметрию. */
+  padding-bottom: 0;
+}
+
+/* ─── Внешний вид ────────────────────────────────────────────────────────────
+   Раздел настроек, где выбирают акцент и фон. Предпросмотром служит само
+   приложение — отдельного окошка с образцом нет намеренно: любой образец
+   меньше экрана врёт, а здесь смотреть можно на настоящий интерфейс. */
+
+.theme-presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+/* Плитка пресета: сама покрашена своим фоном, поэтому выбирают глазом, а не
+   по названию. */
+.theme-swatch {
+  position: relative;
+  height: 64px;
+  padding: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  cursor: pointer;
+  overflow: hidden;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  transition: border-color 0.2s, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.theme-swatch:hover { transform: translateY(-2px); }
+
+.theme-swatch[aria-checked="true"] {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 1px var(--accent-color);
+}
+
+/* Название лежит на собственной подложке, а не прямо на градиенте: под ним
+   чужая тема, вплоть до белой «Бумаги», и полагаться на её светлоту нельзя.
+
+   Подложка и текст здесь единственные во всём файле цвета-литералы, и это не
+   упущение: они обязаны НЕ следовать теме. Возьми они --chip-rgb, на светлой
+   теме подложка стала бы почти белой, а светлый текст на ней исчез бы — причём
+   именно на той плитке, которую человек в этот момент выбирает. */
+.theme-swatch-name {
+  position: absolute;
+  inset: auto 0 4px 0; /* над полосой акцента */
+  padding: 3px 8px;
+  font-size: var(--fs-micro);
+  background: rgb(0 0 0 / 0.62);
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Акцент полосой во всю ширину, а не точкой в углу.
+   Точка там сначала и стояла — и на скриншоте выяснилось, чего она стоит:
+   тёмные темы обязаны быть тёмными (иначе текст на них не читается), поэтому
+   на плитке в сто пикселей их фоны различаются едва-едва, и «Полночь»,
+   «Малахит», «Янтарь» читались одинаковыми чёрными прямоугольниками. Отличает
+   их акцент — значит, ему и место во всю ширину, а не двенадцать пикселей в
+   углу. */
+.theme-swatch-accent {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 4px;
+}
+
+.theme-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Подпись слева, элементы справа: четыре строки настроек выстраиваются в две
+   колонки, и глаз идёт по одной вертикали вместо четырёх. */
+.theme-field {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.theme-field-label {
+  flex: 0 0 120px;
+  font-size: var(--fs-body);
+  color: var(--text-dim);
+  /* Перебивает .form-group label — тот делает подписи блочными с отступом
+     снизу, а здесь подпись стоит в строке. */
+  display: block;
+  margin-bottom: 0;
+}
+
+.theme-field-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Системный <input type="color"> в WebView2 рисуется белой рамкой с толстым
+   внутренним полем. Снимаем всё и оставляем сам цвет: получается образец,
+   похожий на остальные элементы управления, а не на гостя из другой ОС. */
+.color-well {
+  width: 42px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+  appearance: none;
+}
+
+.color-well::-webkit-color-swatch-wrapper { padding: 2px; }
+.color-well::-webkit-color-swatch { border: none; border-radius: 6px; }
+.color-well:hover { border-color: var(--accent-color); }
+
+/* Селектор с тегом, а не один класс: общее правило для полей ввода записано
+   как input[type="text"], и по специфичности это тег плюс атрибут. Голый
+   .color-hex ему проигрывает при любом порядке, и поле растянулось бы во всю
+   ширину формы. */
+input.color-hex {
+  width: 96px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  text-transform: uppercase;
+  padding: 7px 10px;
+}
+
+.theme-modes {
+  display: flex;
+  gap: 6px;
+}
+
+/* Переключатель из трёх кнопок вместо <select>: вариантов три, они короткие, и
+   раскрывающийся список прятал бы за кликом то, что помещается на экран. */
+.theme-mode {
+  padding: 7px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--glass-02);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-label);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.theme-mode:hover { background: var(--glass-04); }
+
+.theme-mode[aria-checked="true"] {
+  background: var(--accent-fill);
+  border-color: var(--accent-edge);
+  color: var(--accent-color);
+}
+
+.theme-stops {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-compact {
+  padding: 7px 12px;
+  font-size: var(--fs-label);
+  border-radius: 8px;
+}
+
+/* Ползунок направления. Собственный, потому что системный в WebView2 приходит
+   с синей дорожкой из светлой темы Windows — единственный элемент, который на
+   любой теме оставался бы чужого цвета. */
+#themeAngle {
+  appearance: none;
+  width: 180px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--glass-04);
+  outline: none;
+  cursor: pointer;
+}
+
+#themeAngle::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent-color);
+  border: none;
+  cursor: pointer;
+}
+
+.theme-angle {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  min-width: 40px;
+}
+
+.theme-hint {
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+}
+
+/* Отчёт о контрасте. Приложение не правит палитру молча: если оно подвинуло
+   выбранный цвет, оно здесь же говорит, что и зачем. */
+.theme-contrast {
+  margin: 18px 0 14px;
+  font-size: var(--fs-label);
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+.theme-contrast--adjusted { color: var(--warning); }
+
+/* Подсказка под полем ввода. Обычная — приглушённая; при непригодном значении
+   становится предупреждающей, но поле не блокирует: настройку можно сохранить
+   и починить позже, а не оказаться запертым в форме. */
+.field-hint {
+  margin-top: 6px;
+  font-size: var(--fs-label);
+  color: var(--text-faint);
+  line-height: 1.45;
+}
+
+.field-hint--invalid {
+  color: var(--warning);
+}
+
+/* ── Бывшие инлайновые стили разметки ──────────────────────────────────────
+
+   Ровно то, что стояло в атрибутах style= в index.html, перенесённое сюда
+   без единого изменения значений. Перенос понадобился не ради опрятности:
+   пока эти атрибуты существовали, Content-Security-Policy была обязана
+   держать style-src 'unsafe-inline', потому что CSP считает инлайновым
+   стилем именно атрибут. Присвоения вида element.style.x из скриптов под
+   запрет не подпадают никогда — это CSSOM, — так что переносить их было не
+   нужно, и прежняя запись в PRODUCT.md, называвшая их причиной послабления,
+   была неверна.
+
+   Секция стоит последней в файле осознанно. Правила по id выигрывают у любых
+   правил по классу выше, а перечисленные здесь модификаторы классов
+   выигрывают у одноимённых выше по порядку — то есть тем же способом, каким
+   раньше выигрывал сам атрибут. Единственное, что вело себя иначе и раньше:
+   объявления с !important выше по файлу перебивали инлайновый стиль и
+   продолжают перебивать эти правила.
+
+   Значения, которые скрипты меняют на ходу (ширина полосы прогресса, показ
+   и скрытие блоков), остаются за скриптами: инлайновый стиль, выставленный
+   из JavaScript, по-прежнему сильнее всего, что здесь написано. Здесь только
+   начальное состояние. */
+
+#langToggle {
+  margin-bottom: 10px;
+  font-weight: bold;
+  font-size: var(--fs-body);
+}
+
+#appVersion {
+  font-size: var(--fs-micro);
+  opacity: 0.5;
+  margin-left: 6px;
+  font-weight: normal;
+  vertical-align: middle;
+}
+
+.status-badge--accent {
+  background: var(--accent-tint);
+}
+
+#currentIp {
+  color: var(--accent-color);
+}
+
+#killSwitchBadge {
+  display: none;
+}
+
+#sessionTimerBadge {
+  display: none;
+  background: rgb(var(--success-rgb) / 0.1);
+}
+
+#sessionTimerText {
+  color: var(--success);
+  font-variant-numeric: tabular-nums;
+}
+
+#trafficCard {
+  display: none;
+}
+
+#tunStatusContainer {
+  display: none;
+}
+
+.tun-status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+#tunStatusTitle {
+  font-size: var(--fs-body);
+  margin: 0;
+}
+
+#tunStatusText {
+  font-size: var(--fs-micro);
+  margin-top: 3px;
+  color: var(--text-dim);
+}
+
+#restoreTunBtn {
+  padding: 6px 12px;
+  font-size: var(--fs-micro);
+  border-radius: 8px;
+}
+
+#restartBtn {
+  display: none;
+}
+
+.sub-manage-panel {
+  margin-bottom: 30px;
+  padding: 20px;
+  background: var(--glass-01);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+}
+
+#subManagementTitle {
+  margin-bottom: 15px;
+  color: var(--accent-color);
+  font-size: var(--fs-subhead);
+}
+
+#addSubBtn {
+  background: var(--accent-color);
+  color: var(--on-accent);
+  font-weight: bold;
+}
+
+#myLocationsTitle {
+  margin-bottom: 0;
+}
+
+#sortBtn {
+  padding: 6px 12px;
+  font-size: var(--fs-label);
+  gap: 5px;
+}
+
+#dnsLeakBtn {
+  padding: 6px 12px;
+  font-size: var(--fs-label);
+}
+
+#pingAllBtn {
+  padding: 6px 12px;
+  font-size: var(--fs-label);
+}
+
+#subscription-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+  padding-bottom: 5px;
+}
+
+.search-field-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+#serverSearchInput {
+  padding-left: 34px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+#bestServerBtn {
+  white-space: nowrap;
+  padding: 6px 14px;
+  font-size: var(--fs-label);
+}
+
+#serversEmpty {
+  display: none;
+}
+
+.empty-state-icon {
+  color: var(--text-dim);
+  margin-bottom: 16px;
+}
+
+#serversEmptyText {
+  color: var(--text-dim);
+}
+
+#clearHistoryBtn {
+  padding: 6px 12px;
+  font-size: var(--fs-label);
+  border-color: rgb(var(--danger-rgb) / 0.3);
+  color: var(--danger);
+}
+
+#historyStatsRow {
+  display: none;
+}
+
+#historyEmptyText {
+  color: var(--text-dim);
+}
+
+#directDomainsLabel {
+  display: block;
+  color: var(--text-dim);
+  margin-bottom: 5px;
+}
+
+#customDirect {
+  resize: none;
+}
+
+.routes-direct-actions {
+  margin-top: 15px;
+  margin-bottom: 20px;
+}
+
+#splitTunnelingTitle {
+  margin-top: 20px;
+  color: var(--accent-color);
+}
+
+#splitTunnelingDesc {
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  font-size: var(--fs-body);
+}
+
+.process-mode-tabs {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 10px;
+  background: var(--glass-02);
+  padding: 5px;
+  border-radius: 8px;
+}
+
+.process-tab.active {
+  flex: 1;
+  padding: 8px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent-color);
+  color: var(--on-accent);
+  font-weight: bold;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.process-tab {
+  flex: 1;
+  padding: 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+#processListBlacklist {
+  resize: none;
+  display: block;
+}
+
+#processListWhitelist {
+  resize: none;
+  display: none;
+}
+
+#saveAppsBtn {
+  background: var(--accent-color);
+  color: var(--on-accent);
+  width: 220px;
+  justify-content: center;
+}
+
+#appsStatus {
+  color: var(--success);
+  display: none;
+}
+
+#customRoutesTitle {
+  margin-top: 30px;
+  color: var(--accent-color);
+}
+
+#customRoutesDesc {
+  color: var(--text-dim);
+  font-size: var(--fs-body);
+  margin-bottom: 12px;
+}
+
+#rulesPendingRoutes {
+  display: none;
+}
+
+#customRulesList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.rule-builder-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+#newRuleAction {
+  width: 110px;
+}
+
+#newRuleType {
+  width: 140px;
+}
+
+#newRuleValue {
+  flex: 1;
+  min-width: 160px;
+}
+
+#addCustomRuleBtn {
+  background: var(--accent-color);
+  color: var(--on-accent);
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+#connectionsFlash {
+  color: var(--success);
+  font-size: var(--fs-label);
+  display: none;
+}
+
+#connectionsCount {
+  color: var(--text-dim);
+  font-size: var(--fs-label);
+}
+
+#connectionsDesc {
+  color: var(--text-dim);
+  font-size: var(--fs-body);
+  margin-bottom: 12px;
+}
+
+.conn-panel {
+  height: calc(100vh - 210px);
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+#connectionsGrouped {
+  flex: 1;
+  overflow-y: auto;
+}
+
+#connectionsFlatWrap {
+  flex: 1;
+  overflow-y: auto;
+  display: none;
+}
+
+#rulesPendingConnections {
+  display: none;
+  margin-top: 12px;
+}
+
+.form-group--section {
+  margin-top: 30px;
+}
+
+#customDnsInput {
+  display: none;
+  margin-top: 10px;
+}
+
+#customDnsHint {
+  display: none;
+}
+
+#dnsPendingBar {
+  display: none;
+  margin-top: 10px;
+}
+
+#tunModeLabel {
+  color: var(--accent-color);
+  font-weight: bold;
+}
+
+#securityTitle {
+  margin-top: 25px;
+  color: var(--accent-color);
+}
+
+.form-group--row {
+  margin-top: 15px;
+}
+
+#killSwitchCheckbox {
+  color: var(--text-dim);
+  font-size: var(--fs-label);
+}
+
+#fakeDnsCheckbox {
+  color: var(--text-dim);
+  font-size: var(--fs-label);
+}
+
+#verboseLoggingCheckbox {
+  color: var(--text-dim);
+  font-size: var(--fs-label);
+}
+
+#saveSettingsBtn {
+  background: var(--accent-color);
+  color: var(--on-accent);
+  width: 200px;
+  justify-content: center;
+}
+
+#appearanceTitle {
+  margin-top: 30px;
+  color: var(--accent-color);
+}
+
+#appearanceDesc {
+  color: var(--text-dim);
+  margin-bottom: 14px;
+}
+
+#transferTitle {
+  margin-top: 30px;
+  color: var(--accent-color);
+}
+
+#transferDesc {
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+.sub-actions-row--flush {
+  margin-top: 0;
+}
+
+#settingsStatus {
+  margin-left: 15px;
+  color: var(--success);
+  display: none;
+}
+
+#saveLogsBtn {
+  padding: 6px 12px;
+  font-size: var(--fs-label);
+}
+
+#clearLogsBtn {
+  padding: 6px 12px;
+  font-size: var(--fs-label);
+}
+
+.log-viewer {
+  height: calc(100vh - 160px);
+  min-height: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+#fullLogOutput {
+  flex: 1;
+  overflow-y: auto;
+}
+
+#logsEmpty {
+  display: none;
+}
+
+#modalConfirm {
+  background: var(--accent-color);
+  color: var(--on-accent);
+  font-weight: bold;
+}
+
+#updateProgressSection {
+  display: none;
+}
+
+#updateProgressBar {
+  width: 0%;
+}
+
+#errorTerminalContainer {
+  display: none;
+}
+
+.modal-actions--spaced {
+  margin-top: 20px;
+}
+
+#alertCopyBtn {
+  display: none;
+  border-color: var(--glass-05);
+}
+
+.btn-inline-icon {
+  vertical-align: middle;
+  margin-right: 4px;
+  display: inline-block;
+}
+
+#alertConfirmBtn {
+  background: var(--accent-color);
+  color: var(--on-accent);
+  font-weight: bold;
+  border: none;
+  padding-left: 24px;
+  padding-right: 24px;
+}
+
+.modal-content--qr {
+  max-width: 500px;
+  text-align: center;
+  position: relative;
+}
+
+#qrModalTitle {
+  margin-bottom: 15px;
+  color: var(--accent-color);
+}
+
+#qrScannerContainer {
+  width: 100%;
+  height: 300px;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--glass-border);
+}
+
+#qrVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: none;
+}
+
+#qrCanvas {
+  display: none;
+}
+
+#qrScannerPlaceholder {
+  color: var(--text-dim);
+  text-align: center;
+  padding: 20px;
+}
+
+#qrScannerReticle {
+  position: absolute;
+  width: 180px;
+  height: 180px;
+  border: 2px dashed var(--accent-color);
+  border-radius: 16px;
+  display: none;
+  box-shadow: 0 0 20px var(--accent-edge);
+}
+
+#qrFileInput {
+  display: none;
+}
+
+.qr-actions-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+#qrStartCameraBtn {
+  flex: 1;
+  justify-content: center;
+}
+
+#qrUploadFileBtn {
+  flex: 1;
+  justify-content: center;
+}
+
+.modal-actions--divided {
+  border-top: 1px solid var(--glass-border);
+  padding-top: 15px;
+}
+
+#qrModalClose {
+  width: 100%;
+  justify-content: center;
+}
+
+#dnsLeakModalTitle {
+  margin: 0;
+  font-size: var(--fs-heading);
+  font-weight: 700;
+}
+
+#dnsLeakModalSubtitle {
+  margin: 4px 0 0;
+  font-size: var(--fs-label);
+  color: var(--text-dim);
+}
+
+#dnsLeakLoadingText {
+  font-size: var(--fs-body);
+  color: var(--text-dim);
+}
+
+#dnsLeakResult {
+  display: none;
+}
+
+#dnsLeakRetryBtn {
+  display: none;
+}
+
+#dnsLeakCloseBtn {
+  background: var(--accent-color);
+  color: var(--on-accent);
+  font-weight: bold;
+  border: none;
+  padding-left: 24px;
+  padding-right: 24px;
+}
+
+.rule-type-badge {
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+}
+
+/* ── Профили ─────────────────────────────────────────────────────────────────
+   Список именованных наборов настроек в «Настройках». Строка — это кнопка
+   применения во всю ширину плюс кнопка удаления справа; ширину забирает
+   название, потому что именно по нему профиль и опознают. */
+
+.profiles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.profile-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-apply {
+  flex: 1;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+/* Пометка «с сервером» отличает профиль, который поменяет ещё и узел. Это
+   заметно другое действие, чем смена одних маршрутов, и знать о нём надо до
+   нажатия, а не после. */
+.profile-server-mark {
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+}
+
+.profile-delete {
+  color: var(--danger);
+  border-color: rgb(var(--danger-rgb) / 0.2);
+  padding: 4px 8px;
+  font-size: var(--fs-micro);
+}
+
+.profiles-empty {
+  color: var(--text-dim);
+  font-size: var(--fs-label);
+  margin-bottom: 12px;
+}
+
+/* Галка «запомнить и сервер» стоит в одном ряду с кнопкой сохранения, а не
+   отдельной строкой: она уточняет именно это действие и в отрыве от него
+   читается как самостоятельная настройка. */
+.check-row--inline {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-dim);
+}
+
+/* ── Контекстное меню вкладки подписки ───────────────────────────────────────
+   Пункты собирались в TS десятком присвоений element.style на каждый, включая
+   подсветку по наведению через onmouseover/onmouseout. Наведение — это не то,
+   что меняется на ходу по логике приложения, а обычное состояние, и место ему
+   в :hover. */
+
+.tab-context-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: var(--fs-label);
+  border-radius: 4px;
+}
+
+.tab-context-item:hover {
+  background: var(--glass-02);
+}
+
+.tab-context-item--danger {
+  color: var(--danger);
+}
+
+.tab-context-item--danger:hover {
+  background: rgb(var(--danger-rgb) / 0.1);
+}
+
+/* ── Состояние автообновления подписки ───────────────────────────────────── */
+
+.sub-status-line {
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  margin: -12px 0 14px;
+  min-height: 1em;
+}
+
+/* Неудача обязана читаться как неудача, а не как подпись помельче. */
+.sub-status-line--error {
+  color: var(--danger);
+}
+
+/* Пара полей для сочетаний клавиш. Подпись — поле — подпись — поле в одну
+   строку, чтобы было видно, что это две настройки одной галки, а не четыре
+   отдельных. */
+.hotkey-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.hotkey-row label {
+  color: var(--text-dim);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.hotkey-row input[type="text"] {
+  width: 150px;
+  text-align: center;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  cursor: pointer;
+}
+
+/* Пока поле в фокусе, оно ждёт нажатия, и это должно быть видно. */
+.hotkey-row input[type="text"]:focus {
+  cursor: none;
 }

@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"time"
-	"unsafe"
 
 	"NeoBox/backend/core"
 	"NeoBox/backend/security"
@@ -29,6 +28,12 @@ var assets embed.FS
 
 //go:embed build/windows/icon.ico
 var trayIcon []byte
+
+// The same icon, desaturated. Which of the two is in the notification area is
+// the only thing the tray says about the connection without being opened.
+//
+//go:embed build/windows/icon-off.ico
+var trayIconOff []byte
 
 // goMemoryLimit is a backstop, not a tuning knob. Steady state for this process
 // measures around 176 MB of private bytes, most of which is the 35 MB binary
@@ -84,16 +89,39 @@ func main() {
 		security.MarkCleanExit("another instance is running")
 		os.Exit(0)
 	}
-	if mutexHandle != 0 {
-		defer syswindows.CloseHandle(mutexHandle)
+	// Elevate now, before anything expensive exists.
+	//
+	// TUN mode and the Kill Switch both need administrator rights, and nothing
+	// used to notice that until the frontend had loaded and asked to connect. A
+	// machine configured for TUN therefore paid for two complete cold starts on
+	// every launch: storage, the tray, WebView2 and the whole UI came up once
+	// unelevated only to relaunch and do all of it again. The crash log records
+	// the two starts five to six seconds apart.
+	//
+	// The decision needs one plaintext field out of settings.json, so it can be
+	// made here — before the tray icon, the window and the core manager exist,
+	// and before NewAppService tries a kill-switch recovery that needs the very
+	// rights we are about to ask for.
+	mutexHandle, relaunched := relaunchElevatedIfNeeded(userDataDir, mutexHandle)
+	if relaunched {
+		security.MarkCleanExit("relaunch as administrator")
+		os.Exit(0)
 	}
-
 	// 2. Initialize embedded core manager
 	coreManager := core.NewCoreManager()
 
 	// 3. Initialize AppService containing Wails bindings
 	appService := service.NewAppService(coreManager, userDataDir)
 	appService.SetMutexHandle(mutexHandle)
+	// Close whatever handle the service holds at that point, not the value read
+	// here: RequestAdmin releases the mutex for an elevated relaunch and acquires
+	// a fresh one when the UAC prompt is declined, which leaves this variable
+	// naming a handle that no longer exists.
+	defer func() {
+		if h := appService.MutexHandle(); h != 0 {
+			_ = syswindows.CloseHandle(h)
+		}
+	}()
 
 	// Undo a system proxy left installed by a previous run that crashed. This
 	// restores the user's own configuration when NewAppService found a persisted
@@ -112,9 +140,23 @@ func main() {
 	}
 	appService.SetWindowVisible(!startHidden)
 
+	// Clear any WebView2 process left over from a previous session, before this
+	// one can attach to it.
+	//
+	// WebView2 keeps one browser process per user data folder and hands it to
+	// whoever names that folder next, so a leftover is not idle load — it is the
+	// process the interface below is about to be rendered inside. A session that
+	// followed one which did not shut down cleanly was drawn by the previous
+	// session's wedged renderer from its very first frame. See
+	// backend/service/webview_children.go.
+	//
+	// After the single-instance check on purpose: that is what guarantees no
+	// other NeoBox legitimately owns one of these.
+	service.SweepOrphanedWebViews(userDataDir)
+
 	// Start system tray immediately before launching the main window/WebView2.
 	// This ensures the tray icon appears instantly, even if the app starts minimized.
-	appService.InitTray(trayIcon)
+	appService.InitTray(trayIcon, trayIconOff)
 
 	// Create application with custom modern options
 	err := wails.Run(&options.App{
@@ -129,10 +171,23 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		// Opaque, and matching --bg-color in style.css: the page paints a solid
-		// background anyway, so a transparent one only showed through in the
-		// resize gutters and during the fade-out animation.
-		BackgroundColour: &options.RGBA{R: 11, G: 15, B: 25, A: 255},
+		// Opaque, and matching --grad-start in style.css: the page paints a
+		// gradient over it anyway, so a transparent one only showed through in
+		// the resize gutters and during the fade-out animation.
+		//
+		// Это левый стоп градиента, а не его середина: гаттеры окружают окно со
+		// всех сторон, и самый тёмный из трёх цветов меньше всех бросается в
+		// глаза на любой из кромок.
+		//
+		// Значение здесь — только стандартная тема и только до первого кадра.
+		// Дальше цвет гаттеров ведёт фронтенд: applyTheme в
+		// frontend/modules/theme.ts зовёт WindowSetBackgroundColour с самым
+		// тёмным стопом выбранной темы. Без этого на любой чужой теме по краям
+		// окна оставалась бы полоска старого почти чёрного.
+		//
+		// Связь с CSS по-прежнему держится только комментарием, но касается
+		// теперь одной пары значений: этой строки и --grad-start в style.css.
+		BackgroundColour: &options.RGBA{R: 8, G: 9, B: 9, A: 255},
 		OnStartup: func(ctx context.Context) {
 			appService.SetContext(ctx)
 			appService.StartAutoUpdateScheduler()
@@ -151,20 +206,40 @@ func main() {
 			// that lacks this marker can be read as a crash.
 			security.MarkCleanExit("shutdown")
 
+			// Last resort. Everything below is bounded, and the exit after
+			// wails.Run returns is not reached if Wails' own teardown does not
+			// return — and then nothing at all would end the process. On the happy
+			// path the app is long gone before this fires.
+			go func() {
+				time.Sleep(shutdownGrace + shutdownWatchdogSlack)
+				fmt.Fprintln(os.Stderr, "[shutdown] teardown never returned; terminating")
+				service.ExitNow(0)
+			}()
+
 			// Securely wipe encryption keys from memory before shutdown
 			security.SecureWipe()
 
-			// Run clean shutdown in a goroutine so it doesn't block OnShutdown.
-			go appService.Quit()
-
-			// Watchdog: if the process is still alive after a few seconds it means
-			// something (stuck WebView2, tray loop, blocked goroutine) prevented a
-			// normal exit. Force-terminate to avoid leaving a zombie process.
-			// On the happy path the app exits before this fires.
+			// Wait for the clean shutdown instead of firing it off and racing it.
+			//
+			// Quit() is what removes the system proxy and the firewall Kill Switch,
+			// and both of those outlive the process — a run that skips them leaves
+			// the machine proxied at a dead port, or with no internet at all. It
+			// used to be started with `go` and never waited for: main returned from
+			// wails.Run immediately afterwards, so whether the cleanup finished was
+			// down to which goroutine won.
+			//
+			// The wait is bounded because Quit() ends in systray.Quit(), which
+			// enters a message-loop teardown that can hang. Bounded, not absent.
+			done := make(chan struct{})
 			go func() {
-				time.Sleep(5 * time.Second)
-				os.Exit(0)
+				appService.Quit()
+				close(done)
 			}()
+			select {
+			case <-done:
+			case <-time.After(shutdownGrace):
+				fmt.Fprintln(os.Stderr, "[shutdown] clean shutdown did not finish in time; exiting anyway")
+			}
 		},
 		Bind: []interface{}{
 			appService,
@@ -186,19 +261,87 @@ func main() {
 		println("Error starting NeoBox:", err.Error())
 		appService.Quit()
 	}
+
+	// Not os.Exit and not a plain return: with the tray and WebView2 up, both of
+	// those wedge the process instead of ending it. See service.ExitNow.
+	// Everything that has to outlive the process happened in OnShutdown above.
+	service.ExitNow(0)
+}
+
+// shutdownGrace bounds the clean shutdown in OnShutdown. It is long enough for
+// the registry write and the netsh calls that remove the Kill Switch, and short
+// enough that a wedged systray teardown does not keep the user waiting.
+const shutdownGrace = 5 * time.Second
+
+// shutdownWatchdogSlack is how much longer than shutdownGrace the watchdog
+// waits, so it only ever fires when the bounded wait itself did not return.
+const shutdownWatchdogSlack = 3 * time.Second
+
+// relaunchElevatedIfNeeded restarts NeoBox through the UAC prompt when the saved
+// settings select a mode that cannot work without administrator rights. It
+// returns the single-instance mutex the caller should go on holding, and whether
+// an elevated process was started — in which case the caller must exit.
+//
+// Reading settings.json directly rather than through AppService is what lets
+// this run first: the whole point is to answer the question before the objects
+// that would be thrown away are built. The file is the plaintext half of the
+// settings (see backend/service/settings.go), and the two fields wanted here
+// carry no credentials, so nothing needs decrypting.
+//
+// Anything unreadable means no elevation. A missing file is a first run, where
+// both modes are off; a malformed one is not a reason to raise a UAC prompt the
+// user never asked for.
+func relaunchElevatedIfNeeded(userDataDir string, mutexHandle syswindows.Handle) (syswindows.Handle, bool) {
+	if service.IsElevated() {
+		return mutexHandle, false
+	}
+
+	data, err := os.ReadFile(filepath.Join(userDataDir, "settings.json"))
+	if err != nil {
+		return mutexHandle, false
+	}
+	var settings struct {
+		TunMode    bool `json:"tunMode"`
+		KillSwitch bool `json:"killSwitch"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return mutexHandle, false
+	}
+	if !settings.TunMode && !settings.KillSwitch {
+		return mutexHandle, false
+	}
+
+	// The elevated process starts while this one is still alive, so the mutex has
+	// to go first or it would find NeoBox already running and exit at once.
+	if mutexHandle != 0 {
+		_ = syswindows.CloseHandle(mutexHandle)
+		mutexHandle = 0
+	}
+
+	if err := service.RelaunchElevated(); err != nil {
+		// Almost always a declined UAC prompt. Carry on without the rights: the
+		// window opens, and the connection attempt reports admin_required the way
+		// it always did. Retake the mutex first — it was released for a relaunch
+		// that did not happen.
+		fmt.Fprintf(os.Stderr, "Elevation declined or unavailable, continuing unelevated: %v\n", err)
+		mutexHandle, _ = service.AcquireSingleInstanceMutex()
+		return mutexHandle, false
+	}
+	return 0, true
 }
 
 // bringExistingInstanceToForeground finds the window of the running instance of NeoBox by its title,
 // restores it if minimized, and brings it to the foreground.
 func bringExistingInstanceToForeground() {
 	user32 := syswindows.NewLazySystemDLL("user32.dll")
-	procFindWindowW := user32.NewProc("FindWindowW")
 	procShowWindow := user32.NewProc("ShowWindow")
 	procSetForegroundWindow := user32.NewProc("SetForegroundWindow")
 	procIsIconic := user32.NewProc("IsIconic")
 
-	titlePtr, _ := syswindows.UTF16PtrFromString("NeoBox")
-	hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(titlePtr)))
+	// By class as well as title. "NeoBox" as a caption alone also matches an
+	// Explorer window showing a folder of that name — and on the machine this
+	// is built on, that folder exists.
+	hwnd := service.FindMainWindow()
 	if hwnd != 0 {
 		// SW_RESTORE = 9, SW_SHOW = 5
 		isMinimized, _, _ := procIsIconic.Call(hwnd)

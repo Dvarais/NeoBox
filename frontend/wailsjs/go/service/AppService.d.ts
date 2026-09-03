@@ -11,11 +11,23 @@ export function CheckTunStatus():Promise<boolean>;
 
 export function CheckUpdates():Promise<Record<string, any>>;
 
+export function CloseConnection(arg1:string):Promise<boolean>;
+
+export function DNSResolverOwners():Promise<Record<string, string>>;
+
 export function DownloadAndInstallUpdate(arg1:string,arg2:string):Promise<void>;
+
+export function ExportSettings():Promise<string>;
 
 export function FetchSubscription(arg1:string):Promise<Array<string>>;
 
 export function GetAppVersion():Promise<string>;
+
+export function GetConnections():Promise<Record<string, any>>;
+
+export function GetHistory():Promise<string>;
+
+export function GetKillSwitchState():Promise<Record<string, any>>;
 
 export function GetSettings():Promise<string>;
 
@@ -23,9 +35,13 @@ export function GetSubscriptions():Promise<string>;
 
 export function ImportClipboard(arg1:string):Promise<Array<string>>;
 
+export function ImportSettings():Promise<string>;
+
 export function InitTray(arg1:Array<number>):Promise<void>;
 
 export function IsQuitting():Promise<boolean>;
+
+export function MutexHandle():Promise<windows.Handle>;
 
 export function NotifyWindowHidden():Promise<void>;
 
@@ -37,13 +53,17 @@ export function PingServer(arg1:string):Promise<number>;
 
 export function Quit():Promise<void>;
 
+export function RebuildTrayProfiles():Promise<void>;
+
 export function RebuildTrayServers():Promise<void>;
+
+export function RebuildTrayToggles():Promise<void>;
 
 export function RequestAdmin():Promise<void>;
 
 export function RestartXray(arg1:string,arg2:string,arg3:boolean):Promise<Record<string, any>>;
 
-export function RunDiagnostics():Promise<string>;
+export function SaveHistory(arg1:string):Promise<boolean>;
 
 export function SaveLogs(arg1:string):Promise<string>;
 
@@ -53,7 +73,11 @@ export function SaveSubscriptions(arg1:string):Promise<boolean>;
 
 export function SelectAndConnectServer(arg1:string):Promise<void>;
 
+export function SessionTraffic():Promise<Record<string, number>>;
+
 export function SetContext(arg1:context.Context):Promise<void>;
+
+export function SetGlobalHotkeys(arg1:boolean,arg2:string,arg3:string):Promise<string>;
 
 export function SetMutexHandle(arg1:windows.Handle):Promise<void>;
 
@@ -71,6 +95,6 @@ export function StopAutoUpdateScheduler():Promise<void>;
 
 export function StopXray():Promise<Record<string, any>>;
 
-export function UpdateAllSubscriptions():Promise<void>;
+export function UpdateSubscriptionNow(arg1:string):Promise<void>;
 
-export function UpdateTrayStatus(arg1:string):Promise<void>;
+export function ValidateDNS(arg1:string):Promise<string>;

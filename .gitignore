@@ -22,9 +22,10 @@ build/bin/
 frontend/dist/*
 !frontend/dist/.gitkeep
 
-# Runtime artifact: InitTray writes icon.ico next to the running executable,
-# which lands here when the binary is run from the repository root. The icon
-# that ships with the app is build/windows/icon.ico and stays tracked.
+# Runtime artifact left by builds from before InitTray started writing the toast
+# icon into the user data directory. Kept ignored so an old copy in a working
+# tree does not show up as an untracked file; the icons that ship with the app
+# are build/windows/icon.ico and icon-off.ico, and both stay tracked.
 /icon.ico
 
 # Dependency Directories
@@ -47,3 +48,9 @@ Thumbs.db
 *.key
 *.pem
 private_key*
+
+# Design system record and its sidecar. Оба файла адресованы агентам, а не
+# сборке: DESIGN.md описывает визуальную систему, .impeccable/design.json
+# несёт то, что не помещается в его фронтматтер.
+DESIGN.md
+.impeccable/

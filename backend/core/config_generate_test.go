@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/netip"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -318,7 +319,7 @@ func TestFakeIPRuleComesAfterExclusions(t *testing.T) {
 	cfg := generate(t, Settings{
 		FakeDns:              true,
 		TunMode:              true,
-		CustomDirect:         []string{"example.com"},
+		CustomRules:          []CustomRule{{Action: "direct", Type: "domain_suffix", Value: "example.com"}},
 		ProcessMode:          "blacklist",
 		ProcessListBlacklist: []string{"game.exe"},
 	})
@@ -528,7 +529,7 @@ func TestWhitelistCatchAllComesAfterFakeIPRule(t *testing.T) {
 		"fakeip":            indexOfRule(rules, isFakeIPRoute),
 		"private addresses": indexOfRule(rules, func(r map[string]interface{}) bool { return hasKeyValue(r, "ip_is_private", true) }),
 		"bypass RU": indexOfRule(rules, func(r map[string]interface{}) bool {
-			return hasKeyValue(r, "rule_set", []string{"geoip-ru", "geosite-ru"})
+			return hasKeyValue(r, "rule_set", []string{"geoip-ru", "geosite-category-ru"})
 		}),
 		"whitelisted process": indexOfRule(rules, whitelistProcessRule),
 	} {
@@ -620,22 +621,11 @@ func TestCustomRules(t *testing.T) {
 	}
 }
 
-func TestCustomDirectDomainsAreTrimmedAndFiltered(t *testing.T) {
-	cfg := generate(t, Settings{CustomDirect: []string{"  example.com  ", "", "   "}})
-
-	idx := indexOfRule(routeRules(t, cfg), func(r map[string]interface{}) bool {
-		return hasKeyValue(r, "domain_suffix", []string{"example.com"})
-	})
-	if idx < 0 {
-		t.Error("custom direct domain was not trimmed into a usable rule")
-	}
-}
-
 func TestBypassRuAddsRuleSets(t *testing.T) {
 	cfg := generate(t, Settings{BypassRu: true})
 
 	if indexOfRule(routeRules(t, cfg), func(r map[string]interface{}) bool {
-		return hasKeyValue(r, "rule_set", []string{"geoip-ru", "geosite-ru"}) &&
+		return hasKeyValue(r, "rule_set", []string{"geoip-ru", "geosite-category-ru"}) &&
 			hasKeyValue(r, "outbound", "direct")
 	}) < 0 {
 		t.Error("BypassRu did not add a rule referencing the RU rule-sets")
@@ -646,10 +636,22 @@ func TestBypassRuAddsRuleSets(t *testing.T) {
 		t.Fatal("BypassRu did not declare the rule_set sources")
 	}
 	for _, set := range sets {
-		// The rule-set download must not go through the tunnel it configures.
-		if got := set["download_detour"]; got != "direct" {
-			t.Errorf("rule-set %v download_detour = %v, want direct", set["tag"], got)
+		// The lists live on a host the bypass exists to reach, so the download
+		// goes through the tunnel. Fetched direct, it failed for every user who
+		// turns the bypass on and the rules never loaded.
+		if got := set["download_detour"]; got != "proxy" {
+			t.Errorf("rule-set %v download_detour = %v, want the proxy outbound", set["tag"], got)
 		}
+		if url, _ := set["url"].(string); !strings.HasSuffix(url, "/"+set["tag"].(string)+".srs") {
+			t.Errorf("rule-set %v is fetched from %q, which is not that list's file", set["tag"], url)
+		}
+	}
+
+	dnsRules := cfg["dns"].(map[string]interface{})["rules"].([]map[string]interface{})
+	if indexOfRule(dnsRules, func(r map[string]interface{}) bool {
+		return hasKeyValue(r, "rule_set", []string{"geosite-category-ru"}) && hasKeyValue(r, "server", "dns-direct")
+	}) < 0 {
+		t.Error("BypassRu did not resolve RU domains outside the tunnel")
 	}
 
 	if _, ok := routeSection(t, generate(t, Settings{}))["rule_set"]; ok {
@@ -658,6 +660,28 @@ func TestBypassRuAddsRuleSets(t *testing.T) {
 }
 
 // ─── Clash API ──────────────────────────────────────────────────────────────
+
+// Загрузка rule-set-ов идёт в момент старта маршрутизатора, а endpoint-ы
+// стартуют позже него: WireGuard-туннеля тогда ещё нет. Неудачная первая
+// загрузка при этом срывает старт ядра целиком, а не просто оставляет правило
+// без совпадений, поэтому такие конфиги качают списки напрямую.
+func TestBypassRuDownloadsWireGuardRuleSetsDirectly(t *testing.T) {
+	cfg, err := GenerateConfig(wireguardOutbound(), Settings{BypassRu: true}, false, "cache.db", "secret")
+	if err != nil {
+		t.Fatalf("GenerateConfig failed: %v", err)
+	}
+
+	sets, ok := routeSection(t, cfg)["rule_set"].([]map[string]interface{})
+	if !ok {
+		t.Fatal("BypassRu did not declare the rule_set sources")
+	}
+	for _, set := range sets {
+		if got := set["download_detour"]; got != "direct" {
+			t.Errorf("rule-set %v download_detour = %v; a WireGuard endpoint is not up yet when the router fetches it",
+				set["tag"], got)
+		}
+	}
+}
 
 func TestClashSecretIsInjected(t *testing.T) {
 	cfg, err := GenerateConfig(testOutbound(), Settings{}, false, "cache.db", "s3cr3t")
@@ -716,7 +740,6 @@ func TestConfigIsJSONSerialisable(t *testing.T) {
 		TunMode:              true,
 		FakeDns:              true,
 		BypassRu:             true,
-		CustomDirect:         []string{"example.com"},
 		ProcessMode:          "whitelist",
 		ProcessListWhitelist: []string{"browser.exe"},
 		CustomRules:          []CustomRule{{Action: "block", Type: "domain", Value: "ads.example"}},
@@ -880,5 +903,74 @@ func TestNatPmpIsRejectedBeforeItBecomesAConnection(t *testing.T) {
 	}
 	if natPmp < lastHijack {
 		t.Errorf("NAT-PMP reject at %d precedes the DNS hijack at %d", natPmp, lastHijack)
+	}
+}
+
+// Правило по программе — это CustomRule типа "process". Оно существует потому,
+// что «Соединения» группируют трафик по .exe и предлагают отправить программу
+// напрямую или через прокси одним действием, как это уже делается для доменов.
+//
+// В отличие от домена, совпасть оно может только когда ядро видит владельца
+// сокета, то есть в TUN-режиме. Тесты ниже держат обе стороны этого: правило
+// появляется с TUN и не появляется без него.
+
+func TestProcessCustomRuleEmittedInTunMode(t *testing.T) {
+	cfg := generate(t, Settings{
+		TunMode: true,
+		CustomRules: []CustomRule{
+			{Action: "direct", Type: "process", Value: "chrome.exe"},
+		},
+	})
+	rules := routeRules(t, cfg)
+
+	idx := indexOfRule(rules, func(r map[string]interface{}) bool {
+		return hasKeyValue(r, "process_name", []string{"chrome.exe"})
+	})
+	if idx < 0 {
+		t.Fatal("правило по процессу не попало в конфиг при включённом TUN")
+	}
+	if got := rules[idx]["outbound"]; got != "direct" {
+		t.Errorf("outbound правила = %v, ожидался direct", got)
+	}
+
+	// Тот же порядок, что и у остальных кастомных правил: раньше ip_is_private
+	// нельзя, иначе правило по браузеру перехватило бы обращения к роутеру.
+	privateIdx := indexOfRule(rules, func(r map[string]interface{}) bool {
+		return hasKeyValue(r, "ip_is_private", true)
+	})
+	if privateIdx >= 0 && idx > privateIdx {
+		t.Errorf("правило по процессу стоит после ip_is_private (%d > %d)", idx, privateIdx)
+	}
+}
+
+func TestProcessCustomRuleSkippedWithoutTun(t *testing.T) {
+	cfg := generate(t, Settings{
+		TunMode: false,
+		CustomRules: []CustomRule{
+			{Action: "direct", Type: "process", Value: "chrome.exe"},
+		},
+	})
+
+	for _, r := range routeRules(t, cfg) {
+		if _, ok := r["process_name"]; ok {
+			t.Fatal("правило по процессу попало в конфиг без TUN: совпасть оно не может, " +
+				"а место перед ip_is_private занимает")
+		}
+	}
+}
+
+func TestProcessCustomRuleRejectsUnusableValue(t *testing.T) {
+	// Значение с разделителем пути или подстановкой не совпало бы никогда.
+	// Такое правило отбрасывается на генерации, а не уезжает в конфиг мёртвым.
+	for _, value := range []string{`C:\Program Files\app.exe`, "chrome*", "", "   "} {
+		cfg := generate(t, Settings{
+			TunMode:     true,
+			CustomRules: []CustomRule{{Action: "direct", Type: "process", Value: value}},
+		})
+		for _, r := range routeRules(t, cfg) {
+			if _, ok := r["process_name"]; ok {
+				t.Errorf("значение %q не должно было превратиться в правило", value)
+			}
+		}
 	}
 }

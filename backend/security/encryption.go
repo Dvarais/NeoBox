@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -118,8 +119,20 @@ func loadOrCreateKey() ([]byte, error) {
 			cachedKey = decrypted
 			return cachedKey, nil
 		}
-		// If decryption fails, fall through to generate new key
-		fmt.Printf("[encryption] warning: failed to decrypt existing key (%v), generating new one\n", decErr)
+		// The key could not be unsealed. A new one is generated below, and
+		// everything sealed with the old one becomes unreadable — subscriptions,
+		// the saved server, favourites, profiles, history. So the old file is
+		// moved aside first instead of being written over.
+		//
+		// DPAPI failing is not proof the key is gone: it fails when the user
+		// profile is not fully loaded, after some credential changes, and when
+		// AppData was copied from another machine or account. All of those are
+		// recoverable while key.bin still exists, and none of them are once it
+		// has been overwritten. It is the same treatment storage.quarantine
+		// already gives the data files — which bought nothing as long as the one
+		// file they all depend on was the one being destroyed.
+		preserveUnreadableKey(keyFilePath)
+		fmt.Printf("[encryption] warning: failed to decrypt existing key (%v), generating a new one\n", decErr)
 	}
 
 	// Generate a new random 32-byte AES-256 key
@@ -151,6 +164,18 @@ func loadOrCreateKey() ([]byte, error) {
 	}
 
 	return cachedKey, nil
+}
+
+// preserveUnreadableKey renames a key file that could not be unsealed, so the
+// bytes survive for a later attempt. Failures are reported, not returned: the
+// caller is already recovering from a read failure.
+func preserveUnreadableKey(path string) {
+	dest := fmt.Sprintf("%s.unreadable-%s", path, time.Now().Format("20060102-150405"))
+	if err := os.Rename(path, dest); err != nil {
+		fmt.Printf("[encryption] warning: could not preserve the unreadable key: %v\n", err)
+		return
+	}
+	fmt.Printf("[encryption] the previous key could not be decrypted; original preserved as %s\n", filepath.Base(dest))
 }
 
 // Encrypt encrypts data using AES-256-GCM with a random nonce.

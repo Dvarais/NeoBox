@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"NeoBox/backend/core"
 	"NeoBox/backend/security"
 	"NeoBox/backend/storage"
 )
@@ -29,7 +31,13 @@ import (
 // are the fields that move to the encrypted file; everything else in settings
 // (toggles, DNS choice, domain and process lists) carries no credentials and is
 // deliberately left readable so users can edit it by hand.
-var secretSettingKeys = []string{"lastSelectedServer", "favoriteLinks"}
+//
+// "profiles" сидит здесь по той же причине, хотя учётные данные в нём не
+// обязательны: профиль МОЖЕТ хранить ссылку на сервер, а разбирать содержимое
+// поля, чтобы решать про каждый профиль отдельно, — это способ однажды
+// ошибиться и записать чужой UUID открытым текстом. Поле целиком относится к
+// секретным, и вопрос закрыт.
+var secretSettingKeys = []string{"lastSelectedServer", "favoriteLinks", "profiles"}
 
 // settingsPath returns the location of the plaintext settings file.
 func (s *AppService) settingsPath() string {
@@ -172,6 +180,133 @@ func (s *AppService) migrateSecretSettings() {
 	fmt.Printf("[settings] moved %d credential field(s) from settings.json into encrypted state.json\n", len(legacy))
 }
 
+// foldCustomDirect переносит снятое поле «домены для прямого доступа» в
+// кастомные правила и возвращает, нашлось ли что переносить.
+//
+// Поле разворачивалось ровно в domain_suffix → direct, то есть в одно из
+// сочетаний, которые и так даёт таблица правил; ради него в интерфейсе жили
+// вторая текстареа и вторая кнопка «Сохранить». Домены при этом не
+// выбрасываются: трафик, который ходил мимо туннеля, иначе молча пошёл бы в
+// него.
+//
+// Перенесённые правила встают ПЕРЕД существующими, потому что в конфиге
+// customDirect попадал в route.rules раньше customRules и перебивал их. Порядок
+// должен пережить переезд, иначе у того, кто завёл и домен в поле, и правило
+// «заблокировать» на него же, маршрут поменяется молча.
+func foldCustomDirect(settings map[string]interface{}) bool {
+	raw, present := settings["customDirect"]
+	if !present {
+		return false
+	}
+	delete(settings, "customDirect")
+
+	domains, _ := raw.([]interface{})
+	folded := make([]interface{}, 0, len(domains))
+	for _, entry := range domains {
+		domain, _ := entry.(string)
+		if domain = strings.TrimSpace(domain); domain == "" {
+			continue
+		}
+		folded = append(folded, map[string]interface{}{
+			"action": "direct",
+			"type":   "domain_suffix",
+			"value":  domain,
+		})
+	}
+
+	existing, _ := settings["customRules"].([]interface{})
+	settings["customRules"] = append(folded, existing...)
+	return true
+}
+
+// migrateCustomDirect прогоняет foldCustomDirect по сохранённым настройкам и по
+// каждому профилю, один раз при старте.
+//
+// Профили — отдельно и в другом файле: у каждого свой набор маршрутов, лежат они
+// в зашифрованной половине, и миграция одного верхнего уровня потеряла бы домены
+// у всех, кто развёл настройки по профилям. Повторного прогона поле не
+// переживает — foldCustomDirect его удаляет, — так что запуск идемпотентен.
+func (s *AppService) migrateCustomDirect() {
+	s.fileMu.Lock()
+	defer s.fileMu.Unlock()
+
+	if settings := s.readPlainSettingsLocked(); foldCustomDirect(settings) {
+		if err := s.writePlainSettingsLocked(settings); err != nil {
+			fmt.Printf("[settings] warning: could not fold customDirect into custom rules: %v\n", err)
+		}
+	}
+
+	secrets := s.readSecretSettingsLocked()
+	profiles, _ := secrets["profiles"].([]interface{})
+	folded := false
+	for _, entry := range profiles {
+		profile, ok := entry.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if nested, ok := profile["settings"].(map[string]interface{}); ok && foldCustomDirect(nested) {
+			folded = true
+		}
+	}
+	if folded {
+		if err := s.writeSecretSettingsLocked(secrets); err != nil {
+			fmt.Printf("[settings] warning: could not fold customDirect in profiles: %v\n", err)
+		}
+	}
+}
+
+// autostartName is the Run-key value NeoBox registers itself under.
+const autostartName = "NeoBox"
+
+// applyAutostart brings the Run key in line with the saved setting.
+//
+// Сверяется вся строка запуска, а не факт наличия значения, и делается это ещё
+// и при старте — потому что значение уезжает из-под приложения тремя разными
+// способами, и каждый оставлял стоящую галку «Запускать вместе с Windows» над
+// автозапуском, которого нет:
+//
+//   - установщик удаляет значение с именем «NeoBox», вычищая автозапуск
+//     Electron-версии, — а это ровно то имя, под которым регистрируется и эта;
+//   - переустановка в другой каталог оставляет в реестре прежний путь;
+//   - чистильщики реестра сносят записи Run пачками.
+//
+// Починка прежде была случайной: SaveSettings восстанавливал значение только
+// когда галка МЕНЯЛАСЬ, а она стояла и не менялась.
+func applyAutostart(want bool) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return
+	}
+	// SetupAutostart берёт путь в кавычки — сравнивать надо с тем же видом.
+	wanted := "\"" + exePath + "\""
+	current := security.AutostartTarget(autostartName)
+
+	switch {
+	case want && current != wanted:
+		_ = security.SetupAutostart(autostartName, exePath)
+	case !want && current != "":
+		_ = security.RemoveAutostart(autostartName)
+	}
+}
+
+// ValidateDNS проверяет значение поля «свой DNS» и возвращает пустую строку,
+// если оно годится. Интерфейс зовёт её при вводе, чтобы непригодный адрес
+// вскрывался на месте, а не при сборке конфига по нажатию «Подключиться».
+//
+// Проверяет тот же код, что и генерация: своя копия правил во фронтенде
+// разошлась бы с этой при первой же правке.
+func (s *AppService) ValidateDNS(setting string) string {
+	return core.ValidateDNSSetting(setting)
+}
+
+// DNSResolverOwners отдаёт проверке утечки карту «адрес резолвера — владелец
+// сети», ту же самую, по которой собирается конфиг. Своя копия во фронтенде
+// разошлась бы с ней при первом добавленном провайдере — см. комментарий у
+// core.DNSResolverOwners.
+func (s *AppService) DNSResolverOwners() map[string]string {
+	return core.DNSResolverOwners()
+}
+
 // GetSettings returns the user's settings as a JSON string, merging the
 // plaintext half with the decrypted half. It is a pure read — it never writes to
 // disk; moving credentials out of settings.json is migrateSecretSettings' job
@@ -214,14 +349,7 @@ func (s *AppService) SaveSettings(settingsJSON string) bool {
 	// Apply autostart update if needed based on settings changes. This touches the
 	// registry, not the settings files, so it needs no lock.
 	openAtLogin, _ := settings["openAtLogin"].(bool)
-	if exePath, err := os.Executable(); err == nil {
-		alreadyEnabled := security.IsAutostartEnabled("NeoBox")
-		if openAtLogin && !alreadyEnabled {
-			_ = security.SetupAutostart("NeoBox", exePath)
-		} else if !openAtLogin && alreadyEnabled {
-			_ = security.RemoveAutostart("NeoBox")
-		}
-	}
+	applyAutostart(openAtLogin)
 
 	lang, hasLang := settings["language"].(string)
 	secrets := splitSecretSettings(settings)
@@ -256,5 +384,14 @@ func (s *AppService) SaveSettings(settingsJSON string) bool {
 	if hasLang {
 		s.applyLanguage(lang)
 	}
+
+	// Галки в трее — второй экземпляр тех же трёх переключателей, и расходиться
+	// им нельзя. Сюда приходит каждое их изменение, откуда бы оно ни пришло, —
+	// включая клик по самой галке в трее, который возвращается сюда через
+	// фронтенд.
+	//
+	// Из уже разобранного объекта, а не перечитыванием файла: fileMu только что
+	// отпущен, и повторное чтение было бы гонкой с чужим сохранением.
+	s.applyTrayToggles(trayTogglesFrom(settings))
 	return true
 }

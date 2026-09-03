@@ -12,39 +12,62 @@
        (A file's SRI hash sitting in script-src authorises nothing and only reads as
        though it does.)
 
-       style-src keeps 'unsafe-inline': the UI sets element.style throughout, so
-       removing it requires refactoring those call sites first. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.ipify.org https://raw.githubusercontent.com https://cloudflare-dns.com;">
+       style-src no longer carries 'unsafe-inline'. What kept it there was 112
+       style= attributes in this file, not, as the old note here claimed, the
+       element.style assignments in the interface: CSP governs the style
+       ATTRIBUTE and <style> elements, while CSSOM writes from script are outside
+       its reach and always have been. The attributes now live in style.css, at
+       the end, under a heading that says where they came from.
+
+       The rule this leaves behind: markup gets classes, never a style attribute,
+       and that holds for HTML assembled as a string in renderer.ts too — it
+       reaches the parser the same way. Values that genuinely change at runtime
+       stay in script as element.style, which is allowed and is what the interface
+       already does. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://api.ipify.org https://raw.githubusercontent.com https://cloudflare-dns.com;">
   <title>NeoBox Glass</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Боковая панель -->
+  <!-- Боковая панель.
+
+       Пункты рейла — настоящие <button> внутри role="tablist", а не <div> с
+       обработчиком клика: иначе до шести из семи экранов нельзя добраться с
+       клавиатуры. Имя каждой кнопки задаётся через aria-label, потому что
+       внутри только иконка; title оставлен подсказкой для мыши. Оба значения
+       переводятся в applyLanguage. -->
   <aside>
-    <div class="nav-item active" data-target="view-home" title="Главная">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-    </div>
-    <div class="nav-item" data-target="view-servers" title="Серверы">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-    </div>
-    <div class="nav-item" data-target="view-history" title="История">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-    </div>
-    <div class="nav-item" data-target="view-routes" title="Маршруты">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
-    </div>
-    <div class="nav-item" data-target="view-settings" title="Настройки">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-    </div>
-    <div class="nav-item" data-target="view-logs" title="Логи">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/><line x1="9" y1="9" x2="10" y2="9"/></svg>
-    </div>
-    
-    <div style="flex: 1;"></div>
-    
-    <div id="langToggle" class="nav-item" title="Сменить язык / Change Language" style="margin-bottom: 10px; font-weight: bold; font-size: 14px;">
+    <nav class="nav-rail" aria-label="Разделы приложения">
+      <div class="nav-tabs" role="tablist" aria-orientation="vertical">
+        <button type="button" class="nav-item active" id="tab-view-home" role="tab" aria-selected="true" aria-controls="view-home" data-target="view-home" title="Главная" aria-label="Главная">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </button>
+        <button type="button" class="nav-item" id="tab-view-servers" role="tab" aria-selected="false" aria-controls="view-servers" data-target="view-servers" title="Серверы" aria-label="Серверы" tabindex="-1">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        </button>
+        <button type="button" class="nav-item" id="tab-view-history" role="tab" aria-selected="false" aria-controls="view-history" data-target="view-history" title="История" aria-label="История" tabindex="-1">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </button>
+        <button type="button" class="nav-item" id="tab-view-routes" role="tab" aria-selected="false" aria-controls="view-routes" data-target="view-routes" title="Маршруты" aria-label="Маршруты" tabindex="-1">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+        </button>
+        <button type="button" class="nav-item" id="tab-view-connections" role="tab" aria-selected="false" aria-controls="view-connections" data-target="view-connections" title="Соединения" aria-label="Соединения" tabindex="-1">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </button>
+        <button type="button" class="nav-item" id="tab-view-settings" role="tab" aria-selected="false" aria-controls="view-settings" data-target="view-settings" title="Настройки" aria-label="Настройки" tabindex="-1">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+        <button type="button" class="nav-item" id="tab-view-logs" role="tab" aria-selected="false" aria-controls="view-logs" data-target="view-logs" title="Логи" aria-label="Логи" tabindex="-1">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/><line x1="9" y1="9" x2="10" y2="9"/></svg>
+        </button>
+      </div>
+    </nav>
+
+    <div class="nav-spacer"></div>
+
+    <button type="button" id="langToggle" class="nav-item" title="Сменить язык / Change Language" aria-label="Сменить язык / Change Language">
       RU
-    </div>
+    </button>
   </aside>
 
   <!-- Основной контент -->
@@ -53,229 +76,293 @@
     <div class="window-header">
       <!-- appVersion is filled in from the Go backend at startup; the literal here
            is only what shows if that call fails. -->
-      <div class="window-title">NeoBox <span id="appVersion" style="font-size: 10px; opacity: 0.5; margin-left: 6px; font-weight: normal; vertical-align: middle;">v1.7.5.4</span></div>
+      <h1 class="window-title">NeoBox <span id="appVersion">v1.7.5.4</span></h1>
       <div class="window-controls">
-        <button id="minimizeBtn" class="control-btn" title="Свернуть">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <button id="minimizeBtn" class="control-btn" title="Свернуть" aria-label="Свернуть">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
-        <button id="closeBtn" class="control-btn close" title="Закрыть">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        <button id="closeBtn" class="control-btn close" title="Закрыть" aria-label="Закрыть">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
     </div>
 
     <!-- Вкладка ГЛАВНАЯ -->
-    <section id="view-home" class="view active">
+    <section id="view-home" class="view active" role="tabpanel" aria-labelledby="tab-view-home">
+      <h2 id="homeViewHeading" class="sr-only">Главная</h2>
       <div class="status-header">
-        <div class="status-badge">
-          <div id="statusDot" class="status-dot"></div>
+        <!-- role="status" — вежливая live-область: смена «Отключено» на
+             «Подключено» произносится скринридером сама, без перевода фокуса.
+             Точка рядом декоративна, состояние несёт текст. -->
+        <div class="status-badge" role="status">
+          <div id="statusDot" class="status-dot" aria-hidden="true"></div>
           <span id="statusText">Отключено</span>
         </div>
-        <div class="status-badge" style="background: rgba(56, 189, 248, 0.1);">
+        <div class="status-badge status-badge--accent">
           <span>IP: </span>
-          <span id="currentIp" style="color: var(--accent-color);">Определяется...</span>
+          <span id="currentIp">Определяется...</span>
         </div>
+        <!-- Kill Switch. До сих пор его состояние жило только галкой в
+             «Настройках», а когда он режет сеть, пользователь видел просто
+             «интернет пропал» и связать одно с другим не мог. Второй принцип
+             продукта требует обратного: падать в закрытое состояние и говорить
+             об этом. -->
+        <div id="killSwitchBadge" class="status-badge status-badge--warning" role="status">
+          <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <span id="killSwitchBadgeText">Kill Switch активен</span>
+        </div>
+
         <!-- Connection timer -->
-        <div id="sessionTimerBadge" class="status-badge" style="display:none; background: rgba(74,222,128,0.1);">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          <span id="sessionTimerText" style="color: var(--success); font-variant-numeric: tabular-nums;">00:00:00</span>
+        <div id="sessionTimerBadge" class="status-badge">
+          <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span id="sessionTimerText">00:00:00</span>
         </div>
       </div>
 
       <div class="power-container">
-        <div id="powerBtn" class="power-btn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
-        </div>
+        <!-- Главное действие продукта. Было <div>: подключиться с клавиатуры
+             было нельзя вообще. Имя кнопки меняется вместе с состоянием в
+             updateAppInterface. -->
+        <button type="button" id="powerBtn" class="power-btn" aria-label="Подключиться">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+        </button>
         
-        <div id="activeServerCard" class="current-server-card">
-          <div class="server-icon">🌐</div>
+        <div class="current-server-card">
+          <div class="server-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          </div>
           <div class="server-info">
             <h3 id="activeServerName">Сервер не выбран</h3>
             <p id="activeServerDetails">Выберите локацию во вкладке Серверы</p>
           </div>
         </div>
 
-        <!-- Скоростемер (Download / Upload) -->
-        <div class="speedometer-container" id="speedometerContainer" style="display: none;">
-          <div class="speed-badge download">
-            <svg class="speed-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>
-            <div class="speed-info">
-              <span class="speed-label" id="speedDownloadLabel">Загрузка</span>
-              <span id="speedDownload" class="speed-value">0.0 KB/s</span>
-            </div>
-          </div>
-          <div class="speed-badge upload">
-            <svg class="speed-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="16 9 12 5 8 9"/><line x1="12" y1="5" x2="12" y2="14"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>
-            <div class="speed-info">
-              <span class="speed-label" id="speedUploadLabel">Выгрузка</span>
-              <span id="speedUpload" class="speed-value">0.0 KB/s</span>
-            </div>
-          </div>
-        </div>
+        <!-- Трафик: скорость сейчас и объём за сессию.
+             Это два измерения по двум направлениям, то есть настоящая таблица —
+             отсюда и разметка. Заголовки строк и столбцов дают скринридеру
+             «Сессия, загрузка, 1,2 ГБ» без единой скрытой подписи, а глазу —
+             выравнивание по направлению: один столбец, одно направление.
 
-        <!-- Dummies to ensure backward compatibility with renderer.js and avoid javascript errors -->
-        <div id="speedometerTotalContainer" style="display: none;">
-          <span id="speedTotal"></span>
-        </div>
+             Не live-область намеренно: цифры меняются раз в секунду, и
+             скринридер, читающий их вслух, сделал бы экран невыносимым.
 
-        <!-- Общий потраченный трафик (Игровой стиль) -->
-        <div class="traffic-game-container" id="sessionTotalContainer" style="display: none;">
-          <div class="traffic-game-card">
-            <div class="traffic-game-header">
-              <span class="traffic-game-title" id="trafficGameTitle">Передача данных</span>
-              <span class="traffic-game-ratio" id="trafficGameRatio">0%</span>
+             Карточка — та же, что у «Сервера» и «TUN-интерфейса» по соседству.
+             Раньше здесь стояла голая таблица: она сжималась по содержимому, а
+             значит была уже соседей, имела свой радиус и не имела заголовка —
+             посреди столбца из двух карточек это читалось как чужой элемент,
+             попавший туда случайно.
+
+             Иконка — те же две стрелки, что стоят в шапке таблицы, а не эмодзи,
+             как у соседей: у эмодзи свой цвет, и на чужой теме они остались бы
+             единственным местом экрана, которое ей не подчиняется.
+
+             Показывается только на подключённом туннеле: без него это четыре
+             нуля, которые ничего не сообщают. -->
+        <div id="trafficCard" class="current-server-card card--stack">
+          <div class="card-head">
+            <div class="server-icon" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3v18"/><polyline points="3 17 7 21 11 17"/><path d="M17 21V3"/><polyline points="13 7 17 3 21 7"/></svg>
             </div>
-            
-            <!-- Прогресс-бар в игровом стиле -->
-            <div class="traffic-game-progress-bar">
-              <div class="traffic-game-progress-fill" id="trafficGameProgressFill">
-                <div class="traffic-game-progress-glow"></div>
-              </div>
-            </div>
-            
-            <!-- Статистика снизу -->
-            <div class="traffic-game-stats">
-              <div class="traffic-stat-item">
-                <span class="traffic-stat-label" id="trafficGameDownLabel">Загружено</span>
-                <span class="traffic-stat-val down" id="sessionTotalDown">0 B</span>
-              </div>
-              <div class="traffic-stat-divider"></div>
-              <div class="traffic-stat-item">
-                <span class="traffic-stat-label" id="trafficGameLimitLabel">Прогресс</span>
-                <span class="traffic-stat-val limit" id="trafficGameTotalAndLimit">0 B / 100 MB</span>
-              </div>
-              <div class="traffic-stat-divider"></div>
-              <div class="traffic-stat-item">
-                <span class="traffic-stat-label" id="trafficGameUpLabel">Выгружено</span>
-                <span class="traffic-stat-val up" id="sessionTotalUp">0 B</span>
-              </div>
-            </div>
+            <h3 id="trafficCardTitle">Передача данных</h3>
           </div>
+          <table class="traffic-meter" aria-labelledby="trafficCardTitle">
+            <thead>
+              <tr>
+                <td></td>
+                <th scope="col">
+                  <svg class="traffic-arrow" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+                  <span class="sr-only" id="trafficColDown">Загрузка</span>
+                </th>
+                <th scope="col">
+                  <svg class="traffic-arrow" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+                  <span class="sr-only" id="trafficColUp">Выгрузка</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="traffic-row traffic-row--rate">
+                <th scope="row" id="trafficRowNow">Сейчас</th>
+                <td><span class="traffic-value" id="speedDownValue">0</span> <span class="traffic-unit" id="speedDownUnit">KB/s</span></td>
+                <td><span class="traffic-value" id="speedUpValue">0</span> <span class="traffic-unit" id="speedUpUnit">KB/s</span></td>
+              </tr>
+              <tr class="traffic-row traffic-row--total">
+                <th scope="row" id="trafficRowSession">За сессию</th>
+                <td><span class="traffic-value" id="totalDownValue">0</span> <span class="traffic-unit" id="totalDownUnit">B</span></td>
+                <td><span class="traffic-value" id="totalUpValue">0</span> <span class="traffic-unit" id="totalUpUnit">B</span></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         <!-- Блок TUN статуса -->
-        <div id="tunStatusContainer" class="current-server-card" style="display: none; margin-top: 20px; max-width: 400px; padding: 15px 20px;">
-          <div class="server-icon" style="background: rgba(14, 165, 233, 0.1);" id="tunStatusIcon">🛡️</div>
-          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+        <div id="tunStatusContainer" class="current-server-card">
+          <div class="server-icon" id="tunStatusIcon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div class="tun-status-row">
             <div class="server-info">
-              <h3 id="tunStatusTitle" style="font-size: 14px; margin: 0;">TUN-интерфейс</h3>
-              <p id="tunStatusText" style="font-size: 11px; margin-top: 3px; color: var(--text-dim);">Проверка...</p>
+              <h3 id="tunStatusTitle">TUN-интерфейс</h3>
+              <p id="tunStatusText">Проверка...</p>
             </div>
-            <button id="restoreTunBtn" class="btn-glass" style="padding: 6px 12px; font-size: 11px; border-radius: 8px;">
+            <button id="restoreTunBtn" class="btn-glass">
               <span id="restoreTunBtnText">Восстановить</span>
             </button>
           </div>
         </div>
 
         <div class="controls">
-          <button id="restartBtn" class="btn-glass" style="display: none;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+          <button id="restartBtn" class="btn-glass">
+            <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
             <span id="restartBtnText">Перезапустить</span>
           </button>
-          <button id="disconnectBtn" class="btn-glass" style="display: none; border-color: var(--danger); color: var(--danger);">
-            <span id="disconnectBtnText">Отключиться</span>
-          </button>
+          <!-- Кнопка «Отключиться» убрана: она дублировала кнопку питания,
+               которая при подключённом VPN и так отключает. «Перезапустить» —
+               отдельное действие, поэтому осталось. -->
         </div>
       </div>
     </section>
 
     <!-- Вкладка СЕРВЕРЫ -->
-    <section id="view-servers" class="view">
-      <div style="margin-bottom: 30px; padding: 20px; background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); border-radius: 12px;">
-        <h4 id="subManagementTitle" style="margin-bottom: 15px; color: var(--accent-color);">Управление подписками</h4>
-        <div style="display: flex; gap: 10px;">
-          <input type="text" id="subName" placeholder="Имя (например, Основная)">
-          <input type="text" id="subUrl" placeholder="URL подписки (vless/sub/base64)">
-          <button id="addSubBtn" class="btn-glass" style="background: var(--accent-color); color: #000; font-weight: bold;">Добавить</button>
+    <section id="view-servers" class="view" role="tabpanel" aria-labelledby="tab-view-servers">
+      <div class="sub-manage-panel">
+        <!-- Был <h4> перед <h2> «Мои локации» — порядок уровней шёл вниз, а не
+             вверх. Уровень исправлен, кегль зафиксирован на прежних 16px, чтобы
+             вид не поехал. -->
+        <h2 id="subManagementTitle">Управление подписками</h2>
+        <div class="sub-add-row">
+          <!-- aria-label дублирует placeholder: подпись, исчезающая при вводе,
+               не является именем поля. Оба значения ставятся из одного ключа. -->
+          <input type="text" id="subName" placeholder="Имя (например, Основная)" aria-label="Имя (например, Основная)">
+          <input type="text" id="subUrl" placeholder="URL подписки (vless/sub/base64)" aria-label="URL подписки (vless/sub/base64)">
+          <button id="addSubBtn" class="btn-glass">Добавить</button>
         </div>
-        <div style="margin-top: 15px; display: flex; gap: 10px;">
+        <div class="sub-actions-row">
            <button id="updateSubBtn" class="btn-glass" title="Загрузить свежие серверы для текущей подписки">Обновить текущую</button>
            <button id="importClipboardBtn" class="btn-glass">Импорт из буфера</button>
            <button id="importQrBtn" class="btn-glass">Импорт через QR-код</button>
         </div>
       </div>
 
-      <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px;">
-        <div style="display: flex; align-items: center; gap: 15px;">
-          <h2 id="myLocationsTitle" style="margin-bottom: 0;">Мои локации</h2>
+      <div class="section-toolbar section-toolbar--baseline">
+        <div class="section-toolbar-group">
+          <h2 id="myLocationsTitle">Мои локации</h2>
+          <!-- Меню сортировки открывалось только по наведению мыши, то есть с
+               клавиатуры было недостижимо. Теперь у него есть кнопка-триггер с
+               aria-expanded, а открытие продублировано фокусом (см. CSS
+               :focus-within и обработчики в renderer.ts). -->
           <div class="sort-dropdown">
-            <button class="btn-glass" style="padding: 6px 12px; font-size: 12px; gap: 5px;">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-3 3-3-3"/><path d="M12 3v18"/><path d="m9 6 3-3 3 3"/></svg>
+            <button type="button" id="sortBtn" class="btn-glass" aria-haspopup="true" aria-expanded="false" aria-controls="sortMenu">
+              <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-3 3-3-3"/><path d="M12 3v18"/><path d="m9 6 3-3 3 3"/></svg>
               <span id="sortBtnText">Сортировка</span>
             </button>
-            <div class="sort-menu">
-              <div class="sort-item active" data-sort="default">🔄 По умолчанию</div>
-              <div class="sort-item" data-sort="ping">🚀 Сначала быстрые</div>
-              <div class="sort-item" data-sort="name">🔤 По названию</div>
-              <div class="sort-item" data-sort="protocol">📡 По протоколу</div>
+            <div class="sort-menu" id="sortMenu" role="menu" aria-label="Сортировка серверов">
+              <button type="button" class="sort-item active" role="menuitemradio" aria-checked="true" data-sort="default">
+                <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+                <span>По умолчанию</span>
+              </button>
+              <button type="button" class="sort-item" role="menuitemradio" aria-checked="false" data-sort="ping">
+                <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                <span>Сначала быстрые</span>
+              </button>
+              <button type="button" class="sort-item" role="menuitemradio" aria-checked="false" data-sort="name">
+                <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+                <span>По названию</span>
+              </button>
+              <button type="button" class="sort-item" role="menuitemradio" aria-checked="false" data-sort="protocol">
+                <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
+                <span>По протоколу</span>
+              </button>
             </div>
           </div>
         </div>
-        <div style="display: flex; gap: 8px; align-items: center;">
-          <button id="dnsLeakBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <div class="section-toolbar-actions">
+          <button id="dnsLeakBtn" class="btn-glass">
+            <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             <span id="dnsLeakBtnText">DNS Leak</span>
           </button>
-          <button id="pingAllBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;">Проверить пинг всех</button>
+          <button id="pingAllBtn" class="btn-glass">Проверить пинг всех</button>
         </div>
       </div>
 
-      <div id="subscription-tabs" style="display: flex; gap: 10px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 5px;">
+      <div id="subscription-tabs">
         <!-- Динамические вкладки -->
       </div>
+      <!-- Состояние автообновления выбранной подписки. До него провалившаяся
+           загрузка не оставляла следа нигде, и устаревший список серверов
+           выглядел необъяснимо. role="status" — строка меняется сама, по итогу
+           фоновой загрузки, а не по действию человека. -->
+      <p id="subStatusLine" class="sub-status-line" role="status"></p>
 
       <!-- Search + Auto-best bar -->
-      <div style="display: flex; gap: 10px; margin-bottom: 16px; align-items: center;">
-        <div style="flex: 1; position: relative;">
-          <svg style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--text-dim); pointer-events:none;" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input id="serverSearchInput" type="text" placeholder="Поиск серверов..." style="padding-left: 34px; width: 100%; box-sizing: border-box;">
+      <div class="search-row">
+        <div class="search-field">
+          <svg class="search-field-icon" aria-hidden="true" focusable="false" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input id="serverSearchInput" type="text" placeholder="Поиск серверов..." aria-label="Поиск серверов...">
         </div>
-        <button id="bestServerBtn" class="btn-glass" style="white-space:nowrap; padding: 6px 14px; font-size:12px;" title="Пинговать все и подключиться к самому быстрому">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <button id="bestServerBtn" class="btn-glass" title="Пинговать все и подключиться к самому быстрому">
+          <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
           <span id="bestServerBtnText">Лучший сервер</span>
         </button>
       </div>
 
-      <div id="serversGrid" class="server-grid">
+      <div id="serversGrid" class="server-grid" role="list" aria-label="Список серверов">
         <!-- Динамические карточки серверов -->
+      </div>
+
+      <!-- Пустое состояние. У «Истории» и «Соединений» оно было, а у главного
+           списка — нет: при отсутствии подписок пользователь видел просто
+           пустоту под панелью инструментов. Сообщений два, потому что «нет
+           подписок» и «поиск ничего не нашёл» — разные ситуации, и показывать
+           первое поверх отфильтрованного списка значило бы врать. -->
+      <div id="serversEmpty" class="empty-state">
+        <svg class="empty-state-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <p id="serversEmptyText">Нет подписок</p>
       </div>
     </section>
 
     <!-- Вкладка ИСТОРИЯ -->
-    <section id="view-history" class="view">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+    <section id="view-history" class="view" role="tabpanel" aria-labelledby="tab-view-history">
+      <div class="section-toolbar section-toolbar--loose">
         <h2 id="historyTitle">История подключений</h2>
-        <button id="clearHistoryBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px; border-color: rgba(239,68,68,0.3); color: var(--danger);">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        <button id="clearHistoryBtn" class="btn-glass">
+          <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
           <span id="clearHistoryBtnText">Очистить</span>
         </button>
       </div>
 
       <!-- Сводная статистика -->
-      <div class="history-stats-row" id="historyStatsRow" style="display: none;">
+      <div class="history-stats-row" id="historyStatsRow">
         <div class="history-stat-card">
-          <div class="history-stat-icon">🔗</div>
+          <div class="history-stat-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </div>
           <div class="history-stat-info">
             <span class="history-stat-value" id="historyStatSessions">0</span>
             <span class="history-stat-label" id="historyStatSessionsLabel">сессий</span>
           </div>
         </div>
         <div class="history-stat-card">
-          <div class="history-stat-icon">⏱️</div>
+          <div class="history-stat-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
           <div class="history-stat-info">
             <span class="history-stat-value" id="historyStatTime">0ч 0м</span>
             <span class="history-stat-label" id="historyStatTimeLabel">общее время</span>
           </div>
         </div>
         <div class="history-stat-card">
-          <div class="history-stat-icon">⬇️</div>
+          <div class="history-stat-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+          </div>
           <div class="history-stat-info">
             <span class="history-stat-value" id="historyStatDown">0 B</span>
             <span class="history-stat-label" id="historyStatDownLabel">скачано</span>
           </div>
         </div>
         <div class="history-stat-card">
-          <div class="history-stat-icon">⬆️</div>
+          <div class="history-stat-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+          </div>
           <div class="history-stat-info">
             <span class="history-stat-value" id="historyStatUp">0 B</span>
             <span class="history-stat-label" id="historyStatUpLabel">отправлено</span>
@@ -288,178 +375,397 @@
       </div>
 
       <div id="historyEmpty" class="history-empty">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48" style="color: var(--text-dim); margin-bottom: 16px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        <p id="historyEmptyText" style="color: var(--text-dim);">История подключений пуста</p>
+        <svg class="empty-state-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <p id="historyEmptyText">История подключений пуста</p>
       </div>
     </section>
 
     <!-- Вкладка МАРШРУТЫ -->
-    <section id="view-routes" class="view">
+    <section id="view-routes" class="view" role="tabpanel" aria-labelledby="tab-view-routes">
       <h2 id="routeSettingsTitle">Настройка маршрутов</h2>
-      <p id="directDomainsLabel" style="color: var(--text-dim); margin-bottom: 5px;">Укажите домены для прямого доступа (без прокси):</p>
-      <textarea id="customDirect" rows="4" placeholder="google.com&#10;yandex.ru" style="resize: none;"></textarea>
-      <div style="margin-top: 15px; margin-bottom: 20px;">
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+      <!-- Поля «домены для прямого доступа» здесь больше нет: оно умело ровно
+           одно — .суффикс домена → напрямую, — а это одна из строк таблицы
+           кастомных правил ниже. Домены из него перенесены в правила
+           (foldCustomDirect в backend/service/settings.go). Кнопки «Сохранить»
+           тоже нет: галка сохраняется сама, а применяется перезапуском ядра —
+           про это говорит плашка над правилами. -->
+      <div class="routes-direct-actions">
+        <label class="check-row">
           <input type="checkbox" id="bypassRuCheckbox"> <span id="bypassRuLabel">Обход блокировок РФ (автоматически)</span>
         </label>
       </div>
-      <div style="margin-bottom: 25px; display: flex; align-items: center;">
-        <button id="saveRoutesBtn" class="btn-glass" style="background: var(--accent-color); color: #000; width: 200px; justify-content: center;">Сохранить маршруты</button>
-        <span id="routesStatus" style="margin-left: 15px; color: var(--success); display: none;">Готово!</span>
-      </div>
 
       <!-- НОВЫЙ БЛОК: Раздельное туннелирование (Split Tunneling) -->
-      <h3 id="splitTunnelingTitle" style="margin-top: 20px; color: var(--accent-color);">Туннелирование приложений (Только для TUN)</h3>
-      <p id="splitTunnelingDesc" style="color: var(--text-dim); margin-bottom: 10px; font-size: 13px;">Укажите названия .exe файлов (каждый с новой строки), например: <b>chrome.exe</b></p>
-      
-      <div class="process-mode-tabs" style="display: flex; gap: 5px; margin-bottom: 10px; background: rgba(255,255,255,0.05); padding: 5px; border-radius: 8px;">
-        <button class="process-tab active" data-mode="blacklist" style="flex: 1; padding: 8px; border: none; border-radius: 6px; background: var(--accent-color); color: #000; font-weight: bold; cursor: pointer; transition: 0.2s;">Черный список</button>
-        <button class="process-tab" data-mode="whitelist" style="flex: 1; padding: 8px; border: none; border-radius: 6px; background: transparent; color: var(--text-main); cursor: pointer; transition: 0.2s;">Белый список</button>
+      <h3 id="splitTunnelingTitle">Туннелирование приложений (Только для TUN)</h3>
+      <p id="splitTunnelingDesc">Укажите названия .exe файлов (каждый с новой строки), например: <b>chrome.exe</b></p>
+
+      <div class="process-mode-tabs" role="group" aria-label="Режим списка приложений">
+        <button type="button" class="process-tab active" data-mode="blacklist" aria-pressed="true">Черный список</button>
+        <button type="button" class="process-tab" data-mode="whitelist" aria-pressed="false">Белый список</button>
       </div>
       <input type="hidden" id="processModeHidden" value="blacklist">
-      
-      <textarea id="processListBlacklist" rows="6" placeholder="..." style="resize: none; display: block;"></textarea>
-      <textarea id="processListWhitelist" rows="6" placeholder="..." style="resize: none; display: none;"></textarea>
-      <div style="margin-top: 15px; display: flex; align-items: center;">
-        <button id="saveAppsBtn" class="btn-glass" style="background: var(--accent-color); color: #000; width: 220px; justify-content: center;">Сохранить приложения</button>
-        <span id="appsStatus" style="margin-left: 15px; color: var(--success); display: none;">Готово!</span>
+
+      <textarea id="processListBlacklist" rows="6" placeholder="..." aria-label="Приложения в обход VPN"></textarea>
+      <textarea id="processListWhitelist" rows="6" placeholder="..." aria-label="Приложения через VPN"></textarea>
+      <div class="save-row save-row--top">
+        <button id="saveAppsBtn" class="btn-glass">Сохранить приложения</button>
+        <span id="appsStatus">Готово!</span>
       </div>
 
       <!-- Custom routing rules -->
-      <h3 id="customRoutesTitle" style="margin-top: 30px; color: var(--accent-color);">Кастомные правила маршрутизации</h3>
-      <p id="customRoutesDesc" style="color: var(--text-dim); font-size: 13px; margin-bottom: 12px;">Добавьте точные правила для конкретных доменов или IP-адресов. Эти правила имеют приоритет над гео-правилами.</p>
-      <div id="customRulesList" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;"></div>
-      <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-        <select id="newRuleAction" style="width: 110px;">
-          <option id="optActionDirect" value="direct">🟢 Напрямую</option>
-          <option id="optActionProxy" value="proxy">🔵 Через VPN</option>
-          <option id="optActionBlock" value="block">🔴 Заблокировать</option>
+      <h3 id="customRoutesTitle">Кастомные правила маршрутизации</h3>
+      <p id="customRoutesDesc">Добавьте точные правила для конкретных доменов или IP-адресов. Эти правила имеют приоритет над гео-правилами.</p>
+      <div id="rulesPendingRoutes" class="rules-pending-bar">
+        <span class="rules-pending-text"></span>
+        <button class="btn-glass rules-pending-apply">Применить сейчас</button>
+      </div>
+      <div id="customRulesList"></div>
+      <div class="rule-builder-row">
+        <select id="newRuleAction" aria-label="Действие правила">
+          <option id="optActionDirect" value="direct">Напрямую</option>
+          <option id="optActionProxy" value="proxy">Через VPN</option>
+          <option id="optActionBlock" value="block">Заблокировать</option>
         </select>
-        <select id="newRuleType" style="width: 140px;">
+        <select id="newRuleType" aria-label="Тип правила">
           <option id="optTypeSuffix" value="domain_suffix">.суффикс домена</option>
           <option id="optTypeDomain" value="domain">Точный домен</option>
           <option id="optTypeKeyword" value="domain_keyword">Ключевое слово</option>
           <option id="optTypeIp" value="ip_cidr">IP / CIDR</option>
+          <!-- Правило по программе создаётся в основном действием на группе во
+               вкладке «Соединения», но раз тип попадает в общую таблицу правил,
+               он должен быть и здесь — иначе такое правило нельзя ни завести
+               вручную, ни понять, откуда оно взялось. -->
+          <option id="optTypeProcess" value="process">Программа (.exe)</option>
         </select>
-        <input type="text" id="newRuleValue" placeholder="example.com или 1.2.3.0/24" style="flex:1; min-width:160px;">
-        <button id="addCustomRuleBtn" class="btn-glass" style="background: var(--accent-color); color:#000; font-weight:bold; white-space:nowrap;">+ Добавить</button>
+        <input type="text" id="newRuleValue" placeholder="example.com или 1.2.3.0/24" aria-label="example.com или 1.2.3.0/24">
+        <button id="addCustomRuleBtn" class="btn-glass">+ Добавить</button>
       </div>
-      <div style="margin-top: 15px; display: flex; align-items: center;">
-        <button id="saveRoutesBtn2" class="btn-glass" style="background: var(--accent-color); color: #000; width: 200px; justify-content: center;">Сохранить маршруты</button>
-        <span id="routesStatus2" style="margin-left: 15px; color: var(--success); display: none;">Готово!</span>
+    </section>
+
+    <!-- Вкладка СОЕДИНЕНИЯ -->
+    <section id="view-connections" class="view" role="tabpanel" aria-labelledby="tab-view-connections">
+      <div class="section-toolbar section-toolbar--tight">
+        <h2 id="connectionsTitle">Соединения</h2>
+        <div class="section-toolbar-actions">
+          <span id="connectionsFlash"></span>
+          <span id="connectionsCount"></span>
+          <!-- Плоская таблица остаётся: сгруппированный вид — это панель
+               управления, а разбираться «почему именно это соединение пошло не
+               туда» удобнее по строкам. Выбор сохраняется в настройках. -->
+          <div id="connViewSwitch" class="conn-view-switch" role="group" aria-label="Вид списка соединений">
+            <button type="button" id="connViewGrouped" class="conn-view-btn active" data-view="grouped" aria-pressed="true">Группами</button>
+            <button type="button" id="connViewFlat" class="conn-view-btn" data-view="flat" aria-pressed="false">Списком</button>
+          </div>
+          <!-- Порядок групп. По алфавиту по умолчанию: папки не должны
+               переставляться под курсором, пока по ним пытаются попасть.
+               Сортировка по трафику отвечает на другой вопрос — «кто сейчас
+               забирает канал», — и включается осознанно, когда за экраном
+               наблюдают, а не действуют. -->
+          <div id="connSortSwitch" class="conn-view-switch" role="group" aria-label="Порядок групп">
+            <button type="button" id="connSortName" class="conn-view-btn active" data-sort="name" aria-pressed="true">По имени</button>
+            <button type="button" id="connSortTraffic" class="conn-view-btn" data-sort="traffic" aria-pressed="false">По трафику</button>
+          </div>
+        </div>
+      </div>
+      <p id="connectionsDesc">Что прямо сейчас идёт через ядро. Действие в строке создаёт кастомное правило маршрутизации — оно появится во вкладке «Маршруты».</p>
+      <div class="conn-panel">
+        <div id="connectionsEmpty" class="conn-empty">Нет активных соединений.</div>
+        <!-- Сгруппированный вид. Не таблица: это два раскрываемых списка, и
+             семантика дерева честнее табличной. Плоская таблица ниже осталась
+             ровно такой, какой была, вместе со своим инкрементальным
+             обновлением строк. -->
+        <div class="conn-scroll conn-groups" id="connectionsGrouped">
+          <section class="conn-section" aria-labelledby="connGroupSitesTitle">
+            <h3 class="conn-section-title" id="connGroupSitesTitle">Сайты</h3>
+            <div id="connSitesList"></div>
+            <p class="conn-section-empty" id="connSitesEmpty">Нет соединений с именем сайта</p>
+          </section>
+          <section class="conn-section" aria-labelledby="connGroupProgramsTitle">
+            <h3 class="conn-section-title" id="connGroupProgramsTitle">Программы</h3>
+            <div id="connProgramsList"></div>
+            <p class="conn-section-empty" id="connProgramsEmpty">Ядро не сообщает программу для этих соединений</p>
+          </section>
+        </div>
+
+        <div class="conn-scroll" id="connectionsFlatWrap">
+          <table class="conn-table" aria-label="Активные соединения" id="connTable">
+            <thead>
+              <tr>
+                <th scope="col" id="connColHost">Хост</th>
+                <th scope="col" id="connColDest">Адрес</th>
+                <th scope="col" id="connColProcess">Процесс</th>
+                <th scope="col" id="connColRule">Правило</th>
+                <th scope="col" id="connColTraffic">↑ / ↓</th>
+                <th scope="col" id="connColAge">Возраст</th>
+                <th scope="col" id="connColActions">Действия</th>
+              </tr>
+            </thead>
+            <tbody id="connectionsBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="rulesPendingConnections" class="rules-pending-bar">
+        <span class="rules-pending-text"></span>
+        <button class="btn-glass rules-pending-apply">Применить сейчас</button>
       </div>
     </section>
 
     <!-- Вкладка НАСТРОЙКИ -->
-    <section id="view-settings" class="view">
+    <section id="view-settings" class="view" role="tabpanel" aria-labelledby="tab-view-settings">
       <h2 id="appSettingsTitle">Настройки приложения</h2>
-      
-      <div class="form-group" style="margin-top: 30px;">
-        <label id="dnsServerLabel">DNS Сервер</label>
+
+      <div class="form-group form-group--section">
+        <label id="dnsServerLabel" for="dnsSelect">DNS Сервер</label>
         <select id="dnsSelect">
           <option value="1.1.1.1">Cloudflare (1.1.1.1)</option>
           <option value="8.8.8.8">Google (8.8.8.8)</option>
           <option value="9.9.9.9">Quad9 (9.9.9.9)</option>
           <option value="custom">Свой сервер...</option>
         </select>
-        <input type="text" id="customDnsInput" placeholder="https://..." style="display: none; margin-top: 10px;">
+        <input type="text" id="customDnsInput" placeholder="1.1.1.1, dns.example.com или https://dns.example.com/dns-query" aria-label="Адрес своего DNS-сервера">
+        <!-- Годность адреса проверяет бэкенд тем же кодом, что собирает конфиг.
+             Раньше непригодное значение вскрывалось только при нажатии
+             «Подключиться», ошибкой сборки конфига. -->
+        <p id="customDnsHint" class="field-hint">Адрес, имя хоста или ссылка — всё работает по DoH. Обычный DNS не поддерживается: он шёл бы внутри туннеля и был бы виден оператору сервера.</p>
+        <div id="dnsPendingBar" class="rules-pending-bar">
+          <span class="rules-pending-text"></span>
+          <button class="btn-glass rules-pending-apply">Применить сейчас</button>
+        </div>
       </div>
 
       <div class="form-group">
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+        <label class="check-row">
           <input type="checkbox" id="tunModeCheckbox"> 
-          <span id="tunModeLabel" style="color: var(--accent-color); font-weight: bold;">TUN Режим</span> <span id="tunModeDesc">(Весь трафик ПК через прокси)</span>
+          <span id="tunModeLabel">TUN Режим</span> <span id="tunModeDesc">(Весь трафик ПК через прокси)</span>
         </label>
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+        <label class="check-row">
           <input type="checkbox" id="systemProxyCheckbox" checked> <span id="systemProxyLabel">Системный прокси (HTTP/SOCKS)</span>
         </label>
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+        <label class="check-row">
           <input type="checkbox" id="autoConnectCheckbox"> <span id="autoConnectLabel">Авто-подключение при запуске</span>
         </label>
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+        <label class="check-row">
           <input type="checkbox" id="autoUpdateSubsCheckbox"> <span id="autoUpdateSubsLabel">Авто-обновление подписок</span>
         </label>
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+        <label class="check-row">
           <input type="checkbox" id="rememberServerCheckbox"> <span id="rememberServerLabel">Запоминать последний сервер</span>
         </label>
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+        <label class="check-row">
           <input type="checkbox" id="openAtLoginCheckbox"> <span id="openAtLoginLabel">Запускать вместе с Windows</span>
         </label>
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+        <label class="check-row">
           <input type="checkbox" id="startMinimizedCheckbox"> <span id="startMinimizedLabel">Запускать свернутым в трей</span>
         </label>
+        <!-- Выключено по умолчанию и включается руками: RegisterHotKey забирает
+             сочетание у всей системы, и делать это без спроса нельзя. Отказ —
+             когда сочетание уже занято другим приложением — виден сразу,
+             галка при этом снимается обратно. -->
+        <label class="check-row">
+          <input type="checkbox" id="globalHotkeysCheckbox"> <span id="globalHotkeysLabel">Системные горячие клавиши</span> <span id="globalHotkeysDesc">(работают, когда окно закрыто)</span>
+        </label>
+        <!-- Поля только для чтения: сочетание не печатают, его нажимают. Что
+             именно Windows согласится отдать, знает только бэкенд, поэтому
+             разбирает строку он же. -->
+        <div class="hotkey-row">
+          <label id="hotkeyToggleLabel" for="hotkeyToggleInput">Подключение</label>
+          <input type="text" id="hotkeyToggleInput" readonly value="Ctrl+Shift+V" aria-label="Сочетание клавиш для подключения">
+          <label id="hotkeyShowLabel" for="hotkeyShowInput">Окно</label>
+          <input type="text" id="hotkeyShowInput" readonly value="Ctrl+Shift+B" aria-label="Сочетание клавиш для показа окна">
+        </div>
+        <p id="hotkeyHint" class="field-hint">Нажмите поле и введите сочетание. Нужен хотя бы один модификатор — Ctrl, Shift, Alt или Win.</p>
       </div>
 
-      <h3 id="securityTitle" style="margin-top: 25px; color: var(--accent-color);">Безопасность</h3>
-      <div class="form-group" style="margin-top: 15px;">
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
-          <input type="checkbox" id="killSwitchCheckbox"> <span id="killSwitchLabel">Kill Switch</span> <span id="killSwitchDesc" style="color: var(--text-dim); font-size: 12px;">(Блокировать интернет вне VPN через Windows Firewall)</span>
+      <h3 id="securityTitle">Безопасность</h3>
+      <div class="form-group form-group--row">
+        <label class="check-row">
+          <input type="checkbox" id="killSwitchCheckbox"> <span id="killSwitchLabel">Kill Switch</span> <span id="killSwitchDesc">(Блокировать интернет вне VPN через Windows Firewall)</span>
         </label>
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+        <label class="check-row">
           <input type="checkbox" id="dnsLeakCheckbox" checked> <span id="dnsLeakLabel">Защита от утечек DNS</span>
         </label>
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
+        <label class="check-row">
           <input type="checkbox" id="ipv6LeakCheckbox" checked> <span id="ipv6LeakLabel">Блокировка IPv6 (утечки IP)</span>
         </label>
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
-          <input type="checkbox" id="fakeDnsCheckbox" checked> <span id="fakeDnsLabel">FakeDNS</span> <span id="fakeDnsDesc" style="color: var(--text-dim); font-size: 12px;">(Ускорение DNS и защита от утечек)</span>
+        <label class="check-row">
+          <input type="checkbox" id="fakeDnsCheckbox" checked> <span id="fakeDnsLabel">FakeDNS</span> <span id="fakeDnsDesc">(Ускорение DNS и защита от утечек)</span>
         </label>
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 12px;">
-          <input type="checkbox" id="verboseLoggingCheckbox"> <span id="verboseLoggingLabel">Подробные логи</span> <span id="verboseLoggingDesc" style="color: var(--text-dim); font-size: 12px;">(Записывать каждое соединение. Повышает расход памяти и CPU)</span>
+        <label class="check-row">
+          <input type="checkbox" id="verboseLoggingCheckbox"> <span id="verboseLoggingLabel">Подробные логи</span> <span id="verboseLoggingDesc">(Записывать каждое соединение. Повышает расход памяти и CPU)</span>
         </label>
       </div>
 
-      <button id="saveSettingsBtn" class="btn-glass" style="background: var(--accent-color); color: #000; width: 200px; justify-content: center;">Сохранить всё</button>
-      <span id="settingsStatus" style="margin-left: 15px; color: var(--success); display: none;">Готово!</span>
+      <button id="saveSettingsBtn" class="btn-glass">Сохранить всё</button>
+
+      <!-- Внешний вид. Ниже кнопки «Сохранить всё» намеренно: всё, что выше,
+           ждёт нажатия, а цвет применяется в тот же миг — предпросмотром здесь
+           служит само приложение, и держать такое над кнопкой значило бы
+           обещать, что оно тоже ждёт.
+
+           Движок пересчитывает под выбранный цвет всю палитру и подтягивает
+           роли до контраста 4.5:1 — обязательство продукта не зависит от
+           вкуса. Что именно он подвинул, написано в строке под полями. -->
+      <h3 id="appearanceTitle">Внешний вид</h3>
+      <p id="appearanceDesc">Цвет действия и фон приложения. Применяется сразу; остальную палитру — текст, панели, состояния — приложение выводит само и держит читаемой.</p>
+
+      <!-- Плитки собирает renderer: у каждой свой градиент, а название
+           переводится. -->
+      <div class="theme-presets" id="themePresets" role="radiogroup" aria-labelledby="appearanceTitle"></div>
+
+      <div class="theme-fields">
+        <!-- Режим стоит первым, потому что он самый решающий: от него зависит,
+             во что движок приводит всё остальное. Раньше его не было вовсе, и
+             движок выбирал сам по цвету фона — из-за чего выбор синего делал
+             приложение белым, а выбор бирюзы той же яркости не делал. -->
+        <div class="theme-field">
+          <span class="theme-field-label" id="themeSchemeLabel">Режим</span>
+          <div class="theme-field-body">
+            <div class="theme-modes" role="radiogroup" aria-labelledby="themeSchemeLabel">
+              <button type="button" class="theme-mode" data-scheme="dark" role="radio" aria-checked="true" id="themeSchemeDark">Тёмный</button>
+              <button type="button" class="theme-mode" data-scheme="light" role="radio" aria-checked="false" id="themeSchemeLight">Светлый</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="theme-field">
+          <span class="theme-field-label" id="themeAccentLabel">Акцент</span>
+          <div class="theme-field-body">
+            <input type="color" id="themeAccentInput" class="color-well" aria-labelledby="themeAccentLabel">
+            <input type="text" id="themeAccentHex" class="color-hex" spellcheck="false" maxlength="7" aria-label="Акцент, шестнадцатеричный код">
+          </div>
+        </div>
+
+        <div class="theme-field">
+          <span class="theme-field-label" id="themeBgLabel">Фон</span>
+          <div class="theme-field-body">
+            <div class="theme-modes" role="radiogroup" aria-labelledby="themeBgLabel">
+              <button type="button" class="theme-mode" data-mode="solid" role="radio" aria-checked="false" id="themeModeSolid">Сплошной</button>
+              <button type="button" class="theme-mode" data-mode="linear" role="radio" aria-checked="true" id="themeModeLinear">Линейный</button>
+              <button type="button" class="theme-mode" data-mode="radial" role="radio" aria-checked="false" id="themeModeRadial">Радиальный</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="theme-field">
+          <span class="theme-field-label" id="themeStopsLabel">Цвета</span>
+          <div class="theme-field-body">
+            <div class="theme-stops" id="themeStops"></div>
+            <button type="button" id="themeStopAdd" class="btn-glass btn-compact">Ещё цвет</button>
+            <button type="button" id="themeStopRemove" class="btn-glass btn-compact">Убрать</button>
+          </div>
+        </div>
+
+        <div class="theme-field" id="themeAngleField">
+          <label class="theme-field-label" id="themeAngleLabel" for="themeAngle">Направление</label>
+          <div class="theme-field-body">
+            <input type="range" id="themeAngle" min="0" max="360" step="15" value="90">
+            <span class="theme-angle" id="themeAngleValue">90°</span>
+          </div>
+        </div>
+      </div>
+
+      <p class="theme-contrast" id="themeContrast" role="status"></p>
+
+      <button id="themeResetBtn" class="btn-glass">
+        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+        <span id="themeResetBtnText">Вернуть стандартную</span>
+      </button>
+
+      <!-- Профили. Именованные наборы того, что различается между сценариями:
+           маршрутизация, DNS, раздельное туннелирование, защита. Язык, тема и
+           автозапуск сюда не входят — они относятся к приложению, а не к
+           сценарию, и профиль, меняющий язык, был бы неожиданностью. -->
+      <h3 id="profilesTitle">Профили</h3>
+      <p id="profilesDesc">Сохранённый набор маршрутов, DNS, раздельного туннелирования и защиты. Переключается одним нажатием — например «дома» и «на работе». Язык, тема и автозапуск в профиль не входят.</p>
+      <div id="profilesList" class="profiles-list"></div>
+      <p id="profilesEmpty" class="profiles-empty">Профилей пока нет. Настройте приложение так, как нужно, и сохраните набор под именем.</p>
+      <div class="sub-actions-row sub-actions-row--flush">
+        <button id="saveProfileBtn" class="btn-glass">
+          <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          <span id="saveProfileBtnText">Сохранить текущие настройки</span>
+        </button>
+        <label class="check-row check-row--inline">
+          <input type="checkbox" id="profileIncludeServerCheckbox"> <span id="profileIncludeServerLabel">Запомнить и сервер</span>
+        </label>
+      </div>
+
+      <!-- Перенос настроек на другую машину. Отдельным блоком ниже кнопки
+           сохранения: это не настройка, а действие над настройками. -->
+      <h3 id="transferTitle">Перенос настроек</h3>
+      <p id="transferDesc">Маршруты, списки приложений, DNS и переключатели можно сохранить в файл и перенести на другой компьютер. Подписки и избранное в файл не попадают: это ссылки с паролями, они шифруются и привязаны к машине.</p>
+      <div class="sub-actions-row sub-actions-row--flush">
+        <button id="exportSettingsBtn" class="btn-glass">
+          <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span id="exportSettingsBtnText">Сохранить в файл</span>
+        </button>
+        <button id="importSettingsBtn" class="btn-glass">
+          <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span id="importSettingsBtnText">Загрузить из файла</span>
+        </button>
+      </div>
+      <span id="settingsStatus">Готово!</span>
     </section>
 
     <!-- Вкладка ЛОГИ -->
-    <section id="view-logs" class="view">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+    <section id="view-logs" class="view" role="tabpanel" aria-labelledby="tab-view-logs">
+      <div class="section-toolbar">
         <h2 id="logsTitle">Системный журнал</h2>
-        <div style="display: flex; gap: 8px;">
-          <button id="saveLogsBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;" title="Сохранить логи в файл">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <div class="section-toolbar-actions">
+          <!-- Поиск по журналу. Стоит рядом с фильтром по уровню, потому что
+               это второй фильтр: когда сайт не работает, вопрос всегда один —
+               что ядро сказало про этот домен. -->
+          <div class="log-search">
+            <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="search" id="logSearchInput" placeholder="Поиск по журналу..." aria-label="Поиск по журналу...">
+          </div>
+          <button id="saveLogsBtn" class="btn-glass" title="Сохранить логи в файл">
+            <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             <span id="saveLogsBtnText">Сохранить</span>
           </button>
-          <button id="clearLogsBtn" class="btn-glass" style="padding: 6px 12px; font-size: 12px;">Очистить</button>
+          <button id="clearLogsBtn" class="btn-glass">Очистить</button>
         </div>
       </div>
-      <div class="log-viewer" style="height: calc(100vh - 160px); min-height: 400px; display: flex; flex-direction: column;">
-        <div class="log-tabs">
-          <button class="log-tab active" data-filter="ALL">Все</button>
-          <button class="log-tab" data-filter="DEBUG">Отладка</button>
-          <button class="log-tab" data-filter="INFO">Инфо</button>
-          <button class="log-tab" data-filter="WARN">Предупреждения</button>
-          <button class="log-tab" data-filter="ERROR">Ошибки</button>
+      <div class="log-viewer">
+        <div class="log-tabs" role="group" aria-label="Фильтр журнала">
+          <button type="button" class="log-tab active" data-filter="ALL" aria-pressed="true">Все</button>
+          <button type="button" class="log-tab" data-filter="DEBUG" aria-pressed="false">Отладка</button>
+          <button type="button" class="log-tab" data-filter="INFO" aria-pressed="false">Инфо</button>
+          <button type="button" class="log-tab" data-filter="WARN" aria-pressed="false">Предупреждения</button>
+          <button type="button" class="log-tab" data-filter="ERROR" aria-pressed="false">Ошибки</button>
         </div>
-        <div class="log-output" id="fullLogOutput" style="flex: 1; overflow-y: auto;"></div>
+        <!-- tabindex="0" — область прокручиваемая, и без него до содержимого
+             журнала нельзя долистать с клавиатуры. -->
+        <div class="log-output" id="fullLogOutput" tabindex="0" role="log" aria-label="Системный журнал"></div>
+        <!-- Отфильтрованный дочиста журнал иначе выглядит сломанным: строки
+             идут, а на экране пусто. -->
+        <p class="log-empty" id="logsEmpty">Ничего не найдено</p>
       </div>
     </section>
 
   </main>
 
-  <!-- Панель логов (скрытая системная) -->
-  <div id="logOutput" style="display: none;"></div>
+  <!-- Кастомное модальное окно.
 
-  <!-- Кастомное модальное окно -->
+       role="dialog" + aria-modal сообщают вспомогательной технологии, что
+       остальная страница на время закрыта; удержание и возврат фокуса делает
+       openDialog в modules/ui-utils.ts. Поле берёт имя из заголовка: заголовок
+       здесь и есть вопрос, на который отвечают вводом. -->
   <div id="modalOverlay" class="modal-overlay">
-    <div class="modal-content">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <h3 id="modalTitle">Введите значение</h3>
-      <input type="text" id="modalInput" placeholder="...">
+      <input type="text" id="modalInput" placeholder="..." aria-labelledby="modalTitle">
       <div class="modal-actions">
         <button id="modalCancel" class="btn-glass">Отмена</button>
-        <button id="modalConfirm" class="btn-glass" style="background: var(--accent-color); color: #000; font-weight: bold;">ОК</button>
+        <button id="modalConfirm" class="btn-glass">ОК</button>
       </div>
     </div>
   </div>
 
   <!-- Модальное окно обновления (Update Modal) -->
   <div id="updateModalOverlay" class="modal-overlay">
-    <div class="modal-content update-modal-content">
+    <div class="modal-content update-modal-content" role="dialog" aria-modal="true" aria-labelledby="updateModalTitle">
       <div class="update-header">
-        <div class="update-icon-wrapper">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <div class="update-icon-wrapper" aria-hidden="true">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
           </svg>
         </div>
@@ -477,13 +783,13 @@
       </div>
       
       <!-- Прогресс скачивания -->
-      <div id="updateProgressSection" class="update-progress-section" style="display: none;">
+      <div id="updateProgressSection" class="update-progress-section">
         <div class="progress-info">
           <span id="updateProgressStatus">Скачивание обновления...</span>
           <span id="updateProgressPercent">0%</span>
         </div>
-        <div class="progress-bar-container">
-          <div id="updateProgressBar" class="progress-bar" style="width: 0%;"></div>
+        <div class="progress-bar-container" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="updateProgressStatus">
+          <div id="updateProgressBar" class="progress-bar"></div>
         </div>
       </div>
       
@@ -496,10 +802,10 @@
 
   <!-- Кастомное модальное окно уведомлений / ошибок (alert/error) -->
   <div id="alertOverlay" class="modal-overlay alert-modal-overlay">
-    <div class="modal-content alert-modal-content">
-      <div class="alert-icon-container">
+    <div class="modal-content alert-modal-content" role="alertdialog" aria-modal="true" aria-labelledby="alertTitleText" aria-describedby="alertMessageText">
+      <div class="alert-icon-container" aria-hidden="true">
         <!-- SVG Warning Sign -->
-        <svg class="alert-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <svg class="alert-svg" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
           <line x1="12" y1="9" x2="12" y2="13"></line>
           <line x1="12" y1="17" x2="12.01" y2="17"></line>
@@ -507,15 +813,15 @@
       </div>
       <h3 id="alertTitleText">Внимание</h3>
       <div id="alertMessageText" class="alert-message-content"></div>
-      <div id="errorTerminalContainer" style="display: none;">
+      <div id="errorTerminalContainer">
         <pre id="errorTerminalText"></pre>
       </div>
-      <div class="modal-actions" style="margin-top: 20px;">
-        <button id="alertCopyBtn" class="btn-glass" style="display: none; border-color: rgba(255,255,255,0.15);">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 4px; display: inline-block;"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+      <div class="modal-actions modal-actions--spaced">
+        <button id="alertCopyBtn" class="btn-glass">
+          <svg class="btn-inline-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
           <span id="alertCopyBtnText">Копировать</span>
         </button>
-        <button id="alertConfirmBtn" class="btn-glass" style="background: var(--accent-color); color: #000; font-weight: bold; border: none; padding-left: 24px; padding-right: 24px;">ОК</button>
+        <button id="alertConfirmBtn" class="btn-glass">ОК</button>
       </div>
     </div>
   </div>
@@ -523,67 +829,80 @@
 
   <!-- Специальный интерактивный виджет прокрутки для вкладки Серверы -->
   <div class="custom-scroll-widget" id="serversScrollWidget">
-    <div class="scroll-arrow scroll-arrow-up" id="scrollUpBtn" title="Вверх">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
-    </div>
-    <div class="scroll-track" id="scrollTrack">
+    <button type="button" class="scroll-arrow scroll-arrow-up" id="scrollUpBtn" title="Вверх" aria-label="Вверх">
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
+    </button>
+    <!-- Полоса и бегунок дублируют штатную прокрутку мышью; с клавиатуры и для
+         скринридера список прокручивается сам, поэтому они скрыты от AT. -->
+    <div class="scroll-track" id="scrollTrack" aria-hidden="true">
       <div class="scroll-thumb" id="scrollThumb"></div>
     </div>
-    <div class="scroll-arrow scroll-arrow-down" id="scrollDownBtn" title="Вниз">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-    </div>
+    <button type="button" class="scroll-arrow scroll-arrow-down" id="scrollDownBtn" title="Вниз" aria-label="Вниз">
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
   </div>  <!-- Модальное окно сканера QR-кодов -->
   <div id="qrModalOverlay" class="modal-overlay">
-    <div class="modal-content" style="max-width: 500px; text-align: center; position: relative;">
-      <h3 id="qrModalTitle" style="margin-bottom: 15px; color: var(--accent-color);">Импорт через QR-код</h3>
+    <div class="modal-content modal-content--qr" role="dialog" aria-modal="true" aria-labelledby="qrModalTitle">
+      <h3 id="qrModalTitle">Импорт через QR-код</h3>
       
-      <div id="qrScannerContainer" style="width: 100%; height: 300px; background: #000; border-radius: 12px; overflow: hidden; position: relative; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--glass-border);">
-        <video id="qrVideo" style="width: 100%; height: 100%; object-fit: cover; display: none;"></video>
-        <canvas id="qrCanvas" style="display: none;"></canvas>
+      <!-- Чёрный здесь literal и вне палитры намеренно: это область
+           видоискателя камеры, а не поверхность интерфейса. Градиент под
+           видеопотоком мешал бы разглядеть код. -->
+      <div id="qrScannerContainer">
+        <video id="qrVideo"></video>
+        <canvas id="qrCanvas"></canvas>
         
-        <div id="qrScannerPlaceholder" style="color: var(--text-dim); text-align: center; padding: 20px;">
+        <div id="qrScannerPlaceholder">
           <p id="qrPlaceholderText">Выберите способ импорта ниже</p>
         </div>
         
-        <div id="qrScannerReticle" style="position: absolute; width: 180px; height: 180px; border: 2px dashed var(--accent-color); border-radius: 16px; display: none; box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);"></div>
+        <div id="qrScannerReticle" aria-hidden="true"></div>
       </div>
 
-      <input type="file" id="qrFileInput" accept="image/*" style="display: none;">
+      <input type="file" id="qrFileInput" accept="image/*">
 
-      <div style="display: flex; gap: 10px; justify-content: center; margin-bottom: 20px;">
-        <button id="qrStartCameraBtn" class="btn-glass" style="flex: 1; justify-content: center;">🎥 Запустить камеру</button>
-        <button id="qrUploadFileBtn" class="btn-glass" style="flex: 1; justify-content: center;">📁 Выбрать файл</button>
+      <div class="qr-actions-row">
+        <button id="qrStartCameraBtn" class="btn-glass">
+          <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          <span id="qrStartCameraBtnText">Запустить камеру</span>
+        </button>
+        <button id="qrUploadFileBtn" class="btn-glass">
+          <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          <span id="qrUploadFileBtnText">Выбрать файл</span>
+        </button>
       </div>
 
-      <div class="modal-actions" style="border-top: 1px solid var(--glass-border); padding-top: 15px;">
-        <button id="qrModalClose" class="btn-glass" style="width: 100%; justify-content: center;">Отмена</button>
+      <div class="modal-actions modal-actions--divided">
+        <button id="qrModalClose" class="btn-glass">Отмена</button>
       </div>
     </div>
   </div>
 
   <!-- Модалка DNS Leak Test -->
   <div id="dnsLeakModalOverlay" class="modal-overlay">
-    <div class="modal-content dns-leak-modal">
+    <div class="modal-content dns-leak-modal" role="dialog" aria-modal="true" aria-labelledby="dnsLeakModalTitle">
       <div class="dns-leak-header">
-        <div class="dns-leak-icon-wrap" id="dnsLeakIconWrap">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <div class="dns-leak-icon-wrap" id="dnsLeakIconWrap" aria-hidden="true">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         </div>
         <div>
-          <h3 id="dnsLeakModalTitle" style="margin:0; font-size:18px; font-weight:700;">DNS Leak Test</h3>
-          <p id="dnsLeakModalSubtitle" style="margin:4px 0 0; font-size:12px; color:var(--text-dim);">Проверка утечки DNS-запросов</p>
+          <h3 id="dnsLeakModalTitle">DNS Leak Test</h3>
+          <p id="dnsLeakModalSubtitle">Проверка утечки DNS-запросов</p>
         </div>
       </div>
 
       <!-- Индикатор загрузки -->
-      <div id="dnsLeakLoading" class="dns-leak-loading">
-        <div class="dns-leak-spinner"></div>
-        <span id="dnsLeakLoadingText" style="font-size:13px; color:var(--text-dim);">Выполняется проверка...</span>
+      <div id="dnsLeakLoading" class="dns-leak-loading" role="status">
+        <div class="dns-leak-spinner" aria-hidden="true"></div>
+        <span id="dnsLeakLoadingText">Выполняется проверка...</span>
       </div>
 
       <!-- Результат -->
-      <div id="dnsLeakResult" style="display:none;">
-        <div id="dnsLeakStatusBanner" class="dns-leak-status-banner">
-          <span id="dnsLeakStatusIcon">✅</span>
+      <div id="dnsLeakResult">
+        <div id="dnsLeakStatusBanner" class="dns-leak-status-banner" role="status">
+          <span id="dnsLeakStatusIcon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </span>
           <span id="dnsLeakStatusText">Утечек не обнаружено</span>
         </div>
         <div class="dns-leak-info-grid">
@@ -598,12 +917,12 @@
         </div>
       </div>
 
-      <div class="modal-actions" style="margin-top:20px; border-top:1px solid var(--glass-border); padding-top:15px;">
-        <button id="dnsLeakRetryBtn" class="btn-glass" style="display:none;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+      <div class="modal-actions modal-actions--spaced modal-actions--divided">
+        <button id="dnsLeakRetryBtn" class="btn-glass">
+          <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
           <span id="dnsLeakRetryBtnText">Повторить</span>
         </button>
-        <button id="dnsLeakCloseBtn" class="btn-glass" style="background:var(--accent-color);color:#000;font-weight:bold;border:none;padding-left:24px;padding-right:24px;">OK</button>
+        <button id="dnsLeakCloseBtn" class="btn-glass">OK</button>
       </div>
     </div>
   </div>

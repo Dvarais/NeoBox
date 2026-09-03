@@ -96,9 +96,9 @@ func TestTFormatsArguments(t *testing.T) {
 	t.Cleanup(func() { SetLanguage(string(defaultLang)) })
 	SetLanguage("EN")
 
-	got := T(DiagProxyPortName, 20809)
-	if got != "Proxy port (20809)" {
-		t.Errorf("T(DiagProxyPortName, 20809) = %q", got)
+	got := T(TrayStatusConnected, "Amsterdam")
+	if got != "Status: Connected (Amsterdam)" {
+		t.Errorf("T(TrayStatusConnected, \"Amsterdam\") = %q", got)
 	}
 }
 

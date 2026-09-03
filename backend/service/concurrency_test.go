@@ -10,18 +10,21 @@ import (
 	"testing"
 	"time"
 
+	"NeoBox/backend/core"
 	"NeoBox/backend/storage"
 )
 
 // newConcurrentService builds a service whose storage layer is initialised, so
-// the subscription paths actually read and write encrypted files.
+// the subscription paths actually read and write encrypted files. The core
+// manager is real but never started: paths that gate on IsRunning need it to
+// answer rather than to be nil.
 func newConcurrentService(t *testing.T) *AppService {
 	t.Helper()
 	dir := t.TempDir()
 	if err := storage.Init(dir); err != nil {
 		t.Fatalf("storage.Init failed: %v", err)
 	}
-	return &AppService{userDataDir: dir}
+	return &AppService{userDataDir: dir, coreManager: core.NewCoreManager()}
 }
 
 // AppService went from one mutex covering everything to four covering one
@@ -87,7 +90,7 @@ func TestConcurrentAccessDoesNotDeadlock(t *testing.T) {
 		run(func(int) {
 			s.SetWindowVisible(true)
 			s.NotifyWindowHidden()
-			s.UpdateTrayStatus("status")
+			s.setTrayStatus("tray.status.disconnected")
 		})
 		// The other file under fileMu.
 		run(func(int) {
@@ -100,6 +103,9 @@ func TestConcurrentAccessDoesNotDeadlock(t *testing.T) {
 			s.IsQuitting()
 			s.StopAutoUpdateScheduler()
 		})
+		// The Connections view's poll: another stateMu reader, and the one that
+		// runs once a second for as long as the view is open.
+		run(func(int) { s.GetConnections() })
 	}
 
 	go func() {

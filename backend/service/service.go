@@ -49,14 +49,28 @@ type AppService struct {
 	// trayMu guards the tray menu items and the window visibility they display.
 	trayMu          sync.Mutex
 	windowVisible   bool
+	mainHWND        uintptr // main window handle, looked up once and cached
 	mStatusItem     *systray.MenuItem
 	mToggleItem     *systray.MenuItem
 	mServersItem    *systray.MenuItem
+	mProfilesItem   *systray.MenuItem
+	mKillSwitchItem *systray.MenuItem
+	mTunItem        *systray.MenuItem
+	mSysProxyItem   *systray.MenuItem
 	mRestartItem    *systray.MenuItem
 	mDisconnectItem *systray.MenuItem
 	mQuitItem       *systray.MenuItem
-	trayServerItems [50]*TrayServerItem
-	trayStarted     bool // true once systray.Run has been entered; guards systray.Quit()
+	// Пункты обоих динамических подменю — только те, что висят прямо под своим
+	// заголовком. Remove() уносит детей за собой, и хранить их отдельно значило
+	// бы закрыть один и тот же канал дважды.
+	trayServerItems  []*systray.MenuItem
+	trayProfileItems []*systray.MenuItem
+	trayStarted      bool // true once systray.Run has been entered; guards systray.Quit()
+	// Иконка и подсказка — единственное, что видно, пока меню не открыли.
+	trayIconOn     []byte
+	trayIconOff    []byte
+	trayConnected  bool
+	trayServerName string
 	// The status line is dynamic, so its message id and arguments are kept in
 	// order to re-render it in the new language when the user switches.
 	trayStatusID   string
@@ -72,7 +86,11 @@ type AppService struct {
 	backupProxyEnable uint32
 	hasProxyBackup    bool
 	quitting          bool
-	mutexHandle       windows.Handle
+	// killSwitchStuck: правила брандмауэра остались от прошлого запуска и снять
+	// их не удалось. Машина при этом без сети, а причина не видна нигде, кроме
+	// crash-лога — поэтому состояние доезжает до интерфейса.
+	killSwitchStuck bool
+	mutexHandle     windows.Handle
 	// logStream batches sing-box log lines on their way to the frontend; nil
 	// while no core session is running. See logstream.go.
 	logStream *logStreamer
@@ -83,6 +101,11 @@ type AppService struct {
 	trafficMu   sync.Mutex
 	sessionUp   int64
 	sessionDown int64
+	// trafficStreamOpened is true once the /traffic stream has been open at
+	// least once this session. It is what separates "connecting for the first
+	// time" from "reconnecting", so the log only claims a recovery when
+	// something was actually lost.
+	trafficStreamOpened bool
 
 	// watchdogMu guards the auto-reconnect watchdog.
 	watchdogMu     sync.Mutex
@@ -107,6 +130,7 @@ func NewAppService(cm *core.CoreManager, userDataDir string) *AppService {
 	// settings.json into the encrypted store. This runs before the first read
 	// below so nothing observes the half-migrated state.
 	svc.migrateSecretSettings()
+	svc.migrateCustomDirect()
 
 	// Adopt the language the user last chose, so the tray, toasts and diagnostics
 	// come up translated rather than in the default language.
@@ -115,6 +139,10 @@ func NewAppService(cm *core.CoreManager, userDataDir string) *AppService {
 		if lang, ok := settings["language"].(string); ok {
 			i18n.SetLanguage(lang)
 		}
+		// И привести реестр в соответствие с галкой автозапуска: между двумя
+		// запусками значение могло исчезнуть или устареть. См. applyAutostart.
+		openAtLogin, _ := settings["openAtLogin"].(bool)
+		applyAutostart(openAtLogin)
 	}
 
 	// Pick up a system proxy backup left behind by a run that did not shut down
@@ -134,15 +162,24 @@ func (s *AppService) SetContext(ctx context.Context) {
 	s.wailsCtx = ctx
 	s.wailsCtxMu.Unlock()
 	// Register toast AppID once after the app context is available.
-	InitNotifications()
+	InitNotifications(s.userDataDir)
+}
+
+// context returns the Wails context, or nil before Wails has started.
+//
+// Every reader goes through here. The field is written from the main thread
+// while sing-box's own goroutines read it, and two paths in transfer.go read it
+// bare — a data race that a convention spread over a dozen copies of the same
+// four lines was never going to prevent.
+func (s *AppService) context() context.Context {
+	s.wailsCtxMu.RLock()
+	defer s.wailsCtxMu.RUnlock()
+	return s.wailsCtx
 }
 
 // emitSafe emits a Wails event thread-safely (wailsCtx may be nil during startup).
 func (s *AppService) emitSafe(event string, data ...interface{}) {
-	s.wailsCtxMu.RLock()
-	ctx := s.wailsCtx
-	s.wailsCtxMu.RUnlock()
-	if ctx != nil {
+	if ctx := s.context(); ctx != nil {
 		wailsruntime.EventsEmit(ctx, event, data...)
 	}
 }
@@ -183,6 +220,25 @@ func (s *AppService) flushLogStream() {
 	}
 }
 
+// logNotice puts a line NeoBox wrote itself into the same stream as sing-box's
+// own output, in the shape the log view already parses ("LEVEL [component]
+// message"; see the dropped-lines notice in logstream.go).
+//
+// fmt.Printf would not do here. A windowsgui build has no console attached, so
+// everything printed there goes nowhere — fine for the post-mortem diagnostics
+// the rest of this package uses it for, useless for something the user is
+// meant to act on. Silently dropped when no session is running: there is no
+// stream to write into, and the events these report only happen inside one.
+func (s *AppService) logNotice(level, format string, args ...interface{}) {
+	s.stateMu.Lock()
+	ls := s.logStream
+	s.stateMu.Unlock()
+	if ls == nil {
+		return
+	}
+	ls.WriteMessage(0, level+" [NeoBox] "+fmt.Sprintf(format, args...))
+}
+
 // resetSessionTraffic zeroes the counters at the start of a core session.
 func (s *AppService) resetSessionTraffic() {
 	s.trafficMu.Lock()
@@ -198,6 +254,20 @@ func (s *AppService) addSessionTraffic(up, down int64) (totalUp, totalDown int64
 	s.sessionUp += up
 	s.sessionDown += down
 	return s.sessionUp, s.sessionDown
+}
+
+// SessionTraffic reports the running session totals, in bytes, to the frontend.
+//
+// Запись в «Историю» составляет интерфейс, а трафик считает Go, и до этого
+// метода интерфейс брал итоги из счётчиков на window, которые заполняет
+// обработчик события traffic-stats. События же не приходят, пока окно в трее
+// (см. vpn.go: emit пропускается при скрытом окне), — а отключаются в этом
+// приложении чаще всего именно из трея, и в историю уезжало последнее, что
+// успели увидеть до сворачивания. Спрашивать итог в момент записи — способ не
+// зависеть от того, смотрел ли кто-нибудь на спидометр.
+func (s *AppService) SessionTraffic() map[string]int64 {
+	up, down := s.sessionTraffic()
+	return map[string]int64{"up": up, "down": down}
 }
 
 // sessionTraffic reads the running totals.

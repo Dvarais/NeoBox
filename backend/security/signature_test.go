@@ -79,3 +79,39 @@ func TestVerifyFileSignatureRejectsMalformedInput(t *testing.T) {
 		t.Error("a missing file was accepted")
 	}
 }
+
+// Ключ, который не расшифровался, нельзя просто перезаписать: всё, что им
+// запечатано — подписки, выбранный сервер, избранное, профили, история, — после
+// этого не читается уже никогда. А DPAPI отказывает и по причинам, которые
+// проходят: профиль не догрузился, AppData принесли с другой машины. Файл
+// обязан пережить неудачу.
+func TestPreserveUnreadableKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "key.bin")
+	if err := os.WriteFile(path, []byte("not a DPAPI blob"), 0600); err != nil {
+		t.Fatalf("подготовка файла: %v", err)
+	}
+
+	preserveUnreadableKey(path)
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("исходный key.bin остался на месте — следующая запись затрёт его")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("чтение каталога: %v", err)
+	}
+	var saved string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "key.bin.unreadable-") {
+			saved = e.Name()
+		}
+	}
+	if saved == "" {
+		t.Fatalf("копия не найдена, в каталоге: %v", entries)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, saved))
+	if err != nil || string(data) != "not a DPAPI blob" {
+		t.Errorf("содержимое копии повреждено: %q, %v", data, err)
+	}
+}

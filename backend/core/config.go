@@ -12,8 +12,10 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -49,12 +51,282 @@ func getRandomUserAgent() string {
 	return realisticUserAgents[idx.Int64()]
 }
 
+// dohProviders maps the resolver addresses the DNS dropdown offers to the
+// DoH endpoint each one serves.
+//
+// The address is what settings.json stores — the dropdown's option values are
+// bare IPs — and the hostname is what the TLS handshake needs. Keeping the IP
+// as the address and carrying the hostname only as the SNI is the point of the
+// whole arrangement: the resolver never has to be looked up, so there is no
+// bootstrap query to leak before the tunnel's own DNS is up.
+// Вторые адреса тех же резолверов и AdGuard добавлены потому, что их набирают
+// по памяти не реже первых. Записаны только те соответствия, в которых нет
+// сомнений: неверное имя здесь хуже его отсутствия — оно уедет в SNI, и
+// рукопожатие развалится там, где без карты оно бы состоялось по IP-SAN.
+//
+// owner — владелец сети, от имени которой резолвер ходит к авторитетным
+// серверам. Нужен проверке утечки DNS: она узнаёт, кто на самом деле обслужил
+// запрос, и сверяет с тем, кого выбрал пользователь. Сверять по адресу нельзя —
+// запросы принимаются на 1.1.1.1, а наружу провайдер ходит с совсем других
+// адресов своей сети. Строка сравнивается без учёта регистра как подстрока
+// имени организации из записи AS.
+var dohProviders = map[string]struct{ hostname, path, owner string }{
+	"1.1.1.1":         {"cloudflare-dns.com", "/dns-query", "cloudflare"},
+	"1.0.0.1":         {"cloudflare-dns.com", "/dns-query", "cloudflare"},
+	"8.8.8.8":         {"dns.google", "/dns-query", "google"},
+	"8.8.4.4":         {"dns.google", "/dns-query", "google"},
+	"9.9.9.9":         {"dns.quad9.net", "/dns-query", "quad9"},
+	"149.112.112.112": {"dns.quad9.net", "/dns-query", "quad9"},
+	"94.140.14.14":    {"dns.adguard-dns.com", "/dns-query", "adguard"},
+}
+
+// DNSResolverOwners отдаёт интерфейсу карту «адрес резолвера — владелец сети».
+//
+// Существует затем, чтобы проверка утечки не держала свою копию этого списка.
+// Копия молча разошлась бы с оригиналом при первом же добавленном провайдере, и
+// разошлась бы худшим образом: проверка объявила бы утечку на исправном
+// туннеле, потому что владельца нового резолвера она бы просто не знала.
+func DNSResolverOwners() map[string]string {
+	owners := make(map[string]string, len(dohProviders))
+	for address, provider := range dohProviders {
+		owners[address] = provider.owner
+	}
+	return owners
+}
+
+// defaultDoHAddress is used when no DNS server has been chosen. It is the value
+// the dropdown starts on, so an untouched install keeps exactly the behaviour it
+// has always had.
+const defaultDoHAddress = "1.1.1.1"
+
+// remoteDNSServer builds the dns-remote server from the user's DNS setting.
+//
+// Until now this setting was written to settings.json by the UI and read by
+// nobody: Settings.Dns was declared and never referenced anywhere in the
+// backend, so the resolver was hardcoded to Cloudflare no matter what the user
+// picked. Choosing Google, Quad9 or a DoH URL of their own changed the stored
+// value, the dropdown, and nothing else.
+//
+// Two properties are preserved whatever the user asks for, because the rest of
+// the DNS design rests on them:
+//
+//   - The server is always DoH. Plain DNS would be readable by anything on the
+//     path, and config_generate_test asserts the type for that reason.
+//   - It is always detoured through the proxy outbound, so queries leave inside
+//     the tunnel rather than beside it.
+//
+// A value that cannot satisfy those is an error rather than a silent fallback.
+// Silently ignoring the setting is the bug being fixed here; doing it again for
+// a typo would leave the user in exactly the same place, watching a resolver
+// they did not choose.
+// isDoHHostname reports whether the value looks like a bare hostname that can
+// be turned into a DoH URL.
+//
+// Голый IP сюда не попадает намеренно. Для DoH нужно имя, которым проверяется
+// сертификат; у незнакомого адреса такого имени взять неоткуда, и подстановка
+// самого адреса в SNI дала бы отказ рукопожатия вместо понятной ошибки.
+// Известные провайдеры разобраны выше по карте dohProviders — там имя есть.
+func isDoHHostname(value string) bool {
+	if value == "" || strings.ContainsAny(value, " \t/\\?#@:[]") {
+		return false
+	}
+	if !strings.Contains(value, ".") {
+		return false
+	}
+	if _, err := netip.ParseAddr(value); err == nil {
+		return false
+	}
+	return true
+}
+
+// ValidateDNSSetting проверяет значение поля «свой DNS» тем же кодом, что и
+// генерация конфига, и возвращает пустую строку, если всё в порядке.
+//
+// Существует затем, чтобы интерфейс мог сказать о непригодном адресе сразу, а
+// не через сборку конфига при нажатии «Подключиться». Проверка одна на оба
+// пути: своя копия правил во фронтенде разошлась бы с этой при первой правке.
+func ValidateDNSSetting(setting string) string {
+	if _, err := remoteDNSServer(setting, "proxy"); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func remoteDNSServer(setting, outboundTag string) (map[string]interface{}, error) {
+	address := strings.TrimSpace(setting)
+	if address == "" {
+		address = defaultDoHAddress
+	}
+
+	server := map[string]interface{}{
+		"type":   "https",
+		"tag":    "dns-remote",
+		"path":   "/dns-query",
+		"detour": outboundTag,
+	}
+
+	// A known provider, named by the IP the dropdown stores.
+	if provider, ok := dohProviders[address]; ok {
+		server["server"] = address
+		server["path"] = provider.path
+		server["tls"] = map[string]interface{}{
+			"enabled":     true,
+			"server_name": provider.hostname,
+		}
+		return server, nil
+	}
+
+	// Голое имя хоста — самая естественная запись «своего DNS», и раньше она
+	// отвергалась наравне с мусором: пользователь, написавший
+	// dns.adguard-dns.com, получал совет «дайте один из 1.1.1.1, 8.8.8.8,
+	// 9.9.9.9». Дописываем схему и путь по умолчанию сами — получается тот же
+	// DoH, к которому всё и сводится.
+	if !strings.Contains(address, "://") && isDoHHostname(address) {
+		address = "https://" + address + "/dns-query"
+	}
+
+	// Голый IP, которого нет в карте провайдеров.
+	//
+	// Раньше он отвергался: имени для проверки сертификата взять неоткуда.
+	// Но проверять можно и по IP-SAN — крупные резолверы такой SAN несут, —
+	// поэтому адрес принимается и превращается в тот же DoH. SNI при этом не
+	// отправляется вовсе, см. сборку блока tls ниже.
+	//
+	// Частные и петлевые адреса отсекаются здесь, а не молчаливым отказом
+	// рукопожатия: резолвер в домашней сети через detour всё равно недостижим —
+	// запрос уйдёт искать его в сети VPN-сервера, — и понятная причина лучше
+	// невнятной ошибки TLS через минуту.
+	if !strings.Contains(address, "://") {
+		if addr, err := netip.ParseAddr(address); err == nil {
+			if !isRoutableDestination(addr) {
+				return nil, fmt.Errorf(
+					"DNS server %q cannot be reached: it is a local or loopback address, and DNS "+
+						"queries travel inside the tunnel, where that address belongs to the "+
+						"server's network rather than yours", address)
+			}
+			if addr.Is6() {
+				address = "https://[" + addr.String() + "]/dns-query"
+			} else {
+				address = "https://" + addr.String() + "/dns-query"
+			}
+		}
+	}
+
+	// Всё остальное обязано быть DoH-адресом. Требование не косметическое:
+	// сервер уходит через detour в туннель, поэтому обычный DNS был бы виден
+	// оператору сервера, а локальный резолвер просто не нашёлся бы — запрос
+	// ушёл бы искать его в сети сервера, а не дома.
+	if !strings.HasPrefix(address, "https://") {
+		return nil, fmt.Errorf(
+			"DNS server %q is not usable: give a hostname (dns.example.com), a DoH URL "+
+				"(https://dns.example.com/dns-query), or one of %s. Plain DNS is not "+
+				"accepted: it travels inside the tunnel, where the server operator would read it",
+			address, strings.Join(sortedProviderAddresses(), ", "))
+	}
+
+	parsed, err := url.Parse(address)
+	if err != nil || parsed.Hostname() == "" {
+		return nil, fmt.Errorf("DNS server %q is not a valid URL", address)
+	}
+
+	host := parsed.Hostname()
+	path := parsed.EscapedPath()
+	if path == "" || path == "/" {
+		path = "/dns-query"
+	}
+	server["server"] = host
+	server["path"] = path
+	if port := parsed.Port(); port != "" {
+		portNum, err := strconv.Atoi(port)
+		if err != nil || portNum < 1 || portNum > 65535 {
+			return nil, fmt.Errorf("DNS server %q has an invalid port", address)
+		}
+		server["server_port"] = portNum
+	}
+
+	// SNI.
+	//
+	// Для имени это само имя. Для известного провайдера — имя из карты: его
+	// несёт сертификат, и подстановка избавляет от заведомо неудачного
+	// рукопожатия.
+	//
+	// Для незнакомого IP SNI не отправляется вовсе. Раньше туда уходил сам
+	// адрес, и это было неверно: SNI по RFC 6066 — доменное имя, IP-литерал в
+	// нём недопустим, сервер такой либо игнорирует, либо рвёт соединение. Без
+	// SNI сертификат проверяется по IP-SAN; не несёт его сервер — рукопожатие
+	// честно не состоится. Проверка при этом никуда не девается: отключать её
+	// приложение не умеет и уметь не должно.
+	tlsOpts := map[string]interface{}{"enabled": true}
+	if provider, ok := dohProviders[host]; ok {
+		tlsOpts["server_name"] = provider.hostname
+	} else if net.ParseIP(host) == nil {
+		tlsOpts["server_name"] = host
+	}
+	server["tls"] = tlsOpts
+
+	// A hostname has to be resolved before it can be dialled, and the tunnel's
+	// own resolver is the thing being defined here — so that first lookup goes
+	// through the system resolver. It reveals the DoH provider's name to it,
+	// once per session, and nothing else. Naming the resolver by IP avoids it
+	// entirely, which is why the built-in choices do.
+	if net.ParseIP(host) == nil {
+		server["domain_resolver"] = "dns-direct"
+	}
+	return server, nil
+}
+
+// sortedProviderAddresses lists the built-in resolvers in a stable order, so
+// the error message above does not shuffle between runs.
+func sortedProviderAddresses() []string {
+	addresses := make([]string, 0, len(dohProviders))
+	for address := range dohProviders {
+		addresses = append(addresses, address)
+	}
+	sort.Strings(addresses)
+	return addresses
+}
+
+// resolveRemoteDNSHost заменяет имя DoH-резолвера его адресом.
+//
+// remoteDNSServer оставляет своему резолверу, заданному именем, поле
+// domain_resolver: dns-direct — то есть имя провайдера уходит системному
+// резолверу обычным запросом на 53-й порт. Ровно такой запрос провайдеры и
+// перехватывают, и это последнее место на пути подключения, где оно ещё
+// оставалось: у встроенных вариантов адрес известен заранее, а у своего — нет.
+//
+// Разрешаем его тем же ResolveHost и подставляем адрес. SNI при этом уже стоит
+// правильный — remoteDNSServer записал туда имя, — поэтому сертификат
+// проверяется как прежде, а искать резолвер через DNS больше не нужно.
+//
+// Делается здесь, а не в remoteDNSServer, потому что тот вызывается ещё и из
+// ValidateDNSSetting — на каждую правку поля в настройках. Сетевой запрос на
+// набор текста был бы неуместен.
+//
+// Неудача ничего не ломает: остаётся прежняя пара «имя + domain_resolver», то
+// есть ровно то поведение, что было до этой правки.
+func resolveRemoteDNSHost(ctx context.Context, remote map[string]interface{}) {
+	if remote["domain_resolver"] == nil {
+		return
+	}
+	host, _ := remote["server"].(string)
+	ips, err := ResolveHost(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return
+	}
+	for _, ip := range ips {
+		if ip4 := ip.To4(); ip4 != nil {
+			remote["server"] = ip4.String()
+			delete(remote, "domain_resolver")
+			return
+		}
+	}
+}
+
 // Settings represents the NeoBox application settings.
 type Settings struct {
 	TunMode              bool     `json:"tunMode"`
 	FakeDns              bool     `json:"fakeDns"`
 	Dns                  string   `json:"dns"`
-	CustomDirect         []string `json:"customDirect"`
 	ProcessMode          string   `json:"processMode"` // "blacklist" or "whitelist"
 	ProcessList          []string `json:"processList"`
 	ProcessListBlacklist []string `json:"processListBlacklist"`
@@ -935,19 +1207,21 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		workOutbound[k] = v
 	}
 
+	// Один срок на оба разрешения имени ниже — резолвера и самого сервера.
+	//
+	// По отдельному сроку на каждое они складывались бы: на мёртвой сети
+	// пользователь ждал бы вдвое дольше, глядя на «Подключение...».
+	resolveCtx, resolveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer resolveCancel()
+
 	// 1. DNS Section (Nuclear Strategy: No local DNS, only IP-based DoH for remote, local for direct)
+	remote, err := remoteDNSServer(settings.Dns, outboundTag)
+	if err != nil {
+		return nil, err
+	}
+	resolveRemoteDNSHost(resolveCtx, remote)
 	dnsServers := []map[string]interface{}{
-		{
-			"type":   "https",
-			"tag":    "dns-remote",
-			"server": "1.1.1.1",
-			"path":   "/dns-query",
-			"detour": outboundTag,
-			"tls": map[string]interface{}{
-				"enabled":     true,
-				"server_name": "cloudflare-dns.com",
-			},
-		},
+		remote,
 		{
 			"type": "local",
 			"tag":  "dns-direct",
@@ -976,16 +1250,18 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		serverDomain, _ = wgPeer["address"].(string)
 	}
 	if net.ParseIP(serverDomain) == nil {
-		resolveCtx, resolveCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer resolveCancel()
-		addrs, err := net.DefaultResolver.LookupIPAddr(resolveCtx, serverDomain)
+		// Через ResolveHost, а не через системный резолвер: обычный DNS на пути к
+		// серверу перехватывается провайдером, и подменённый адрес выглядел бы
+		// потом как «сервер не отвечает». За ResolveHost теперь два DoH-резолвера
+		// разом и системный как откат, если молчат оба.
+		ips, err := ResolveHost(resolveCtx, serverDomain)
 		if err == nil {
-			for _, addr := range addrs {
-				if addr.IP.To4() != nil {
+			for _, ip := range ips {
+				if ip4 := ip.To4(); ip4 != nil {
 					if wgPeer != nil {
-						wgPeer["address"] = addr.IP.String()
+						wgPeer["address"] = ip4.String()
 					} else {
-						workOutbound["server"] = addr.IP.String()
+						workOutbound["server"] = ip4.String()
 					}
 					break
 				}
@@ -1065,22 +1341,6 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		})
 	}
 
-	// Custom direct domains
-	var validDirect []string
-	for _, domain := range settings.CustomDirect {
-		d := strings.TrimSpace(domain)
-		if d != "" {
-			validDirect = append(validDirect, d)
-		}
-	}
-	if len(validDirect) > 0 {
-		routeRules = append(routeRules, map[string]interface{}{
-			"domain_suffix": validDirect,
-			"action":        "route",
-			"outbound":      "direct",
-		})
-	}
-
 	// Custom user-defined routing rules (take priority over geoip/geosite)
 	for _, rule := range settings.CustomRules {
 		if rule.Value == "" || rule.Type == "" || rule.Action == "" {
@@ -1110,6 +1370,21 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			ruleEntry["domain_keyword"] = []string{rule.Value}
 		case "ip_cidr":
 			ruleEntry["ip_cidr"] = []string{rule.Value}
+		case "process":
+			// Правило по программе применимо только когда ядро видит владельца
+			// сокета, то есть в TUN-режиме — ровно то же ограничение, что у
+			// раздельного туннелирования ниже. Вне TUN правило не «работает
+			// хуже», оно не совпадает никогда, поэтому лучше не выпускать его в
+			// конфиг вовсе: иначе оно молча занимало бы место перед
+			// ip_is_private и bypass-RU, ничего при этом не делая.
+			if !tunMode {
+				continue
+			}
+			name, ok := NormaliseProcessName(rule.Value)
+			if !ok {
+				continue
+			}
+			ruleEntry["process_name"] = []string{name}
 		default:
 			continue
 		}
@@ -1146,7 +1421,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 	// Bypass Russia (rule-sets)
 	if settings.BypassRu {
 		routeRules = append(routeRules, map[string]interface{}{
-			"rule_set": []string{"geoip-ru", "geosite-ru"},
+			"rule_set": []string{"geoip-ru", "geosite-category-ru"},
 			"action":   "route",
 			"outbound": "direct",
 		})
@@ -1194,6 +1469,18 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		firstDNSRule["domain"] = append(domains, serverIPStr)
 	}
 	dnsRules := []map[string]interface{}{firstDNSRule}
+	if settings.BypassRu {
+		// RU names are resolved outside the tunnel, because their traffic leaves
+		// outside it: an address chosen by the remote resolver points at the
+		// CDN edge nearest the exit node, not the one nearest the user. Under
+		// FakeDNS it is worse than slow -- the answer is a 198.18/15 address, so
+		// the geoip-ru half of the route rule has no real IP left to match.
+		dnsRules = append(dnsRules, map[string]interface{}{
+			"rule_set": []string{"geosite-category-ru"},
+			"action":   "route",
+			"server":   "dns-direct",
+		})
+	}
 	if settings.FakeDns && tunMode {
 		dnsRules = append(dnsRules, map[string]interface{}{
 			"query_type": []string{"A", "AAAA"},
@@ -1297,20 +1584,47 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 
 	if settings.BypassRu {
 		routeSection := config["route"].(map[string]interface{})
+		// Кто именно качает списки. По умолчанию — сам туннель (см. ниже), но
+		// WireGuard так не умеет, и дело не в протоколе, а в порядке старта
+		// ядра: sing-box поднимает outbound'ы раньше маршрутизатора
+		// (box.go, StartStateStart), а endpoint'ы — позже него, и туннель
+		// WireGuard становится пригодным только на PostStart. Маршрутизатор к
+		// этому моменту уже качает rule-set, то есть звонил бы в туннель,
+		// которого ещё нет.
+		//
+		// Цена ошибки здесь максимальная: когда кэша нет, неудачная первая
+		// загрузка — это не «правило не совпадёт», а отказ старта целиком
+		// (route/rule/rule_set_remote.go: "initial rule-set: ..."). Поэтому
+		// для WireGuard загрузка идёт напрямую.
+		downloadDetour := outboundTag
+		if outboundType, _ := workOutbound["type"].(string); outboundType == "wireguard" {
+			downloadDetour = "direct"
+		}
+		// Both lists are fetched through the tunnel, not around it. They live on
+		// raw.githubusercontent.com, which is exactly the kind of host this
+		// feature exists to reach: a "direct" detour meant the download failed
+		// for exactly the users who turn the bypass on. And a failed download is
+		// not a rule that quietly never matches: with no cached copy, sing-box
+		// aborts the whole start over it (route/rule/rule_set_remote.go,
+		// "initial rule-set: ..."), so the toggle took the core down with it.
+		//
+		// The domain list is "geosite-category-ru": sing-geosite has no
+		// "geosite-ru.srs", so that URL answered 404 and only the geoip half of
+		// the bypass ever had a chance of loading.
 		routeSection["rule_set"] = []map[string]interface{}{
 			{
 				"tag":             "geoip-ru",
 				"type":            "remote",
 				"format":          "binary",
 				"url":             "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs",
-				"download_detour": "direct",
+				"download_detour": downloadDetour,
 			},
 			{
-				"tag":             "geosite-ru",
+				"tag":             "geosite-category-ru",
 				"type":            "remote",
 				"format":          "binary",
-				"url":             "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-ru.srs",
-				"download_detour": "direct",
+				"url":             "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs",
+				"download_detour": downloadDetour,
 			},
 		}
 	}
@@ -1346,6 +1660,25 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 	}
 
 	return config, nil
+}
+
+// refuseInsecureRedirect keeps a subscription fetch on HTTPS for the whole of
+// its redirect chain.
+//
+// Rejecting an "http://" URL up front only covers the address the user typed.
+// Go's client follows up to ten redirects on its own, so a host answering an
+// HTTPS request with "302 Location: http://…" got the body fetched in plain
+// text anyway — the exact interception the scheme check exists to prevent, one
+// header away. The subscription body is a list of proxy servers, so an attacker
+// who can rewrite it chooses which server the user connects through.
+func refuseInsecureRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if !strings.EqualFold(req.URL.Scheme, "https") {
+		return fmt.Errorf("refusing redirect to %s: subscriptions must stay on HTTPS", req.URL.Scheme)
+	}
+	return nil
 }
 
 // errSubBlocked marks a response that arrived intact but carried no
@@ -1417,14 +1750,16 @@ func FetchSubscription(subURL string) ([]string, error) {
 	var transports []transport
 	if proxyURL, err := url.Parse("http://" + ProxyListenAddr); err == nil {
 		transports = append(transports, transport{"proxy", &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout:       10 * time.Second,
+			CheckRedirect: refuseInsecureRedirect,
 			Transport: &http.Transport{
 				Proxy: http.ProxyURL(proxyURL),
 			},
 		}})
 	}
 	transports = append(transports, transport{"direct", &http.Client{
-		Timeout: 15 * time.Second,
+		Timeout:       15 * time.Second,
+		CheckRedirect: refuseInsecureRedirect,
 	}})
 
 	// Each transport asks with a browser User-Agent first. Only when the host

@@ -70,7 +70,7 @@ const COUNTRY_PATTERNS: Array<[RegExp, string]> = [
   [/\.ar$|argenti/i, '🇦🇷'],
 ];
 
-export function getCountryFlag(name: string, address: string): string {
+function getCountryFlag(name: string, address: string): string {
   const haystack = `${name} ${address}`.toLowerCase();
   for (const [pattern, flag] of COUNTRY_PATTERNS) {
     if (pattern.test(haystack)) return flag;
@@ -174,7 +174,7 @@ function latencyRank(value: PingValue | undefined): number {
   return value;
 }
 
-export function sortServers(
+function sortServers(
   servers: string[],
   sortMode: SortMode,
   pings: Record<string, PingValue>,
@@ -194,6 +194,49 @@ export function sortServers(
   return sorted;
 }
 
+// Ячейка задержки каждой отрисованной карточки, по ссылке сервера.
+//
+// Она существует ровно ради onPingResult. Замеры приходят по одному на сервер, и
+// «перерисовать список» на каждый из них означает собрать список столько раз,
+// сколько в нём карточек: на 360 серверах — 130 000 сборок карточки подряд,
+// каждая с разбором ссылки и тремя десятками регулярных выражений на флаг
+// страны. Интерфейс переставал отвечать до конца проверки. Со ссылкой на ячейку
+// результат вписывается на место за постоянное время.
+//
+// Карта живёт ровно одну отрисовку: renderCards очищает её и заполняет заново,
+// так что в ней никогда нет узлов, выброшенных из DOM.
+const pingCells = new Map<string, HTMLElement>();
+
+/**
+ * pingDisplay — то, как замер выглядит в карточке. Общий для первой отрисовки и
+ * для обновления на месте, иначе они разъедутся.
+ */
+function pingDisplay(value: PingValue | undefined): { text: string; color: string } {
+  if (value === -1) return { text: 'Err', color: 'var(--text-dim)' };
+  if (value === 'pinging') return { text: '...', color: 'var(--text-dim)' };
+  if (typeof value !== 'number') return { text: '—', color: 'var(--text-dim)' };
+  return {
+    text: `${value}ms`,
+    color: value < 150 ? 'var(--success)' : value < 400 ? 'var(--attention)' : 'var(--danger)',
+  };
+}
+
+/**
+ * updateCardPing вписывает свежий замер в уже отрисованную карточку.
+ *
+ * Возвращает false, если карточки на экране нет — сервер отфильтрован поиском
+ * или лежит в другой подписке. Показывать тогда нечего: значение уже в pingData,
+ * и ближайшая настоящая отрисовка возьмёт его оттуда.
+ */
+export function updateCardPing(link: string, value: PingValue): boolean {
+  const cell = pingCells.get(link);
+  if (!cell) return false;
+  const { text, color } = pingDisplay(value);
+  cell.textContent = text;
+  cell.style.color = color;
+  return true;
+}
+
 export function renderCards(
   container: HTMLElement | null,
   servers: string[],
@@ -204,10 +247,11 @@ export function renderCards(
   searchQuery: string,
   favoriteLinks: Set<string>,
   onToggleFavorite: (link: string) => void,
-  t: Partial<Translations> = {},
+  t: Translations,
 ): void {
   if (!container) return;
   container.innerHTML = '';
+  pingCells.clear();
 
   const uniqueServers = Array.from(new Set(servers));
   let displayServers = sortServers(uniqueServers, sortMode, pings);
@@ -229,18 +273,21 @@ export function renderCards(
     const info = parseBasicInfo(link);
     const card = document.createElement('div');
     card.className = `server-card ${activeServerLink === link ? 'selected' : ''}`;
+    card.setAttribute('role', 'listitem');
 
-    const ping = pings[link];
-    const latency =
-      ping === 'pinging' ? '...' : ping === -1 ? 'Err' : typeof ping === 'number' ? `${ping}ms` : '—';
+    // Карточку нельзя сделать одной большой <button>: внутри неё живёт кнопка
+    // избранного, а вложенные друг в друга кнопки — невалидная разметка,
+    // которую браузер разбирает по-своему. Поэтому кликабельная часть вынесена
+    // в отдельную кнопку, а звёздочка осталась её соседкой. Раньше обработчик
+    // висел прямо на <div>, и выбрать сервер с клавиатуры было невозможно.
+    const mainBtn = document.createElement('button');
+    mainBtn.type = 'button';
+    mainBtn.className = 'server-card-main';
+    if (activeServerLink === link) mainBtn.setAttribute('aria-current', 'true');
 
-    // Colour-code latency
-    let pingColor = 'var(--text-dim)';
-    if (typeof ping === 'number' && ping !== -1) {
-      pingColor = ping < 150 ? 'var(--success)' : ping < 400 ? '#f59e0b' : 'var(--danger)';
-    }
+    const { text: latency, color: pingColor } = pingDisplay(pings[link]);
 
-    const displayName = info.name || info.address || t.proxyFallbackName || 'Proxy';
+    const displayName = info.name || info.address || t.proxyFallbackName;
     const displayType = info.type ? info.type.toUpperCase() : 'VPN';
     const flag = getCountryFlag(info.name, info.address);
 
@@ -250,15 +297,21 @@ export function renderCards(
     const iconDiv = document.createElement('div');
     iconDiv.className = 'server-icon';
     iconDiv.textContent = flag;
+    // Флаг — эмодзи. Скринридер прочёл бы «флаг Нидерландов» перед каждым
+    // именем, дублируя то, что и так есть в названии сервера.
+    iconDiv.setAttribute('aria-hidden', 'true');
 
     const infoDiv = document.createElement('div');
     const titleH4 = document.createElement('h4');
-    titleH4.style.cssText = 'font-size:14px; display:flex; align-items:center; gap:8px; margin:0;';
+    titleH4.style.cssText = 'font-size:var(--fs-body); display:flex; align-items:center; gap:8px; margin:0;';
 
     const protoTag = document.createElement('span');
     protoTag.className = 'protocol-tag';
-    protoTag.style.cssText =
-      'background:var(--accent-color); color:white; padding:2px 6px; border-radius:4px; font-size:10px; flex-shrink:0;';
+    // Инлайновый стиль здесь раньше перебивал класс .protocol-tag и ставил
+    // белый текст на сплошном акценте — контраст 2.14:1 при кегле 10px. Класс
+    // задаёт акцентный текст на его же полупрозрачной подложке и проходит AA;
+    // оставляем только то, чего в классе нет.
+    protoTag.style.flexShrink = '0';
     protoTag.textContent = displayType;
 
     const nameSpan = document.createElement('span');
@@ -269,8 +322,8 @@ export function renderCards(
     titleH4.appendChild(nameSpan);
 
     const addressP = document.createElement('p');
-    addressP.style.cssText = 'font-size:11px; color:var(--text-dim); margin:2px 0 0;';
-    addressP.textContent = info.address || t.unknownAddress || 'Unknown';
+    addressP.style.cssText = 'font-size:var(--fs-micro); color:var(--text-dim); margin:2px 0 0;';
+    addressP.textContent = info.address || t.unknownAddress;
 
     infoDiv.appendChild(titleH4);
     infoDiv.appendChild(addressP);
@@ -282,33 +335,44 @@ export function renderCards(
     pingDiv.className = 'ping';
     pingDiv.style.color = pingColor;
     pingDiv.textContent = latency;
+    // Без подписи «42 мс» читается голосом как одинокое число в конце строки.
+    if (t.pingLabel) pingDiv.setAttribute('aria-label', `${t.pingLabel}: ${latency}`);
+    pingCells.set(link, pingDiv);
 
     // Star toggle button
     const starBtn = document.createElement('button');
+    starBtn.type = 'button';
+    starBtn.className = 'server-star';
+    // font-size здесь задаёт размер глифа ★/☆, а не кегль текста, поэтому
+    // значение литеральное и в шкалу кеглей не входит — как у .server-icon.
     starBtn.style.cssText =
       'background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:16px; padding:4px; display:flex; align-items:center; transition:color 0.2s;';
     const isFav = favoriteLinks && favoriteLinks.has(link);
+    const starLabel = isFav
+      ? t.favoriteRemove
+      : t.favoriteAdd;
     // Обе звёздочки — литералы без интерполяции, поэтому textContent, а не innerHTML.
     starBtn.textContent = isFav ? '★' : '☆';
-    if (isFav) starBtn.style.color = '#f59e0b';
-    starBtn.title = isFav
-      ? t.favoriteRemove || 'Remove from favorites'
-      : t.favoriteAdd || 'Add to favorites';
+    if (isFav) starBtn.style.color = 'var(--attention)';
+    starBtn.title = starLabel;
+    // Именем кнопки был сам символ: скринридер произносил «звёздочка», а не
+    // действие. Символ теперь декоративен, имя задаёт aria-label, состояние —
+    // aria-pressed.
+    starBtn.setAttribute('aria-label', starLabel);
+    starBtn.setAttribute('aria-pressed', isFav ? 'true' : 'false');
 
     starBtn.onclick = (e) => {
       e.stopPropagation();
       if (onToggleFavorite) onToggleFavorite(link);
     };
 
-    const rightContainer = document.createElement('div');
-    rightContainer.style.cssText = 'display:flex; align-items:center; gap:8px;';
-    rightContainer.appendChild(pingDiv);
-    rightContainer.appendChild(starBtn);
+    mainBtn.appendChild(detailsDiv);
+    mainBtn.appendChild(pingDiv);
+    mainBtn.onclick = () => onServerSelect(link, displayName, displayType, info.address);
 
-    card.appendChild(detailsDiv);
-    card.appendChild(rightContainer);
+    card.appendChild(mainBtn);
+    card.appendChild(starBtn);
 
-    card.onclick = () => onServerSelect(link, displayName, displayType, info.address);
     container.appendChild(card);
   });
 }

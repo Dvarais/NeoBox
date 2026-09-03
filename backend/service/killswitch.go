@@ -61,8 +61,43 @@ func (s *AppService) recoverKillSwitch() {
 		// rules cannot be removed and the user stays offline. Keep the marker so
 		// the next start retries, and surface it in diagnostics.
 		fmt.Printf("[killswitch] recovery FAILED, the machine may have no internet access: %v\n", err)
+		// Раньше это оставалось только в crash-логе. Между тем это худшее
+		// состояние продукта: машина без интернета, приложение ещё даже не
+		// подключено, и связать одно с другим пользователю нечем. Запоминаем,
+		// чтобы интерфейс мог сказать об этом вслух.
+		s.stateMu.Lock()
+		s.killSwitchStuck = true
+		s.stateMu.Unlock()
 		return
 	}
 	_ = os.Remove(s.killSwitchMarkerPath())
 	fmt.Println("[killswitch] leftover rules removed")
+}
+
+// GetKillSwitchState сообщает, режет ли сейчас сеть сам NeoBox.
+//
+// Нужно это ровно затем, чтобы «интернета нет» не выглядело как поломка
+// провайдера. Правила брандмауэра переживают процесс, который их поставил, и до
+// сих пор единственным следом их существования был файл-маркер, о котором
+// пользователь не знает.
+//
+// Возвращает карту, а не структуру, — так же, как GetConnections и StartXray:
+// биндинги Wails здесь генерируются в Record<string, any>, и заводить ради двух
+// булевых полей отдельную модель значило бы выбиваться из общего порядка.
+//
+//	active — правила установлены; считается по тому же маркеру, которым
+//	         пользуется восстановление при старте;
+//	stuck  — правила остались от прошлого запуска и снять их не удалось.
+//	         Обычно это упавший сеанс с правами администратора и следующий
+//	         запуск без них: машина без сети, и помогает только перезапуск с
+//	         повышением прав.
+func (s *AppService) GetKillSwitchState() map[string]interface{} {
+	_, err := os.Stat(s.killSwitchMarkerPath())
+	s.stateMu.Lock()
+	stuck := s.killSwitchStuck
+	s.stateMu.Unlock()
+	return map[string]interface{}{
+		"active": err == nil,
+		"stuck":  stuck,
+	}
 }

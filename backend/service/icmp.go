@@ -9,6 +9,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"NeoBox/backend/core"
 )
 
 // ICMP echo, used to time servers that speak only UDP — WireGuard, TUIC and the
@@ -109,12 +111,15 @@ func resolveIPv4(host string, timeout time.Duration) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	// Тот же путь, что и у подключения (core.ResolveHost): пинговать имеет смысл
+	// тот адрес, на который потом пойдёт туннель, — иначе замер относится к чужому
+	// узлу, подставленному перехватом DNS.
+	ips, err := core.ResolveHost(ctx, host)
 	if err != nil {
 		return nil, err
 	}
-	for _, addr := range addrs {
-		if ip4 := addr.IP.To4(); ip4 != nil {
+	for _, ip := range ips {
+		if ip4 := ip.To4(); ip4 != nil {
 			return ip4, nil
 		}
 	}

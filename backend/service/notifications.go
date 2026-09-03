@@ -2,7 +2,6 @@ package service
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	toast "git.sr.ht/~jackmordaunt/go-toast/v2"
@@ -17,12 +16,7 @@ const neoBoxAppID = "NeoBox.VPN.Client"
 // HKCU\SOFTWARE\Classes\AppUserModelId so the OS can attribute toast
 // notifications to the correct application name and icon.
 // Must be called once at application startup (before sending any toasts).
-func InitNotifications() {
-	exePath, err := os.Executable()
-	if err != nil {
-		return
-	}
-
+func InitNotifications(userDataDir string) {
 	keyPath := `SOFTWARE\Classes\AppUserModelId\` + neoBoxAppID
 	k, _, err := registry.CreateKey(registry.CURRENT_USER, keyPath, registry.SET_VALUE)
 	if err != nil {
@@ -32,9 +26,9 @@ func InitNotifications() {
 	defer k.Close()
 
 	_ = k.SetStringValue("DisplayName", "NeoBox VPN")
-	// Point to the icon next to the executable (build/windows/icon.ico extracted at runtime)
-	iconPath := filepath.Join(filepath.Dir(exePath), "icon.ico")
-	_ = k.SetStringValue("IconUri", iconPath)
+	// The same file InitTray writes, and in the same place: the install
+	// directory is not writable without elevation.
+	_ = k.SetStringValue("IconUri", filepath.Join(userDataDir, "icon.ico"))
 }
 
 // sendToast sends a best-effort Windows toast notification.

@@ -12,12 +12,27 @@ const (
 	TrayToggleTooltip      = "tray.toggle.tooltip"
 	TraySelectServer       = "tray.servers"
 	TraySelectTooltip      = "tray.servers.tooltip"
+	TrayProfiles           = "tray.profiles"
+	TrayProfilesTooltip    = "tray.profiles.tooltip"
 	TrayRestart            = "tray.restart"
 	TrayRestartTooltip     = "tray.restart.tooltip"
 	TrayDisconnect         = "tray.disconnect"
 	TrayDisconnectTooltip  = "tray.disconnect.tooltip"
 	TrayQuit               = "tray.quit"
 	TrayQuitTooltip        = "tray.quit.tooltip"
+	TrayKillSwitch         = "tray.killswitch"
+	TrayKillSwitchTooltip  = "tray.killswitch.tooltip"
+	TrayTunMode            = "tray.tun"
+	TrayTunModeTooltip     = "tray.tun.tooltip"
+	TraySystemProxy        = "tray.sysproxy"
+	TraySystemProxyTooltip = "tray.sysproxy.tooltip"
+	// TrayMoreServers closes an over-long server list. See trayServerLimit.
+	TrayMoreServers = "tray.servers.more"
+	// The hover text on the icon itself — the only part of the tray that is
+	// readable without opening the menu, and the reason the traffic totals are
+	// in it.
+	TrayTipConnected    = "tray.tip.connected"
+	TrayTipDisconnected = "tray.tip.disconnected"
 
 	// Windows toast notifications.
 	ToastConnectedTitle    = "toast.connected.title"
@@ -35,6 +50,7 @@ const (
 	ErrKillSwitchFailed  = "error.killswitch.failed"
 	ErrSignatureRejected = "error.signature.rejected"
 	ErrSecretGeneration  = "error.secret.generate"
+	ErrHotkeyInvalid     = "error.hotkey.invalid"
 
 	// Errors produced while parsing links and subscriptions.
 	ErrLinkTooLong          = "error.link.too_long"
@@ -46,31 +62,23 @@ const (
 	ErrWireGuardNoAddress   = "error.wireguard.no_address"
 	ErrTransportUnsupported = "error.transport.unsupported"
 
-	// Diagnostics screen.
-	DiagWintunName         = "diag.wintun.name"
-	DiagWintunFound        = "diag.wintun.found"
-	DiagWintunMissing      = "diag.wintun.missing"
-	DiagAdminName          = "diag.admin.name"
-	DiagAdminYes           = "diag.admin.yes"
-	DiagAdminNo            = "diag.admin.no"
-	DiagProxyPortName      = "diag.proxyport.name"
-	DiagClashPortName      = "diag.clashport.name"
-	DiagPortInUseByVPN     = "diag.port.inuse_vpn"
-	DiagPortInUseByVPNAPI  = "diag.port.inuse_vpn_api"
-	DiagPortBusy           = "diag.port.busy"
-	DiagClashPortBusy      = "diag.clashport.busy"
-	DiagPortFree           = "diag.port.free"
-	DiagInternetName       = "diag.internet.name"
-	DiagInternetOK         = "diag.internet.ok"
-	DiagInternetFail       = "diag.internet.fail"
-	DiagDNSName            = "diag.dns.name"
-	DiagDNSOK              = "diag.dns.ok"
-	DiagDNSFail            = "diag.dns.fail"
-	DiagKillSwitchName     = "diag.killswitch.name"
-	DiagKillSwitchLeftover = "diag.killswitch.leftover"
-	DiagCoreName           = "diag.core.name"
-	DiagCoreRunning        = "diag.core.running"
-	DiagCoreStopped        = "diag.core.stopped"
+	// Import and export of the portable settings file. These reach the user as
+	// the titles of the two system dialogs and as the reason an import was
+	// refused, so they need the same parity as everything else on screen.
+	TransferExportTitle    = "transfer.export.title"
+	TransferImportTitle    = "transfer.import.title"
+	TransferJSONFilter     = "transfer.filter.json"
+	ErrWindowNotReady      = "error.window.not_ready"
+	ErrTransferEncode      = "error.transfer.encode"
+	ErrTransferSaveDialog  = "error.transfer.save_dialog"
+	ErrTransferOpenDialog  = "error.transfer.open_dialog"
+	ErrTransferWrite       = "error.transfer.write"
+	ErrTransferRead        = "error.transfer.read"
+	ErrTransferSave        = "error.transfer.save"
+	ErrTransferForeign     = "error.transfer.foreign"
+	ErrTransferMalformed   = "error.transfer.malformed"
+	ErrTransferNewerSchema = "error.transfer.newer_schema"
+	ErrTransferNoSettings  = "error.transfer.no_settings"
 )
 
 // messages holds every translation. Keep the two tables in step: a key present
@@ -86,12 +94,23 @@ var messages = map[Lang]map[string]string{
 		TrayToggleTooltip:      "Показать/Скрыть окно приложения",
 		TraySelectServer:       "Выбрать сервер",
 		TraySelectTooltip:      "Выбрать сервер из подписок",
+		TrayProfiles:           "Профили",
+		TrayProfilesTooltip:    "Переключить сохранённый набор настроек",
 		TrayRestart:            "Перезапустить VPN",
 		TrayRestartTooltip:     "Перезапустить текущее VPN соединение",
 		TrayDisconnect:         "Отключиться",
 		TrayDisconnectTooltip:  "Разорвать VPN соединение",
 		TrayQuit:               "Выход",
 		TrayQuitTooltip:        "Закрыть NeoBox",
+		TrayKillSwitch:         "Kill Switch",
+		TrayKillSwitchTooltip:  "Блокировать интернет вне VPN",
+		TrayTunMode:            "Режим TUN",
+		TrayTunModeTooltip:     "Пускать через VPN весь трафик системы",
+		TraySystemProxy:        "Системный прокси",
+		TraySystemProxyTooltip: "Прописывать NeoBox в настройки прокси Windows",
+		TrayMoreServers:        "…и ещё %d",
+		TrayTipConnected:       "NeoBox — подключено\n%s\n↑ %s   ↓ %s",
+		TrayTipDisconnected:    "NeoBox — отключено",
 
 		ToastConnectedTitle:    "✅ NeoBox VPN",
 		ToastConnectedBody:     "Подключено к серверу: %s",
@@ -107,6 +126,7 @@ var messages = map[Lang]map[string]string{
 		ErrKillSwitchFailed:  "Не удалось включить Kill Switch, подключение отменено: %v",
 		ErrSignatureRejected: "Проверка подписи не удалась: %v",
 		ErrSecretGeneration:  "Не удалось сгенерировать секрет для Clash API, подключение отменено: %v",
+		ErrHotkeyInvalid:     "сочетание «%s» приложению непонятно",
 
 		ErrLinkTooLong:          "Ссылка прокси слишком длинная (максимум %d символов)",
 		ErrSubURLTooLong:        "URL подписки слишком длинный (максимум %d символов)",
@@ -117,30 +137,20 @@ var messages = map[Lang]map[string]string{
 		ErrWireGuardNoAddress:   "В ссылке WireGuard не указан адрес интерфейса (параметр address) — без него туннель не поднять",
 		ErrTransportUnsupported: "Транспорт %s не поддерживается ядром sing-box. Такой сервер работает только в клиентах на базе Xray.",
 
-		DiagWintunName:         "Wintun драйвер",
-		DiagWintunFound:        "Найден (%s)",
-		DiagWintunMissing:      "wintun.dll не найден рядом с исполняемым файлом. TUN режим будет недоступен.",
-		DiagAdminName:          "Права администратора",
-		DiagAdminYes:           "Запущен с правами администратора — TUN режим доступен",
-		DiagAdminNo:            "Нет прав администратора. Системный прокси работает, TUN режим — нет.",
-		DiagProxyPortName:      "Порт прокси (%d)",
-		DiagClashPortName:      "Порт Clash API (%d)",
-		DiagPortInUseByVPN:     "Порт занят текущим активным подключением VPN",
-		DiagPortInUseByVPNAPI:  "Порт занят текущим активным подключением VPN (статистика работает)",
-		DiagPortBusy:           "Порт %d занят другим процессом. VPN не запустится пока порт не освобождён.",
-		DiagClashPortBusy:      "Порт %d занят. Статистика трафика в реальном времени может не работать.",
-		DiagPortFree:           "Порт свободен",
-		DiagInternetName:       "Интернет",
-		DiagInternetOK:         "Интернет доступен (успешное подключение к %s)",
-		DiagInternetFail:       "Нет доступа к интернету (проверенные хосты недоступны). Проверьте сетевое соединение.",
-		DiagDNSName:            "DNS резолвер",
-		DiagDNSOK:              "DNS порт доступен (успешное подключение к %s)",
-		DiagDNSFail:            "Порты DNS недоступны. Возможны проблемы с подпиской и DNS-over-HTTPS.",
-		DiagKillSwitchName:     "Kill Switch",
-		DiagKillSwitchLeftover: "В брандмауэре остались правила NeoBox, хотя VPN не запущен — интернет заблокирован. Перезапустите NeoBox от имени администратора, чтобы удалить их.",
-		DiagCoreName:           "VPN ядро (sing-box)",
-		DiagCoreRunning:        "Запущено и работает",
-		DiagCoreStopped:        "VPN не подключён",
+		TransferExportTitle:    "Экспорт настроек NeoBox",
+		TransferImportTitle:    "Импорт настроек NeoBox",
+		TransferJSONFilter:     "JSON (*.json)",
+		ErrWindowNotReady:      "Окно ещё не готово",
+		ErrTransferEncode:      "Не удалось собрать файл настроек: %v",
+		ErrTransferSaveDialog:  "Не удалось открыть диалог сохранения: %v",
+		ErrTransferOpenDialog:  "Не удалось открыть диалог выбора файла: %v",
+		ErrTransferWrite:       "Не удалось записать файл: %v",
+		ErrTransferRead:        "Не удалось прочитать файл: %v",
+		ErrTransferSave:        "Не удалось сохранить импортированные настройки",
+		ErrTransferForeign:     "Это не файл настроек NeoBox",
+		ErrTransferMalformed:   "Это не файл настроек NeoBox: %v",
+		ErrTransferNewerSchema: "Файл сделан более новой версией NeoBox (формат %d, поддерживается %d)",
+		ErrTransferNoSettings:  "В файле нет настроек",
 	},
 	EN: {
 		TrayStatusDisconnected: "Status: Disconnected",
@@ -151,12 +161,23 @@ var messages = map[Lang]map[string]string{
 		TrayToggleTooltip:      "Show or hide the application window",
 		TraySelectServer:       "Select server",
 		TraySelectTooltip:      "Pick a server from your subscriptions",
+		TrayProfiles:           "Profiles",
+		TrayProfilesTooltip:    "Switch to a saved set of settings",
 		TrayRestart:            "Restart VPN",
 		TrayRestartTooltip:     "Restart the current VPN connection",
 		TrayDisconnect:         "Disconnect",
 		TrayDisconnectTooltip:  "Drop the VPN connection",
 		TrayQuit:               "Quit",
 		TrayQuitTooltip:        "Close NeoBox",
+		TrayKillSwitch:         "Kill Switch",
+		TrayKillSwitchTooltip:  "Block all traffic outside the VPN",
+		TrayTunMode:            "TUN mode",
+		TrayTunModeTooltip:     "Route the whole system through the VPN",
+		TraySystemProxy:        "System proxy",
+		TraySystemProxyTooltip: "Point the Windows proxy settings at NeoBox",
+		TrayMoreServers:        "…and %d more",
+		TrayTipConnected:       "NeoBox — connected\n%s\n↑ %s   ↓ %s",
+		TrayTipDisconnected:    "NeoBox — disconnected",
 
 		ToastConnectedTitle:    "✅ NeoBox VPN",
 		ToastConnectedBody:     "Connected to: %s",
@@ -172,6 +193,7 @@ var messages = map[Lang]map[string]string{
 		ErrKillSwitchFailed:  "Could not enable the Kill Switch, connection cancelled: %v",
 		ErrSignatureRejected: "Signature verification failed: %v",
 		ErrSecretGeneration:  "Could not generate the Clash API secret, connection cancelled: %v",
+		ErrHotkeyInvalid:     "the shortcut %q means nothing to the app",
 
 		ErrLinkTooLong:          "Proxy link is too long (maximum %d characters)",
 		ErrSubURLTooLong:        "Subscription URL is too long (maximum %d characters)",
@@ -182,29 +204,19 @@ var messages = map[Lang]map[string]string{
 		ErrWireGuardNoAddress:   "The WireGuard link carries no interface address (the \"address\" parameter); the tunnel cannot come up without it",
 		ErrTransportUnsupported: "The %s transport is not supported by the sing-box core. Such a server only works in Xray-based clients.",
 
-		DiagWintunName:         "Wintun driver",
-		DiagWintunFound:        "Found (%s)",
-		DiagWintunMissing:      "wintun.dll was not found next to the executable. TUN mode will be unavailable.",
-		DiagAdminName:          "Administrator rights",
-		DiagAdminYes:           "Running as administrator — TUN mode is available",
-		DiagAdminNo:            "Not running as administrator. The system proxy works, TUN mode does not.",
-		DiagProxyPortName:      "Proxy port (%d)",
-		DiagClashPortName:      "Clash API port (%d)",
-		DiagPortInUseByVPN:     "In use by the active VPN connection",
-		DiagPortInUseByVPNAPI:  "In use by the active VPN connection (statistics are working)",
-		DiagPortBusy:           "Port %d is used by another process. The VPN will not start until it is freed.",
-		DiagClashPortBusy:      "Port %d is in use. Live traffic statistics may not work.",
-		DiagPortFree:           "Free",
-		DiagInternetName:       "Internet",
-		DiagInternetOK:         "Reachable (connected to %s)",
-		DiagInternetFail:       "No internet access (none of the probed hosts responded). Check your network connection.",
-		DiagDNSName:            "DNS resolver",
-		DiagDNSOK:              "DNS port reachable (connected to %s)",
-		DiagDNSFail:            "DNS ports are unreachable. Subscriptions and DNS-over-HTTPS may fail.",
-		DiagKillSwitchName:     "Kill Switch",
-		DiagKillSwitchLeftover: "NeoBox firewall rules are still installed even though the VPN is not running — internet is blocked. Restart NeoBox as administrator to remove them.",
-		DiagCoreName:           "VPN core (sing-box)",
-		DiagCoreRunning:        "Running",
-		DiagCoreStopped:        "Not connected",
+		TransferExportTitle:    "Export NeoBox settings",
+		TransferImportTitle:    "Import NeoBox settings",
+		TransferJSONFilter:     "JSON (*.json)",
+		ErrWindowNotReady:      "The window is not ready yet",
+		ErrTransferEncode:      "Could not build the settings file: %v",
+		ErrTransferSaveDialog:  "Could not open the save dialog: %v",
+		ErrTransferOpenDialog:  "Could not open the file picker: %v",
+		ErrTransferWrite:       "Could not write the file: %v",
+		ErrTransferRead:        "Could not read the file: %v",
+		ErrTransferSave:        "Could not save the imported settings",
+		ErrTransferForeign:     "This is not a NeoBox settings file",
+		ErrTransferMalformed:   "This is not a NeoBox settings file: %v",
+		ErrTransferNewerSchema: "The file was made by a newer version of NeoBox (format %d, supported %d)",
+		ErrTransferNoSettings:  "The file carries no settings",
 	},
 }

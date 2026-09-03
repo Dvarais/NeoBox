@@ -16,12 +16,15 @@ doing the actual work is [sing-box](https://github.com/SagerNet/sing-box); NeoBo
 the interface around it, plus the Windows-specific parts sing-box does not handle on
 its own: the TUN adapter, the system proxy, firewall rules, the tray icon.
 
-The window is frameless with the native Windows Acrylic backdrop, so it looks like it
-belongs on Windows 10/11 rather than like a browser in a box.
+The window is frameless with a title bar of its own, so it looks like it belongs on
+Windows 10/11 rather than like a browser in a box. The surfaces inside it are drawn
+by the interface — glass panels over a gradient — rather than by the Windows
+compositor.
 
 ### What it does
 
-**Protocols.** VLESS, VMess, Trojan, Shadowsocks, TUIC, Hysteria and Hysteria 2.
+**Protocols.** VLESS, VMess, Trojan, Shadowsocks, TUIC, Hysteria, Hysteria 2 and
+WireGuard.
 Servers come from a subscription URL, from your clipboard, or from a QR code — either
 scanned with a webcam or loaded from an image file.
 
@@ -54,7 +57,7 @@ in Russian and English.
 
 ### Installing
 
-You need Windows — 10 or 11 if you want the Acrylic effect to actually render.
+You need Windows 10 or 11. Older versions are out of scope.
 
 1. Grab `NeoBox_Setup_v1.7.5.4.exe` from the [Releases](https://github.com/Dvarais/NeoBox/releases)
    page, or `NeoBox.exe` if you would rather run it without installing.
@@ -150,12 +153,14 @@ NeoBox — десктопный клиент для прокси-протоко�
 интерфейс вокруг него плюс то, чем sing-box сам по себе не занимается: TUN-адаптер,
 системный прокси, правила брандмауэра, иконка в трее.
 
-Окно без стандартной рамки, с нативным эффектом Windows Acrylic — выглядит как
-приложение для Windows 10/11, а не как браузер в коробке.
+Окно без стандартной рамки, со своим заголовком — выглядит как приложение для
+Windows 10/11, а не как браузер в коробке. Поверхности внутри рисует сам интерфейс:
+стеклянные панели поверх градиента, а не эффект композитора Windows.
 
 ### Что умеет
 
-**Протоколы.** VLESS, VMess, Trojan, Shadowsocks, TUIC, Hysteria и Hysteria 2. Серверы
+**Протоколы.** VLESS, VMess, Trojan, Shadowsocks, TUIC, Hysteria, Hysteria 2 и
+WireGuard. Серверы
 добавляются из подписки по URL, из буфера обмена или через QR-код — со сканированием
 камерой или из файла с картинкой.
 
@@ -188,7 +193,7 @@ NeoBox — десктопный клиент для прокси-протоко�
 
 ### Установка
 
-Нужна Windows — 10 или 11, если хотите, чтобы эффект Acrylic действительно отрисовался.
+Нужна Windows 10 или 11. Более старые версии вне области поддержки.
 
 1. Скачайте `NeoBox_Setup_v1.7.5.4.exe` со страницы
    [Releases](https://github.com/Dvarais/NeoBox/releases) или `NeoBox.exe`, если

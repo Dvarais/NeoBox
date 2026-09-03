@@ -83,6 +83,11 @@ ManifestDPIAware true
 LangString LaunchApp ${LANG_ENGLISH} "Launch NeoBox"
 LangString LaunchApp ${LANG_RUSSIAN} "Запустить NeoBox"
 
+; Вопрос про данные при удалении. Текст, а не «мы всё стёрли»: подписки — это
+; чужие ссылки, которые человек собирал руками, и второй раз он их не соберёт.
+LangString RemoveUserData ${LANG_ENGLISH} "Also delete your settings, subscriptions and history?$\n$\nChoose No to keep them: installing NeoBox again will pick them up where they were."
+LangString RemoveUserData ${LANG_RUSSIAN} "Удалить также настройки, подписки и историю?$\n$\nЕсли выбрать «Нет», они останутся на месте: следующая установка NeoBox подхватит их обратно."
+
 
 ## The following two statements can be used to sign the installer and the uninstaller. The path to the binaries are provided in %1
 #!uninstfinalize 'signtool --file "%1"'
@@ -96,6 +101,49 @@ ShowInstDetails show # This will always show the installation details.
 
 Function .onInit
    !insertmacro wails.checkArchitecture
+
+   ; Подставить в страницу выбора каталога тот путь, куда NeoBox уже
+   ; установлен, вместо значения InstallDir по умолчанию.
+   ;
+   ; Без этого обновление у человека, выбравшего когда-то свой каталог,
+   ; уходило по стандартному пути: снятие прежней версии работает по
+   ; $INSTDIR, то есть промахивалось, и рядом оставалась вторая копия
+   ; вместе со своим ярлыком.
+   ;
+   ; SetRegView 64 обязателен и стоит здесь, а не в InstallDirRegKey.
+   ; Установщик 32-разрядный, его вид реестра по умолчанию тоже, и запись
+   ; об установке искалась бы в Wow6432Node — где её нет: wails.writeUninstaller
+   ; пишет её под 64-разрядным видом. А InstallDirRegKey читается движком
+   ; на старте, до .onInit, так что повлиять на него отсюда нельзя вовсе.
+   SetRegView 64
+   ReadRegStr $0 HKLM "${UNINST_KEY}" "InstallLocation"
+   StrCmp $0 "" 0 use_previous_dir
+   ReadRegStr $0 HKCU "${UNINST_KEY}" "InstallLocation"
+   StrCmp $0 "" 0 use_previous_dir
+
+   ; Записи, оставленные версиями до этой, поля InstallLocation не имеют:
+   ; его никто не писал. Для них каталог выводится из пути к деинсталлятору
+   ; — иначе первое же обновление промахнулось бы мимо нестандартной
+   ; установки, то есть ровно там, где это и нужно.
+   ReadRegStr $0 HKLM "${UNINST_KEY}" "UninstallString"
+   StrCmp $0 "" 0 derive_from_uninstaller
+   ReadRegStr $0 HKCU "${UNINST_KEY}" "UninstallString"
+   StrCmp $0 "" oninit_done
+
+derive_from_uninstaller:
+   ; Путь записан в кавычках — снять их, иначе GetParent разберёт мусор.
+   StrCpy $1 $0 1
+   StrCmp $1 '"' 0 +2
+   StrCpy $0 $0 -1 1
+   ${GetParent} "$0" $1
+   StrCpy $0 "$1"
+
+use_previous_dir:
+   ; Каталог мог быть удалён руками — тогда прежний путь не подсказка.
+   IfFileExists "$0\*.*" 0 oninit_done
+   StrCpy $INSTDIR "$0"
+
+oninit_done:
 FunctionEnd
 
 Section
@@ -108,37 +156,59 @@ Section
     nsExec::Exec "taskkill /F /IM sing-box.exe"
     Sleep 1000
 
-    # 1. Detect and silently uninstall the old Electron version of NeoBox (AppID: com.neobox.vpn)
+    # 1. Предыдущая версия на Go: удаляется САМА ПРОГРАММА, файл за файлом.
+    #
+    #    Здесь стоял симметричный блок, который читал UninstallString ключа
+    #    DvaraisNeoBox и запускал "uninstall.exe /S". Этот деинсталлятор ниже
+    #    по файлу делает RMDir /r "$APPDATA\NeoBox", то есть тихий прогон
+    #    перед установкой уносил settings.json, state.json, subscriptions.json,
+    #    history.json и key.bin — подписки, избранное, профили и историю. А
+    #    следом стояла приписка «НЕ удаляем $APPDATA\NeoBox здесь, данные
+    #    должны сохраняться при обновлении»: сохранять было уже нечего. Тем же
+    #    путём идёт встроенный автообновлятор, так что каждое обновление из
+    #    приложения обнуляло установку.
+    #
+    #    Поэтому старая версия снимается напрямую: перечисленным ниже и
+    #    исчерпывается всё, что установщик когда-либо клал в каталог. Тот же
+    #    результат, что от деинсталлятора, но код, который трогает данные
+    #    пользователя, при обновлении не выполняется вовсе — а не полагается на
+    #    ключ вроде /KEEPDATA, которого деинсталляторы уже установленных версий
+    #    всё равно не понимают.
+    #
+    #    Процессы погашены выше, поэтому файлы не заняты. Ярлыки и запись в
+    #    «Установка и удаление программ» пересоздаются ниже по тем же путям.
+    DetailPrint "Removing the previous version..."
+    Delete "$INSTDIR\NeoBox.exe"
+    # Имя, под которым выходили прежние сборки. Установщик его только
+    # taskkill'ил и никогда не удалял, поэтому у всех, кто ставил ту версию, в
+    # каталоге до сих пор лежат 35 МБ мёртвого кода.
+    Delete "$INSTDIR\NeoBox-Go.exe"
+    Delete "$INSTDIR\wintun.dll"
+    # Иконка для уведомлений: прежние сборки писали её рядом с exe, теперь она
+    # живёт в каталоге данных.
+    Delete "$INSTDIR\icon.ico"
+    Delete "$INSTDIR\uninstall.exe"
+
+    # 2. Detect and silently uninstall the old Electron version of NeoBox (AppID: com.neobox.vpn)
     ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.neobox.vpn" "UninstallString"
     StrCmp $0 "" check_electron_hkcu
     Goto do_uninstall_electron
 
 check_electron_hkcu:
     ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.neobox.vpn" "UninstallString"
-    StrCmp $0 "" check_go_version
+    StrCmp $0 "" end_uninstall_detection
 
 do_uninstall_electron:
     DetailPrint "Uninstalling legacy Electron version of NeoBox..."
     ExecWait '"$0" /S'
     Sleep 1000
 
-check_go_version:
-    # 2. Detect and silently uninstall previous Go versions of NeoBox (DvaraisNeoBox)
-    SetRegView 64
-    ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\DvaraisNeoBox" "UninstallString"
-    StrCmp $0 "" check_go_hkcu
-    Goto do_uninstall_go
-
-check_go_hkcu:
-    ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\DvaraisNeoBox" "UninstallString"
-    StrCmp $0 "" end_uninstall_detection
-
-do_uninstall_go:
-    DetailPrint "Uninstalling previous Go version of NeoBox..."
-    ExecWait '"$0" /S'
-    Sleep 1000
-
 end_uninstall_detection:
+    # SetRegView стоял в снятом выше блоке и выполнялся всегда, поэтому переехал
+    # сюда: без него DeleteRegValue HKLM ниже уходит в Wow6432Node — установщик
+    # 32-разрядный — и ключ автозапуска Electron-версии остался бы на месте.
+    SetRegView 64
+
     # Clean up legacy Electron installation folder (NOT user data in APPDATA\NeoBox)
     SetShellVarContext current
     RMDir /r "$LOCALAPPDATA\Programs\neobox"
@@ -160,7 +230,11 @@ end_uninstall_detection:
     SetOutPath $INSTDIR
 
     !insertmacro wails.files
-    File "..\..\bin\wintun.dll"
+    ; Из корня репозитория, а не из build\bin: build/bin целиком в .gitignore,
+    ; и никакой шаг сборки wintun.dll туда не кладёт. На этой машине файл там
+    ; оказался руками когда-то давно, а на чистом клоне makensis падал на
+    ; "could not find file". Отслеживается git'ом ровно одна копия — эта.
+    File "..\..\..\wintun.dll"
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
@@ -169,6 +243,13 @@ end_uninstall_detection:
     !insertmacro wails.associateCustomProtocols
 
     !insertmacro wails.writeUninstaller
+
+    ; Куда установлено — отдельным значением. Штатное поле записи в
+    ; «Установка и удаление программ», которого wails.writeUninstaller не
+    ; пишет; отсюда его читает .onInit следующей версии, чтобы обновление
+    ; легло поверх этой установки, а не рядом с ней.
+    SetRegView 64
+    WriteRegStr HKLM "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
 SectionEnd
 
 Section "uninstall"
@@ -188,13 +269,27 @@ Section "uninstall"
     !insertmacro wails.unassociateFiles
     !insertmacro wails.unassociateCustomProtocols
 
-    # Clean up ALL user data directories (for both legacy JS/Electron and new Go/Wails versions)
-    # Use current user context to locate the correct AppData and LocalAppData folders
+    # Данные пользователя удаляются только по его слову.
+    #
+    # Раньше «Удалить» уносило подписки, избранное, профили и историю молча, и
+    # человек узнавал об этом после переустановки. Переустановка ради починки —
+    # обычное действие, а собранный руками список серверов вторым заходом не
+    # восстанавливается ниоткуда: экспорт настроек подписки не переносит
+    # намеренно (см. backend/service/transfer.go).
+    #
+    # /SD IDNO — ответ при тихом прогоне (uninstall.exe /S). Тихое удаление
+    # запускает чужой код, и стирать по своей инициативе он не должен.
+    # По умолчанию выделена кнопка «Нет» по той же причине.
     SetShellVarContext current
+    MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "$(RemoveUserData)" /SD IDNO IDNO keep_user_data
+    DetailPrint "Removing settings, subscriptions and history..."
     RMDir /r "$APPDATA\NeoBox"
     RMDir /r "$APPDATA\NeoBox-Go"
     RMDir /r "$LOCALAPPDATA\NeoBox"
     RMDir /r "$LOCALAPPDATA\NeoBox-Go"
+
+keep_user_data:
+    # Каталог программы Electron-версии — не данные, уходит всегда.
     RMDir /r "$LOCALAPPDATA\Programs\neobox"
     
     # Restore shell context to all if needed

@@ -51,3 +51,44 @@ func TestKillSwitchMarkerPathIsInDataDir(t *testing.T) {
 		t.Errorf("marker path %q is not inside the data dir %q", got, want)
 	}
 }
+
+// Состояние Kill Switch, каким его видит интерфейс.
+//
+// Оно существует затем, чтобы «интернета нет» не выглядело как поломка
+// провайдера: правила брандмауэра переживают процесс, который их поставил, и до
+// сих пор единственным их следом был файл-маркер, о котором пользователь не
+// знает.
+func TestGetKillSwitchStateFollowsMarker(t *testing.T) {
+	s := newTestService(t)
+
+	state := s.GetKillSwitchState()
+	if state["active"] != false {
+		t.Errorf("без маркера active должно быть false, получено %v", state["active"])
+	}
+	if state["stuck"] != false {
+		t.Errorf("на свежем запуске stuck должно быть false, получено %v", state["stuck"])
+	}
+
+	if err := os.WriteFile(s.killSwitchMarkerPath(), []byte("2026-08-13T00:00:00Z"), 0600); err != nil {
+		t.Fatalf("не удалось создать маркер: %v", err)
+	}
+	if state := s.GetKillSwitchState(); state["active"] != true {
+		t.Errorf("с маркером active должно быть true, получено %v", state["active"])
+	}
+}
+
+// Застрявшие правила — худший сценарий продукта: машина без сети, приложение
+// ещё даже не подключено, а причина до этой правки оставалась только в
+// crash-логе. Флаг должен доезжать до интерфейса.
+func TestGetKillSwitchStateReportsStuck(t *testing.T) {
+	s := newTestService(t)
+
+	s.stateMu.Lock()
+	s.killSwitchStuck = true
+	s.stateMu.Unlock()
+
+	state := s.GetKillSwitchState()
+	if state["stuck"] != true {
+		t.Errorf("stuck не доехало до состояния: %v", state)
+	}
+}

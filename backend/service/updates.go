@@ -192,9 +192,25 @@ func validateUpdateURL(rawURL string) error {
 	return fmt.Errorf("untrusted host %q: expected github.com or githubusercontent.com", host)
 }
 
+// keepUpdateRedirectsOnGitHub applies validateUpdateURL to every hop, not only
+// to the address the API handed us.
+//
+// GitHub's own download URLs redirect (to objects.githubusercontent.com), so
+// redirects cannot simply be refused — but validating only the first URL means
+// a single Location header decides where the installer really comes from, and
+// nothing else in the chain was checked. The signature is what stops a hostile
+// binary from running; this is what stops it from being fetched at all, and
+// keeps the transfer on TLS.
+func keepUpdateRedirectsOnGitHub(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return fmt.Errorf("stopped after 10 redirects")
+	}
+	return validateUpdateURL(req.URL.String())
+}
+
 // downloadSignatureText downloads the hex signature content from the given URL.
 func (s *AppService) downloadSignatureText(downloadURL string) (string, error) {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: keepUpdateRedirectsOnGitHub}
 	req, err := http.NewRequest("GET", downloadURL, nil)
 	if err != nil {
 		return "", err
@@ -223,9 +239,7 @@ func (s *AppService) downloadSignatureText(downloadURL string) (string, error) {
 // reporting progress to the frontend, verifies its Ed25519 signature,
 // and runs it upon successful verification.
 func (s *AppService) DownloadAndInstallUpdate(downloadURL string, signatureHex string) error {
-	s.wailsCtxMu.RLock()
-	wCtx := s.wailsCtx
-	s.wailsCtxMu.RUnlock()
+	wCtx := s.context()
 
 	if wCtx == nil {
 		return fmt.Errorf("wails context is not initialized")
@@ -308,7 +322,7 @@ func (s *AppService) DownloadAndInstallUpdate(downloadURL string, signatureHex s
 }
 
 func (s *AppService) performDownload(ctx context.Context, url, destPath string) error {
-	client := &http.Client{}
+	client := &http.Client{CheckRedirect: keepUpdateRedirectsOnGitHub}
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return err
