@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -341,6 +342,12 @@ const (
 // сама стартовая гонка: фиксированный Sleep стал первой паузой цикла, а
 // проигранная гонка — обычной неудачной попыткой, за которой следует ещё одна.
 func (s *AppService) startTrafficMonitor(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "[vpn] recovered panic in startTrafficMonitor: %v\n", r)
+		}
+	}()
+
 	delay := trafficRetryMin
 	attempts := 0
 

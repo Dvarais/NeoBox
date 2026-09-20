@@ -12,7 +12,7 @@ import (
 // The snapshot has to describe the machine it was taken on: our own process
 // present, named correctly, and reachable from its parent.
 func TestProcessTreeSeesThisProcess(t *testing.T) {
-	children, names, err := processTree()
+	children, _, names, err := processTree()
 	if err != nil {
 		t.Fatalf("processTree: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestProcessTreeReachesGrandchildren(t *testing.T) {
 	// Give the shell a moment to spawn ping.
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		children, _, err := processTree()
+		children, _, _, err := processTree()
 		if err != nil {
 			t.Fatalf("processTree: %v", err)
 		}
@@ -98,7 +98,7 @@ func descendants(children map[uint32][]uint32, root uint32) map[uint32]bool {
 // WebView2 as well — Windows' own search UI does — and matching on the
 // executable name alone would take theirs down with ours.
 func TestTerminateWebViewChildrenIgnoresForeignTrees(t *testing.T) {
-	children, names, err := processTree()
+	children, _, names, err := processTree()
 	if err != nil {
 		t.Fatalf("processTree: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestTerminateWebViewChildrenIgnoresForeignTrees(t *testing.T) {
 // several running that belong to Windows itself; a folder that matches none of
 // them must select nothing.
 func TestSweepSelectsNothingForAnUnrelatedFolder(t *testing.T) {
-	_, names, err := processTree()
+	_, _, names, err := processTree()
 	if err != nil {
 		t.Fatalf("processTree: %v", err)
 	}

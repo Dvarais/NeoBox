@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,10 +52,7 @@ var dohClients = func() []*http.Client {
 				DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 					return (&net.Dialer{}).DialContext(ctx, network, addr)
 				},
-				TLSClientConfig: &tls.Config{
-					ServerName: provider.sni,
-					MinVersion: tls.VersionTLS12,
-				},
+				TLSClientConfig: SecureTLSConfig(provider.sni),
 				MaxIdleConns:    1,
 				IdleConnTimeout: 30 * time.Second,
 			},

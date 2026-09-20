@@ -3,6 +3,8 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"strings"
+	"unsafe"
 
 	"NeoBox/backend/security"
 
@@ -152,26 +154,86 @@ func (s *AppService) MutexHandle() windows.Handle {
 	return s.mutexHandle
 }
 
-// AcquireSingleInstanceMutex creates a Windows named mutex to ensure only one
-// instance of NeoBox runs at a time.
-func AcquireSingleInstanceMutex() (windows.Handle, bool) {
-	if handle, already := createSingleInstanceMutex("Global\\NeoBox-SingleInstance-Mutex"); handle != 0 || already {
-		return handle, already
+// createMutexSecurityAttributes returns a SECURITY_ATTRIBUTES structure allowing
+// full control to Everyone and Authenticated Users. This allows cross-integrity
+// (unelevated <-> elevated) mutex visibility.
+func createMutexSecurityAttributes() *windows.SecurityAttributes {
+	sd, err := windows.SecurityDescriptorFromString("D:(A;;GA;;;WD)(A;;GA;;;AU)")
+	if err != nil {
+		return nil
 	}
-	// Global\ failed (e.g. access denied) — fall back to Local\.
-	handle, already := createSingleInstanceMutex("Local\\NeoBox-SingleInstance-Mutex")
-	return handle, already
+	sa := &windows.SecurityAttributes{
+		SecurityDescriptor: sd,
+		InheritHandle:      0,
+	}
+	sa.Length = uint32(unsafe.Sizeof(*sa))
+	return sa
+}
+
+func isMutexExisting(name string) bool {
+	mutexName, err := windows.UTF16PtrFromString(name)
+	if err != nil {
+		return false
+	}
+	h, err := windows.OpenMutex(windows.SYNCHRONIZE, false, mutexName)
+	if err == nil {
+		_ = windows.CloseHandle(h)
+		return true
+	}
+	if err == windows.ERROR_ACCESS_DENIED {
+		return true
+	}
+	return false
+}
+
+// AcquireSingleInstanceMutex creates a Windows named mutex to ensure only one
+// instance of NeoBox runs at a time. It checks both Global\ and Local\ namespaces
+// to prevent duplicate instances across integrity levels (unelevated vs elevated).
+func AcquireSingleInstanceMutex() (windows.Handle, bool) {
+	const globalName = "Global\\NeoBox-SingleInstance-Mutex"
+	const localName = "Local\\NeoBox-SingleInstance-Mutex"
+
+	// 1. Check if an instance is already running under either namespace
+	if isMutexExisting(globalName) || isMutexExisting(localName) {
+		return 0, true
+	}
+
+	// 2. Try creating in Global\ first (succeeds if elevated or permitted)
+	if handle, already := createSingleInstanceMutex(globalName); already {
+		return 0, true
+	} else if handle != 0 {
+		return handle, false
+	}
+
+	// 3. Fallback to Local\ if Global\ failed (e.g. unelevated without SeCreateGlobalPrivilege)
+	return createSingleInstanceMutex(localName)
 }
 
 func createSingleInstanceMutex(name string) (windows.Handle, bool) {
-	mutexName, _ := windows.UTF16PtrFromString(name)
-	handle, err := windows.CreateMutex(nil, false, mutexName)
+	mutexName, err := windows.UTF16PtrFromString(name)
+	if err != nil {
+		return 0, false
+	}
+
+	sa := createMutexSecurityAttributes()
+	handle, err := windows.CreateMutex(sa, false, mutexName)
 	if err != nil {
 		if err == windows.ERROR_ALREADY_EXISTS {
 			if handle != 0 {
 				_ = windows.CloseHandle(handle)
 			}
-			return 0, true // Another instance holds the mutex
+			return 0, true
+		}
+		if err == windows.ERROR_ACCESS_DENIED {
+			if handle != 0 {
+				_ = windows.CloseHandle(handle)
+			}
+			// If Global\ creation was denied due to lack of SeCreateGlobalPrivilege,
+			// return false so caller can fall back to Local\.
+			if strings.HasPrefix(name, "Global\\") {
+				return 0, false
+			}
+			return 0, true
 		}
 		return 0, false
 	}

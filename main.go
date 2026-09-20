@@ -107,6 +107,12 @@ func main() {
 		security.MarkCleanExit("relaunch as administrator")
 		os.Exit(0)
 	}
+
+	// Clean up any legacy Task Scheduler tasks ("NeoBox", "NeoBox-Go") when elevated.
+	if service.IsElevated() {
+		security.RemoveLegacyScheduledTasks()
+	}
+
 	// 2. Initialize embedded core manager
 	coreManager := core.NewCoreManager()
 
@@ -254,6 +260,11 @@ func main() {
 			WindowIsTranslucent:  false,
 			BackdropType:         windows.None,
 			Theme:                windows.Dark,
+			WebviewUserDataPath:  userDataDir,
+			// WebviewGpuIsDisabled disables GPU hardware acceleration for WebView2.
+			// This prevents WebView2 browser process crashes when graphics drivers reset (TDR),
+			// and saves GPU memory and background CPU cycles while sitting in the system tray.
+			WebviewGpuIsDisabled: true,
 		},
 	})
 

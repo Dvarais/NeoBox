@@ -1,7 +1,6 @@
 package service
 
 import (
-	"NeoBox/backend/i18n"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"NeoBox/backend/core"
+	"NeoBox/backend/i18n"
 	"NeoBox/backend/security"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -44,7 +45,10 @@ func (s *AppService) GetAppVersion() string {
 func (s *AppService) CheckUpdates() map[string]interface{} {
 	response := map[string]interface{}{"available": false}
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: core.DefaultTransport(),
+	}
 	req, err := http.NewRequest("GET", "https://api.github.com/repos/Dvarais/NeoBox/releases/latest", nil)
 	if err != nil {
 		return response
@@ -210,7 +214,11 @@ func keepUpdateRedirectsOnGitHub(req *http.Request, via []*http.Request) error {
 
 // downloadSignatureText downloads the hex signature content from the given URL.
 func (s *AppService) downloadSignatureText(downloadURL string) (string, error) {
-	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: keepUpdateRedirectsOnGitHub}
+	client := &http.Client{
+		Timeout:       5 * time.Second,
+		CheckRedirect: keepUpdateRedirectsOnGitHub,
+		Transport:     core.DefaultTransport(),
+	}
 	req, err := http.NewRequest("GET", downloadURL, nil)
 	if err != nil {
 		return "", err
@@ -322,7 +330,10 @@ func (s *AppService) DownloadAndInstallUpdate(downloadURL string, signatureHex s
 }
 
 func (s *AppService) performDownload(ctx context.Context, url, destPath string) error {
-	client := &http.Client{CheckRedirect: keepUpdateRedirectsOnGitHub}
+	client := &http.Client{
+		CheckRedirect: keepUpdateRedirectsOnGitHub,
+		Transport:     core.DefaultTransport(),
+	}
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return err

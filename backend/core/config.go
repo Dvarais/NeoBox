@@ -1753,13 +1753,19 @@ func FetchSubscription(subURL string) ([]string, error) {
 			Timeout:       10 * time.Second,
 			CheckRedirect: refuseInsecureRedirect,
 			Transport: &http.Transport{
-				Proxy: http.ProxyURL(proxyURL),
+				Proxy:               http.ProxyURL(proxyURL),
+				TLSClientConfig:     SecureTLSConfig(""),
+				TLSHandshakeTimeout: 10 * time.Second,
 			},
 		}})
 	}
 	transports = append(transports, transport{"direct", &http.Client{
 		Timeout:       15 * time.Second,
 		CheckRedirect: refuseInsecureRedirect,
+		Transport: &http.Transport{
+			TLSClientConfig:     SecureTLSConfig(""),
+			TLSHandshakeTimeout: 10 * time.Second,
+		},
 	}})
 
 	// Each transport asks with a browser User-Agent first. Only when the host

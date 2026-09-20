@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -271,6 +272,12 @@ func (s *AppService) StartAutoUpdateScheduler() {
 	s.stateMu.Unlock()
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "[subscriptions] recovered panic in StartAutoUpdateScheduler: %v\n", r)
+			}
+		}()
+
 		// Wait 5 seconds after startup to let the app initialize
 		select {
 		case <-time.After(5 * time.Second):

@@ -62,8 +62,9 @@ func safeAutostartName(taskName string) string {
 // Any legacy "NeoBox" Task Scheduler entry from the old implementation is
 // best-effort cleaned up here so the user doesn't get a duplicate launch.
 func SetupAutostart(taskName string, appPath string) error {
-	// Best-effort: remove a leftover elevated Task Scheduler task from the old
+	// Best-effort: remove any leftover elevated Task Scheduler tasks from the old
 	// implementation, which would otherwise launch a second instance at logon.
+	RemoveLegacyScheduledTasks()
 	removeLegacyScheduledTask(taskName)
 
 	safeName := safeAutostartName(taskName)
@@ -102,6 +103,7 @@ func SetupAutostart(taskName string, appPath string) error {
 // RemoveAutostart removes the Run-key value, and also best-effort removes any
 // legacy Task Scheduler entry from the previous /rl highest implementation.
 func RemoveAutostart(taskName string) error {
+	RemoveLegacyScheduledTasks()
 	removeLegacyScheduledTask(taskName)
 
 	safeName := safeAutostartName(taskName)
@@ -144,9 +146,21 @@ func AutostartTarget(taskName string) string {
 	return value
 }
 
+// RemoveLegacyScheduledTasks removes any legacy elevated Task Scheduler tasks ("NeoBox", "NeoBox-Go", etc.)
+// left over from previous versions.
+func RemoveLegacyScheduledTasks() {
+	names := []string{"NeoBox", "NeoBox-Go"}
+	for _, name := range names {
+		removeLegacyScheduledTask(name)
+	}
+}
+
 // removeLegacyScheduledTask deletes a Task Scheduler entry created by the old
 // /rl highest implementation. Errors are ignored — the task may simply not exist.
 func removeLegacyScheduledTask(taskName string) {
+	if taskName == "" {
+		return
+	}
 	// Sanitize only the task name to prevent argument injection via /tn.
 	safeName := strings.ReplaceAll(taskName, `"`, `'`)
 	cmd := exec.Command("schtasks", "/delete", "/tn", safeName, "/f")

@@ -60,7 +60,7 @@ const webViewProcessName = "msedgewebview2.exe"
 func terminateWebViewChildren() {
 	self := uint32(os.Getpid())
 
-	children, names, err := processTree()
+	children, _, names, err := processTree()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[webview] could not enumerate processes: %v\n", err)
 		return
@@ -118,11 +118,14 @@ func SweepOrphanedWebViews(userDataDir string) {
 	if userDataDir == "" {
 		return
 	}
-	children, names, err := processTree()
+	children, parents, names, err := processTree()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[webview] could not enumerate processes: %v\n", err)
 		return
 	}
+
+	self := uint32(os.Getpid())
+	selfExe := filepath.Base(os.Args[0])
 
 	// Compare case-insensitively on a cleaned path: the folder reaches the
 	// command line through WebView2 and comes back spelled its way, not ours.
@@ -133,6 +136,16 @@ func SweepOrphanedWebViews(userDataDir string) {
 		if pid == 0 || !strings.EqualFold(name, webViewProcessName) {
 			continue
 		}
+		// If the parent process is alive and is a running NeoBox process other than self,
+		// do not terminate its WebView2 (which would kill the active NeoBox session).
+		if parentPid, hasParent := parents[pid]; hasParent && parentPid != self {
+			if parentName, parentAlive := names[parentPid]; parentAlive {
+				if strings.EqualFold(parentName, "NeoBox.exe") || strings.EqualFold(parentName, selfExe) {
+					continue
+				}
+			}
+		}
+
 		cmdline, err := processCommandLine(pid)
 		if err != nil {
 			// Access denied on another user's process is the normal case here,
@@ -228,35 +241,38 @@ var (
 const processCommandLineInformation = 60
 
 // processTree snapshots every process on the machine, returning the children of
-// each PID and the executable name of each.
-func processTree() (children map[uint32][]uint32, names map[uint32]string, err error) {
+// each PID, the parent PID of each, and the executable name of each.
+func processTree() (children map[uint32][]uint32, parents map[uint32]uint32, names map[uint32]string, err error) {
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer windows.CloseHandle(snapshot)
 
 	children = make(map[uint32][]uint32)
+	parents = make(map[uint32]uint32)
 	names = make(map[uint32]string)
 
 	var entry windows.ProcessEntry32
 	entry.Size = uint32(unsafe.Sizeof(entry))
 	if err := windows.Process32First(snapshot, &entry); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	for {
 		pid := entry.ProcessID
-		children[entry.ParentProcessID] = append(children[entry.ParentProcessID], pid)
+		parentPid := entry.ParentProcessID
+		children[parentPid] = append(children[parentPid], pid)
+		parents[pid] = parentPid
 		names[pid] = windows.UTF16ToString(entry.ExeFile[:])
 
 		if err := windows.Process32Next(snapshot, &entry); err != nil {
 			if err == windows.ERROR_NO_MORE_FILES {
 				break
 			}
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
-	return children, names, nil
+	return children, parents, names, nil
 }
 
 // terminatePID opens a process for termination and terminates it.
