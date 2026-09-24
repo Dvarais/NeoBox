@@ -1,6 +1,6 @@
 # Maintainer: Dvarais <tik26301@gmail.com>
 pkgname=neobox-bin
-pkgver=1.8.0
+pkgver=1.8.1
 pkgrel=1
 pkgdesc="Sleek and Secure VPN Client powered by sing-box"
 arch=('x86_64')
