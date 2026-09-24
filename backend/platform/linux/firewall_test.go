@@ -22,3 +22,22 @@ func TestFirewallMarkerRecovery(t *testing.T) {
 		t.Fatalf("expected marker to be removed during recovery")
 	}
 }
+
+func TestFirewallMarkerLifecycle(t *testing.T) {
+	tmpDir := t.TempDir()
+	fw := &linux.FirewallManager{}
+	fw.SetUserDataDir(tmpDir)
+
+	marker := filepath.Join(tmpDir, "killswitch.active")
+	if err := os.WriteFile(marker, []byte("active"), 0644); err != nil {
+		t.Fatalf("failed to create marker: %v", err)
+	}
+
+	if err := fw.DisableKillSwitch(); err != nil {
+		t.Fatalf("DisableKillSwitch failed: %v", err)
+	}
+
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("expected marker to be cleared by DisableKillSwitch")
+	}
+}

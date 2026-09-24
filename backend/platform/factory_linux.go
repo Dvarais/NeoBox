@@ -26,6 +26,8 @@ func (p *linuxPlatform) Lifecycle() LifecycleManager   { return &p.lifecycle }
 
 func init() {
 	p := &linuxPlatform{}
-	p.proxy.SetUserDataDir(p.paths.UserDataDir())
+	userDataDir := p.paths.UserDataDir()
+	p.proxy.SetUserDataDir(userDataDir)
+	p.firewall.SetUserDataDir(userDataDir)
 	SetCurrent(p)
 }

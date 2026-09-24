@@ -7,9 +7,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
-type FirewallManager struct{}
+type FirewallManager struct {
+	userDataDir string
+}
+
+func (f *FirewallManager) SetUserDataDir(dir string) {
+	f.userDataDir = dir
+}
 
 func (f *FirewallManager) markerPath(userDataDir string) string {
 	return filepath.Join(userDataDir, "killswitch.active")
@@ -26,15 +33,24 @@ func (f *FirewallManager) EnableKillSwitch(serverHost string) error {
 		}
 	}
 
-	if _, err := exec.LookPath("nft"); err == nil {
-		return f.enableNftables(serverIPs)
+	var err error
+	if _, errPath := exec.LookPath("nft"); errPath == nil {
+		err = f.enableNftables(serverIPs)
+	} else if _, errPath := exec.LookPath("iptables"); errPath == nil {
+		err = f.enableIptables(serverIPs)
+	} else {
+		return fmt.Errorf("neither nftables nor iptables found on system")
 	}
 
-	if _, err := exec.LookPath("iptables"); err == nil {
-		return f.enableIptables(serverIPs)
+	if err != nil {
+		return err
 	}
 
-	return fmt.Errorf("neither nftables nor iptables found on system")
+	if f.userDataDir != "" {
+		marker := f.markerPath(f.userDataDir)
+		_ = os.WriteFile(marker, []byte(time.Now().Format(time.RFC3339)), 0644)
+	}
+	return nil
 }
 
 func (f *FirewallManager) enableNftables(serverIPs []string) error {
@@ -62,16 +78,26 @@ func (f *FirewallManager) enableNftables(serverIPs []string) error {
 }
 
 func (f *FirewallManager) enableIptables(serverIPs []string) error {
-	_ = exec.Command("iptables", "-N", "NEOBOX_KILLSWITCH").Run()
-	_ = exec.Command("iptables", "-I", "OUTPUT", "1", "-j", "NEOBOX_KILLSWITCH").Run()
-	_ = exec.Command("iptables", "-A", "NEOBOX_KILLSWITCH", "-o", "lo", "-j", "ACCEPT").Run()
-	_ = exec.Command("iptables", "-A", "NEOBOX_KILLSWITCH", "-d", "192.168.0.0/16", "-j", "ACCEPT").Run()
-	_ = exec.Command("iptables", "-A", "NEOBOX_KILLSWITCH", "-d", "10.0.0.0/8", "-j", "ACCEPT").Run()
-	_ = exec.Command("iptables", "-A", "NEOBOX_KILLSWITCH", "-o", "tun+", "-j", "ACCEPT").Run()
-	for _, ip := range serverIPs {
-		_ = exec.Command("iptables", "-A", "NEOBOX_KILLSWITCH", "-d", ip, "-j", "ACCEPT").Run()
+	commands := [][]string{
+		{"iptables", "-N", "NEOBOX_KILLSWITCH"},
+		{"iptables", "-I", "OUTPUT", "1", "-j", "NEOBOX_KILLSWITCH"},
+		{"iptables", "-A", "NEOBOX_KILLSWITCH", "-o", "lo", "-j", "ACCEPT"},
+		{"iptables", "-A", "NEOBOX_KILLSWITCH", "-d", "192.168.0.0/16", "-j", "ACCEPT"},
+		{"iptables", "-A", "NEOBOX_KILLSWITCH", "-d", "10.0.0.0/8", "-j", "ACCEPT"},
+		{"iptables", "-A", "NEOBOX_KILLSWITCH", "-o", "tun+", "-j", "ACCEPT"},
 	}
-	_ = exec.Command("iptables", "-A", "NEOBOX_KILLSWITCH", "-j", "DROP").Run()
+	for _, ip := range serverIPs {
+		commands = append(commands, []string{"iptables", "-A", "NEOBOX_KILLSWITCH", "-d", ip, "-j", "ACCEPT"})
+	}
+	commands = append(commands, []string{"iptables", "-A", "NEOBOX_KILLSWITCH", "-j", "DROP"})
+
+	for _, args := range commands {
+		cmd := exec.Command(args[0], args[1:]...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			_ = f.DisableKillSwitch()
+			return fmt.Errorf("iptables %s failed: %w (output: %s)", strings.Join(args[1:], " "), err, string(out))
+		}
+	}
 	return nil
 }
 
@@ -83,6 +109,9 @@ func (f *FirewallManager) DisableKillSwitch() error {
 		_ = exec.Command("iptables", "-D", "OUTPUT", "-j", "NEOBOX_KILLSWITCH").Run()
 		_ = exec.Command("iptables", "-F", "NEOBOX_KILLSWITCH").Run()
 		_ = exec.Command("iptables", "-X", "NEOBOX_KILLSWITCH").Run()
+	}
+	if f.userDataDir != "" {
+		_ = os.Remove(f.markerPath(f.userDataDir))
 	}
 	return nil
 }
