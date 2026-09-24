@@ -29,7 +29,7 @@ concurrency:
 
 jobs:
   backend:
-    name: Go
+    name: Go (Windows)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,12 +49,27 @@ jobs:
       - name: go test
         run: go test -tags "with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor" ./...
 
-      # gofmt намеренно не проверяется. Часть файлов лежит в репозитории с
-      # CRLF, gofmt пишет LF, и `gofmt -l` пометил бы их целиком — тысячи строк
-      # разницы, в которых нет ни одного настоящего расхождения форматирования.
-      # Прежде чем делать gofmt воротами, надо привести переводы строк к
-      # одному виду (.gitattributes с `*.go text eol=lf` плюс разовая
-      # перезапись); до тех пор такой шаг только шумел бы.
+  backend-linux:
+    name: Go (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev
+
+      - name: go vet (Linux)
+        run: go vet -tags "with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor" ./backend/platform/...
+
+      - name: go test (Linux)
+        run: go test -tags "with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor" ./backend/platform/...
 
   frontend:
     name: Frontend
