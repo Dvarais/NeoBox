@@ -1,0 +1,11 @@
+Package: neobox
+Version: 1.8.0
+Section: net
+Priority: optional
+Architecture: amd64
+Depends: libc6, libgtk-3-0, libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37, libappindicator3-1, iproute2
+Recommends: nftables | iptables
+Maintainer: Dvarais <tik26301@gmail.com>
+Description: Sleek and Secure VPN Client powered by sing-box
+ NeoBox is a desktop client for modern proxy protocols including VLESS,
+ VMess, Trojan, Shadowsocks, TUIC, Hysteria 2 and WireGuard.

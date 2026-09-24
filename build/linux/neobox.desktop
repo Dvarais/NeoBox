@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=NeoBox
+Comment=Sleek and Secure VPN Client powered by sing-box
+Exec=neobox %U
+Icon=neobox
+Terminal=false
+Type=Application
+Categories=Network;Security;VPN;
+StartupWMClass=NeoBox

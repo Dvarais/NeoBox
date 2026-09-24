@@ -1,0 +1,20 @@
+# Maintainer: Dvarais <tik26301@gmail.com>
+pkgname=neobox-bin
+pkgver=1.8.0
+pkgrel=1
+pkgdesc="Sleek and Secure VPN Client powered by sing-box"
+arch=('x86_64')
+url="https://github.com/Dvarais/NeoBox"
+license=('custom')
+depends=('gtk3' 'webkit2gtk-4.1' 'libappindicator-gtk3' 'iproute2')
+optdepends=('nftables: Kill Switch support'
+            'iptables: Legacy Kill Switch fallback')
+install=neobox.install
+source=("https://github.com/Dvarais/NeoBox/releases/download/v${pkgver}/neobox-linux-amd64.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    install -Dm755 "${srcdir}/neobox" "${pkgdir}/usr/bin/neobox"
+    install -Dm644 "${srcdir}/neobox.desktop" "${pkgdir}/usr/share/applications/neobox.desktop"
+    install -Dm644 "${srcdir}/icon.png" "${pkgdir}/usr/share/icons/hicolor/512x512/apps/neobox.png"
+}
