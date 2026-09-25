@@ -8,14 +8,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${ROOT_DIR}"
 
-if ! command -v wails &> /dev/null; then
-    echo "=== Installing Wails CLI ==="
-    go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
-    export PATH="$PATH:$(go env GOPATH)/bin"
-fi
-
+# Wails CLI <= v2.12 bundles x/tools v0.30, which fails on Go 1.25+ with
+# "package ... without types was imported from". Pin a CLI built with newer x/tools.
 echo "=== Building NeoBox for Arch Linux ==="
-wails build -tags "webkit2_41,with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor" -o neobox
+go run github.com/wailsapp/wails/v2/cmd/wails@v2.16.0 build -tags "webkit2_41,with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor" -o neobox
 
 echo "=== Build Complete! ==="
 echo "Executable: ${ROOT_DIR}/build/bin/neobox"

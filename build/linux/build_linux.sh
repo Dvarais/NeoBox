@@ -8,7 +8,9 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 echo "=== Building NeoBox v${VERSION} for Linux ==="
 cd "${ROOT_DIR}"
 
-wails build -tags "webkit2_41,with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor" -o neobox
+# Wails CLI <= v2.12 bundles x/tools v0.30, which fails on Go 1.25+ with
+# "package ... without types was imported from". Pin a CLI built with newer x/tools.
+go run github.com/wailsapp/wails/v2/cmd/wails@v2.16.0 build -tags "webkit2_41,with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor" -o neobox
 
 echo "=== Packaging .deb ==="
 DEB_DIR="${ROOT_DIR}/build/bin/deb"
