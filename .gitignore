@@ -58,3 +58,8 @@ DESIGN.md
 # Superpowers and GitHub Workflows
 docs/superpowers/
 .github/workflows/
+
+# makepkg output from building build/linux/PKGBUILD in place.
+build/linux/src/
+build/linux/pkg/
+build/linux/*.pkg.tar.zst
