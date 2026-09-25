@@ -14,11 +14,10 @@ var (
 )
 
 // SystemCertPool returns the cached system root certificate pool.
-// On Windows, Go's default verification calls crypt32.dll (CertGetCertificateChain /
-// CertFreeCertificateChain) on every TLS handshake. Under load or when security
-// software hooks CryptoAPI, this can trigger STATUS_ACCESS_VIOLATION (0xc0000005).
-// Setting RootCAs to this pool forces Go to use its built-in pure Go certificate
-// verifier, avoiding the flaky Win32 calls.
+// On Windows this pool alone does not keep verification out of crypt32.dll — it
+// is a marker that routes Verify into CryptoAPI. What does is roots_windows.go
+// together with x509usefallbackroots=1 in main.go, which make this return the
+// pure-Go pool built there.
 func SystemCertPool() *x509.CertPool {
 	systemRootsOnce.Do(func() {
 		pool, err := x509.SystemCertPool()

@@ -1,3 +1,9 @@
+// Verify TLS chains in pure Go against the roots backend/core/roots_windows.go
+// installs, never through crypt32 — see that file for the crash this avoids.
+// No effect on Linux, where no fallback roots are set.
+//
+//go:debug x509usefallbackroots=1
+
 package main
 
 import (

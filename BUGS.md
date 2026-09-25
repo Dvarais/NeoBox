@@ -18,7 +18,7 @@
 ### 4. Access Violation (0xc0000005) в Windows CryptoAPI при проверке сертификатов
 * **Симптом:** Фатальный сбой рантайма Go внутри `crypt32.dll` (`CertFreeCertificateChain`).
 * **Причина:** Системный верификатор `crypto/x509` в Windows периодически падает при конкурентных TLS-хэндшейках.
-* **Решение:** В [`backend/core/tls.go`](file:///C:/Users/tik26/Desktop/NeoBox-Go/backend/core/tls.go) реализованы `SystemCertPool()` и `SecureTLSConfig()`. Загрузка системных корней в пул переключает Go на встроенную чистую верификацию, исключая вызовы `crypt32.dll`.
+* **Решение:** Первая попытка (`RootCAs = x509.SystemCertPool()` в `backend/core/tls.go`) не работала: на Windows этот пул — маркер, и `Verify` всё равно уходит в `crypt32.dll`. Теперь [`backend/core/roots_windows.go`](backend/core/roots_windows.go) один раз при старте собирает корни из хранилища Windows `ROOT` и бандла Mozilla и ставит их через `x509.SetFallbackRoots`, а `//go:debug x509usefallbackroots=1` в `main.go` подменяет ими системный пул для всего процесса, включая sing-box. Проверка: `TestSystemRootsBypassCryptoAPI`.
 
 ### 5. Неперехваченные паники в фоновых горутинах
 * **Симптом:** Закрытие приложения без окон и логов при непредвиденной сетевой/структурной ошибке.
