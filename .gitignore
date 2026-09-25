@@ -54,3 +54,7 @@ private_key*
 # несёт то, что не помещается в его фронтматтер.
 DESIGN.md
 .impeccable/
+
+# Superpowers and GitHub Workflows
+docs/superpowers/
+.github/workflows/
