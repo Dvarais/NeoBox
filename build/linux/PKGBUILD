@@ -1,0 +1,42 @@
+# Maintainer: NeoBox Team <support@neobox.app>
+pkgname=neobox
+pkgver=1.8.1
+pkgrel=1
+pkgdesc="Modern, sleek VPN and Proxy Client powered by sing-box"
+arch=('x86_64')
+url="https://github.com/Dvarais/NeoBox"
+license=('custom')
+depends=('webkit2gtk-4.1' 'gtk3')
+makedepends=('go' 'nodejs' 'npm' 'git')
+provides=('neobox')
+conflicts=('neobox')
+
+build() {
+    # If building inside repo or PKGBUILD directory
+    if [ -f "$startdir/../../main.go" ]; then
+        cd "$startdir/../.."
+    elif [ -f "$startdir/main.go" ]; then
+        cd "$startdir"
+    fi
+
+    # Ensure wails is installed
+    if ! command -v wails &> /dev/null; then
+        echo "Installing Wails CLI..."
+        go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+        export PATH="$PATH:$(go env GOPATH)/bin"
+    fi
+
+    echo "Building NeoBox with WebKit2GTK 4.1..."
+    wails build -tags "webkit2_41,with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor" -o neobox
+}
+
+package() {
+    local src_root="$startdir"
+    if [ -f "$startdir/../../main.go" ]; then
+        src_root="$startdir/../.."
+    fi
+
+    install -Dm755 "${src_root}/build/bin/neobox" "${pkgdir}/usr/bin/neobox"
+    install -Dm644 "${src_root}/build/linux/neobox.desktop" "${pkgdir}/usr/share/applications/neobox.desktop"
+    install -Dm644 "${src_root}/build/linux/icon.png" "${pkgdir}/usr/share/icons/hicolor/512x512/apps/neobox.png"
+}

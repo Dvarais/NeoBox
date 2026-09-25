@@ -8,7 +8,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 echo "=== Building NeoBox v${VERSION} for Linux ==="
 cd "${ROOT_DIR}"
 
-wails build -tags "with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor" -o neobox
+wails build -tags "webkit2_41,with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor" -o neobox
 
 echo "=== Packaging .deb ==="
 DEB_DIR="${ROOT_DIR}/build/bin/deb"

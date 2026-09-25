@@ -1,0 +1,10 @@
+# Set default behaviour to automatically normalize line endings
+* text=auto
+
+# Enforce LF for shell scripts and Linux package files
+*.sh text eol=lf
+PKGBUILD text eol=lf
+*.desktop text eol=lf
+control text eol=lf
+postinst text eol=lf
+postrm text eol=lf
