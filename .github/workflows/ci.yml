@@ -90,18 +90,6 @@ jobs:
           chmod +x build/linux/build_linux.sh
           ./build/linux/build_linux.sh
 
-      - name: Sign packages if secret key is configured
-        env:
-          SIGNING_KEY: ${{ secrets.ED25519_PRIVATE_KEY }}
-        run: |
-          if [ -n "${SIGNING_KEY}" ]; then
-            echo "Signing Linux binaries..."
-            go run cmd/sign/main.go -key "${SIGNING_KEY}" -file build/bin/neobox
-            go run cmd/sign/main.go -key "${SIGNING_KEY}" -file build/bin/neobox_1.8.1_amd64.deb
-          else
-            echo "No SIGNING_KEY secret found; skipping automated signing."
-          fi
-
       - name: Upload Debian Package (.deb)
         uses: actions/upload-artifact@v4
         with:
@@ -115,13 +103,6 @@ jobs:
           name: neobox-linux-amd64
           path: build/bin/neobox
           if-no-files-found: error
-
-      - name: Upload Signatures (if generated)
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-signatures
-          path: build/bin/*.sig
-          if-no-files-found: ignore
 
   frontend:
     name: Frontend
