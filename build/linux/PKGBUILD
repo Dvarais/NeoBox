@@ -7,6 +7,10 @@ arch=('x86_64')
 url="https://github.com/Dvarais/NeoBox"
 license=('custom')
 depends=('webkit2gtk-4.1' 'gtk3')
+optdepends=('nftables: Kill Switch support'
+            'iptables: Legacy Kill Switch fallback')
+install=arch/neobox.install
+options=('!debug')
 makedepends=('go' 'nodejs' 'npm' 'git')
 provides=('neobox')
 conflicts=('neobox')

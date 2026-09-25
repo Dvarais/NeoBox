@@ -6,7 +6,7 @@ pkgdesc="Sleek and Secure VPN Client powered by sing-box"
 arch=('x86_64')
 url="https://github.com/Dvarais/NeoBox"
 license=('custom')
-depends=('gtk3' 'webkit2gtk-4.1' 'libappindicator-gtk3' 'iproute2')
+depends=('gtk3' 'webkit2gtk-4.1')
 optdepends=('nftables: Kill Switch support'
             'iptables: Legacy Kill Switch fallback')
 install=neobox.install
