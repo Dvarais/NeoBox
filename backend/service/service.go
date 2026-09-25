@@ -18,7 +18,6 @@ import (
 
 	"fyne.io/systray"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-	"golang.org/x/sys/windows"
 )
 
 // AppService is the Wails binding surface: every exported method on it is
@@ -90,7 +89,7 @@ type AppService struct {
 	// их не удалось. Машина при этом без сети, а причина не видна нигде, кроме
 	// crash-лога — поэтому состояние доезжает до интерфейса.
 	killSwitchStuck bool
-	mutexHandle     windows.Handle
+	mutexHandle     uintptr
 	// logStream batches sing-box log lines on their way to the frontend; nil
 	// while no core session is running. See logstream.go.
 	logStream *logStreamer

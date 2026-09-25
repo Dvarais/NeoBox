@@ -12,11 +12,9 @@ import (
 	"strings"
 	"time"
 	"unicode/utf16"
-	"unsafe"
 
 	"fyne.io/systray"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-	"golang.org/x/sys/windows"
 )
 
 // System tray: the icon, its menus and the window-visibility state they reflect.
@@ -37,35 +35,7 @@ const shellTrayWaitTimeout = 30 * time.Second
 // Paging or a search box is the upgrade, and only if someone actually hits it.
 const trayServerLimit = 300
 
-// waitForShellTrayReady blocks until the Explorer shell tray window exists or a
-// timeout elapses. It is used before starting the systray loop so that the very
-// first Shell_NotifyIcon(NIM_ADD) lands on a ready notification area — this is
-// what makes the tray icon appear reliably during early autostart at logon
-// (previously it silently failed and the icon only showed up on later redraws).
-//
-// If the shell is already running (normal interactive launch) this returns
-// immediately. It only waits during cold autostart right after logon.
-func waitForShellTrayReady() {
-	shellTrayPtr, _ := windows.UTF16PtrFromString("Shell_TrayWnd")
-	deadline := time.Now().Add(shellTrayWaitTimeout)
-	for time.Now().Before(deadline) {
-		// FindWindowW(lpClassName, lpWindowName) — the class comes FIRST.
-		//
-		// "Shell_TrayWnd" is the taskbar's window class; its title is empty. Passing
-		// it in the second slot asked for a window whose *caption* reads
-		// "Shell_TrayWnd", which nothing on Windows has, so this never matched and
-		// the loop ran out its full timeout on every single launch. That is where
-		// the half-minute between starting NeoBox and its icon appearing went — and
-		// with startMinimized the tray icon is the only way into the app, so for
-		// that half-minute there was nothing to click at all.
-		hwnd, _, _ := procFindWindowW.Call(uintptr(unsafe.Pointer(shellTrayPtr)), 0)
-		if hwnd != 0 {
-			return
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
-	fmt.Println("[tray] notification area did not appear within the timeout; adding the icon anyway")
-}
+
 
 // InitTray starts the system tray loop in a background goroutine. iconOn is the
 // brand icon shown while a session is up; iconOff is its greyed twin, and the
@@ -214,36 +184,6 @@ func (s *AppService) InitTray(iconOn, iconOff []byte) {
 
 // ── Видимость окна ───────────────────────────────────────────────────────────
 
-// user32 entry points. RegisterHotKey and friends live in hotkey.go and share
-// the same lazy DLL.
-var (
-	procFindWindowW     = user32.NewProc("FindWindowW")
-	procIsWindowVisible = user32.NewProc("IsWindowVisible")
-	procIsIconic        = user32.NewProc("IsIconic")
-)
-
-// mainWindowClass is the window class Wails' winc creates the main window with
-// (internal/frontend/desktop/windows/winc/form.go). Looking the window up by
-// title alone matches anything else on the desktop with that caption — an
-// Explorer folder named NeoBox is enough — so the class is what makes the
-// lookup ours.
-const mainWindowClass = "winc_Form"
-
-// FindMainWindow returns NeoBox's own top-level window, or 0 before Wails has
-// created it.
-func FindMainWindow() uintptr {
-	class, err := windows.UTF16PtrFromString(mainWindowClass)
-	if err != nil {
-		return 0
-	}
-	title, err := windows.UTF16PtrFromString("NeoBox")
-	if err != nil {
-		return 0
-	}
-	hwnd, _, _ := procFindWindowW.Call(uintptr(unsafe.Pointer(class)), uintptr(unsafe.Pointer(title)))
-	return hwnd
-}
-
 // windowHandleLocked caches the main window handle. Callers must hold trayMu.
 func (s *AppService) windowHandleLocked() uintptr {
 	if s.mainHWND == 0 {
@@ -260,14 +200,6 @@ func (s *AppService) SetWindowVisible(visible bool) {
 }
 
 // isWindowVisible reports whether the main window is currently on screen.
-// While it is not, there is nobody to read live output, so the log and traffic
-// streams stop pushing events into WebView2 entirely.
-//
-// It asks Windows rather than trusting the flag the frontend maintains. That
-// flag is a shadow copy of something the OS already knows, and every path that
-// moved the window without updating it — a hotkey, a stray focus event, the
-// taskbar — desynchronised the two. The flag survives only as the answer for
-// the moments before the window exists.
 func (s *AppService) isWindowVisible() bool {
 	s.trayMu.Lock()
 	defer s.trayMu.Unlock()
@@ -276,14 +208,7 @@ func (s *AppService) isWindowVisible() bool {
 	if hwnd == 0 {
 		return s.windowVisible
 	}
-	visible, _, _ := procIsWindowVisible.Call(hwnd)
-	if visible == 0 {
-		return false
-	}
-	// Свёрнутое окно формально visible, но смотреть в него некому — а решение
-	// «слать ли события в WebView2» именно об этом.
-	minimised, _, _ := procIsIconic.Call(hwnd)
-	return minimised == 0
+	return checkWindowVisibleOS(hwnd)
 }
 
 // hideWindow puts the window in the tray from the backend's own side (the tray

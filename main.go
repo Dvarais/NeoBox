@@ -6,21 +6,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime/debug"
 	"time"
 
 	"NeoBox/backend/core"
 	"NeoBox/backend/security"
+	"NeoBox/backend/platform"
 	"NeoBox/backend/service"
 	"NeoBox/backend/storage"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/options/windows"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-	syswindows "golang.org/x/sys/windows"
 )
 
 //go:embed all:frontend/dist
@@ -54,10 +52,7 @@ func main() {
 	// Hide the console window immediately if running in standalone mode (e.g. from registry startup)
 	security.HideConsoleIfNeeded()
 
-	// Resolve the user data directory first: the crash log lives inside it and
-	// must be armed before anything else can fail.
-	homeDir, _ := os.UserHomeDir()
-	userDataDir := filepath.Join(homeDir, "AppData", "Roaming", "NeoBox")
+	userDataDir := platform.Current().Paths().UserDataDir()
 	// Ensure the directory exists before writing the encryption key
 	_ = os.MkdirAll(userDataDir, 0755)
 
@@ -125,7 +120,7 @@ func main() {
 	// naming a handle that no longer exists.
 	defer func() {
 		if h := appService.MutexHandle(); h != 0 {
-			_ = syswindows.CloseHandle(h)
+			closeInstanceHandle(h)
 		}
 	}()
 
@@ -250,22 +245,7 @@ func main() {
 		Bind: []interface{}{
 			appService,
 		},
-		Windows: &windows.Options{
-			// The page fills itself with an opaque background (body in
-			// style.css), so nothing was ever visible through the window.
-			// Asking for transparency anyway bought no glass effect and cost
-			// real memory: it puts WebView2 on its transparent composition
-			// path, which keeps extra render surfaces alive in the GPU process.
-			WebviewIsTransparent: false,
-			WindowIsTranslucent:  false,
-			BackdropType:         windows.None,
-			Theme:                windows.Dark,
-			WebviewUserDataPath:  userDataDir,
-			// WebviewGpuIsDisabled disables GPU hardware acceleration for WebView2.
-			// This prevents WebView2 browser process crashes when graphics drivers reset (TDR),
-			// and saves GPU memory and background CPU cycles while sitting in the system tray.
-			WebviewGpuIsDisabled: true,
-		},
+		Windows: getWindowsOptions(userDataDir),
 	})
 
 	if err != nil {
@@ -288,79 +268,4 @@ const shutdownGrace = 5 * time.Second
 // waits, so it only ever fires when the bounded wait itself did not return.
 const shutdownWatchdogSlack = 3 * time.Second
 
-// relaunchElevatedIfNeeded restarts NeoBox through the UAC prompt when the saved
-// settings select a mode that cannot work without administrator rights. It
-// returns the single-instance mutex the caller should go on holding, and whether
-// an elevated process was started — in which case the caller must exit.
-//
-// Reading settings.json directly rather than through AppService is what lets
-// this run first: the whole point is to answer the question before the objects
-// that would be thrown away are built. The file is the plaintext half of the
-// settings (see backend/service/settings.go), and the two fields wanted here
-// carry no credentials, so nothing needs decrypting.
-//
-// Anything unreadable means no elevation. A missing file is a first run, where
-// both modes are off; a malformed one is not a reason to raise a UAC prompt the
-// user never asked for.
-func relaunchElevatedIfNeeded(userDataDir string, mutexHandle syswindows.Handle) (syswindows.Handle, bool) {
-	if service.IsElevated() {
-		return mutexHandle, false
-	}
 
-	data, err := os.ReadFile(filepath.Join(userDataDir, "settings.json"))
-	if err != nil {
-		return mutexHandle, false
-	}
-	var settings struct {
-		TunMode    bool `json:"tunMode"`
-		KillSwitch bool `json:"killSwitch"`
-	}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return mutexHandle, false
-	}
-	if !settings.TunMode && !settings.KillSwitch {
-		return mutexHandle, false
-	}
-
-	// The elevated process starts while this one is still alive, so the mutex has
-	// to go first or it would find NeoBox already running and exit at once.
-	if mutexHandle != 0 {
-		_ = syswindows.CloseHandle(mutexHandle)
-		mutexHandle = 0
-	}
-
-	if err := service.RelaunchElevated(); err != nil {
-		// Almost always a declined UAC prompt. Carry on without the rights: the
-		// window opens, and the connection attempt reports admin_required the way
-		// it always did. Retake the mutex first — it was released for a relaunch
-		// that did not happen.
-		fmt.Fprintf(os.Stderr, "Elevation declined or unavailable, continuing unelevated: %v\n", err)
-		mutexHandle, _ = service.AcquireSingleInstanceMutex()
-		return mutexHandle, false
-	}
-	return 0, true
-}
-
-// bringExistingInstanceToForeground finds the window of the running instance of NeoBox by its title,
-// restores it if minimized, and brings it to the foreground.
-func bringExistingInstanceToForeground() {
-	user32 := syswindows.NewLazySystemDLL("user32.dll")
-	procShowWindow := user32.NewProc("ShowWindow")
-	procSetForegroundWindow := user32.NewProc("SetForegroundWindow")
-	procIsIconic := user32.NewProc("IsIconic")
-
-	// By class as well as title. "NeoBox" as a caption alone also matches an
-	// Explorer window showing a folder of that name — and on the machine this
-	// is built on, that folder exists.
-	hwnd := service.FindMainWindow()
-	if hwnd != 0 {
-		// SW_RESTORE = 9, SW_SHOW = 5
-		isMinimized, _, _ := procIsIconic.Call(hwnd)
-		if isMinimized != 0 {
-			_, _, _ = procShowWindow.Call(hwnd, 9) // SW_RESTORE
-		} else {
-			_, _, _ = procShowWindow.Call(hwnd, 5) // SW_SHOW
-		}
-		_, _, _ = procSetForegroundWindow.Call(hwnd)
-	}
-}

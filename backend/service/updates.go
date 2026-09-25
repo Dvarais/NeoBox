@@ -18,7 +18,6 @@ import (
 	"NeoBox/backend/security"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-	"golang.org/x/sys/windows"
 )
 
 // Update checking and installation: querying the GitHub release API,
@@ -309,13 +308,8 @@ func (s *AppService) DownloadAndInstallUpdate(downloadURL string, signatureHex s
 		// Wait a split second for frontend to process before starting installer
 		time.Sleep(1 * time.Second)
 
-		// Start installer asynchronously using ShellExecute so that it can request UAC elevation
-		verbPtr, _ := windows.UTF16PtrFromString("runas") // "runas" triggers Windows UAC prompt
-		exePtr, _ := windows.UTF16PtrFromString(installerPath)
-		dirPtr, _ := windows.UTF16PtrFromString(filepath.Dir(installerPath))
-		argsPtr, _ := windows.UTF16PtrFromString("")
-
-		if err := windows.ShellExecute(0, verbPtr, exePtr, argsPtr, dirPtr, windows.SW_SHOWNORMAL); err != nil {
+		// Start installer asynchronously
+		if err := runInstallerElevated(installerPath); err != nil {
 			fail("Failed to start installer: " + err.Error())
 			return
 		}

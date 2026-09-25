@@ -1,3 +1,5 @@
+//go:build windows
+
 package service
 
 import (
@@ -103,7 +105,7 @@ func (s *AppService) RequestAdmin() {
 	hasMutex := s.mutexHandle != 0
 	oldMutex := s.mutexHandle
 	if hasMutex {
-		_ = windows.CloseHandle(oldMutex)
+		_ = windows.CloseHandle(windows.Handle(oldMutex))
 		s.mutexHandle = 0
 	}
 	s.stateMu.Unlock()
@@ -139,7 +141,7 @@ func (s *AppService) RequestAdmin() {
 }
 
 // SetMutexHandle sets the single instance mutex handle so it can be released on relaunch.
-func (s *AppService) SetMutexHandle(handle windows.Handle) {
+func (s *AppService) SetMutexHandle(handle uintptr) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	s.mutexHandle = handle
@@ -148,7 +150,7 @@ func (s *AppService) SetMutexHandle(handle windows.Handle) {
 // MutexHandle returns the single-instance mutex this process currently holds, or
 // zero when it holds none. RequestAdmin can replace it, so this is the only
 // reliable way to name the live handle at shutdown.
-func (s *AppService) MutexHandle() windows.Handle {
+func (s *AppService) MutexHandle() uintptr {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	return s.mutexHandle
@@ -189,7 +191,7 @@ func isMutexExisting(name string) bool {
 // AcquireSingleInstanceMutex creates a Windows named mutex to ensure only one
 // instance of NeoBox runs at a time. It checks both Global\ and Local\ namespaces
 // to prevent duplicate instances across integrity levels (unelevated vs elevated).
-func AcquireSingleInstanceMutex() (windows.Handle, bool) {
+func AcquireSingleInstanceMutex() (uintptr, bool) {
 	const globalName = "Global\\NeoBox-SingleInstance-Mutex"
 	const localName = "Local\\NeoBox-SingleInstance-Mutex"
 
@@ -202,11 +204,12 @@ func AcquireSingleInstanceMutex() (windows.Handle, bool) {
 	if handle, already := createSingleInstanceMutex(globalName); already {
 		return 0, true
 	} else if handle != 0 {
-		return handle, false
+		return uintptr(handle), false
 	}
 
 	// 3. Fallback to Local\ if Global\ failed (e.g. unelevated without SeCreateGlobalPrivilege)
-	return createSingleInstanceMutex(localName)
+	h, already := createSingleInstanceMutex(localName)
+	return uintptr(h), already
 }
 
 func createSingleInstanceMutex(name string) (windows.Handle, bool) {

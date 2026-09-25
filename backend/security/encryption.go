@@ -10,9 +10,6 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-	"unsafe"
-
-	"golang.org/x/sys/windows"
 )
 
 var (
@@ -20,58 +17,6 @@ var (
 	keyFilePath string
 	cachedKey   []byte
 )
-
-// dpapiProtect encrypts data using Windows DPAPI (CryptProtectData).
-// Only the same user account on the same machine can decrypt it.
-func dpapiProtect(data []byte) ([]byte, error) {
-	var dataIn windows.DataBlob
-	dataIn.Size = uint32(len(data))
-	dataIn.Data = &data[0]
-
-	var dataOut windows.DataBlob
-	// The freed pointer must be read when the deferred call RUNS, not when it is
-	// declared: arguments to a plain `defer f(x)` are evaluated immediately, so
-	// the previous form always passed the still-nil dataOut.Data and leaked the
-	// buffer CryptProtectData allocates.
-	defer func() {
-		if dataOut.Data != nil {
-			_, _ = windows.LocalFree(windows.Handle(unsafe.Pointer(dataOut.Data)))
-		}
-	}()
-
-	err := windows.CryptProtectData(&dataIn, nil, nil, 0, nil, windows.CRYPTPROTECT_UI_FORBIDDEN, &dataOut)
-	if err != nil {
-		return nil, fmt.Errorf("CryptProtectData failed: %w", err)
-	}
-
-	protected := make([]byte, dataOut.Size)
-	copy(protected, unsafe.Slice(dataOut.Data, dataOut.Size))
-	return protected, nil
-}
-
-// dpapiUnprotect decrypts data using Windows DPAPI (CryptUnprotectData).
-func dpapiUnprotect(data []byte) ([]byte, error) {
-	var dataIn windows.DataBlob
-	dataIn.Size = uint32(len(data))
-	dataIn.Data = &data[0]
-
-	var dataOut windows.DataBlob
-	// See dpapiProtect: the pointer must be read at call time, not at declaration.
-	defer func() {
-		if dataOut.Data != nil {
-			_, _ = windows.LocalFree(windows.Handle(unsafe.Pointer(dataOut.Data)))
-		}
-	}()
-
-	err := windows.CryptUnprotectData(&dataIn, nil, nil, 0, nil, windows.CRYPTPROTECT_UI_FORBIDDEN, &dataOut)
-	if err != nil {
-		return nil, fmt.Errorf("CryptUnprotectData failed: %w", err)
-	}
-
-	unprotected := make([]byte, dataOut.Size)
-	copy(unprotected, unsafe.Slice(dataOut.Data, dataOut.Size))
-	return unprotected, nil
-}
 
 // InitEncryption must be called once at startup with the user data directory.
 // It generates a persistent AES-256 key on first run and caches it for future calls.
@@ -246,38 +191,6 @@ func Decrypt(data []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-// LockMemory pins the encryption key in physical memory so Windows cannot page
-// it out to pagefile.sys, where it would survive on disk and be recoverable
-// long after the process exited.
-func LockMemory(data []byte) error {
-	if len(data) == 0 {
-		return nil
-	}
-
-	addr := uintptr(unsafe.Pointer(&data[0]))
-	size := uintptr(len(data))
-
-	if err := windows.VirtualLock(addr, size); err != nil {
-		return fmt.Errorf("VirtualLock failed: %w", err)
-	}
-	return nil
-}
-
-// UnlockMemory releases a region pinned by LockMemory. It is called before the
-// key is wiped, so the pages can be reclaimed normally afterwards.
-func UnlockMemory(data []byte) error {
-	if len(data) == 0 {
-		return nil
-	}
-
-	addr := uintptr(unsafe.Pointer(&data[0]))
-	size := uintptr(len(data))
-
-	if err := windows.VirtualUnlock(addr, size); err != nil {
-		return fmt.Errorf("VirtualUnlock failed: %w", err)
-	}
-	return nil
-}
 
 // SecureWipe overwrites the cached key in memory with random data and unlocks it.
 // Call this during application shutdown to prevent key extraction from memory dumps.

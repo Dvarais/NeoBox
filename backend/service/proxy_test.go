@@ -1,3 +1,5 @@
+//go:build windows
+
 package service
 
 import (
@@ -7,10 +9,7 @@ import (
 	"testing"
 )
 
-func newTestService(t *testing.T) *AppService {
-	t.Helper()
-	return &AppService{userDataDir: t.TempDir()}
-}
+
 
 func writeBackupFile(t *testing.T, s *AppService, content string) {
 	t.Helper()
