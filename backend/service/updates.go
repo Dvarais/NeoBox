@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -87,8 +88,11 @@ func (s *AppService) CheckUpdates() map[string]interface{} {
 		response["url"] = htmlURL
 		response["body"] = body
 
-		// Extract download URL for the Windows .exe installer, prioritizing the setup/installer package
-		if assets, ok := releaseInfo["assets"].([]interface{}); ok {
+		// Extract download URL for the Windows .exe installer, prioritizing the setup/installer package.
+		// Only Windows gets an in-app install: elsewhere the .exe would be
+		// downloaded and handed to xdg-open, so the response carries no
+		// downloadUrl and the frontend opens the release page instead.
+		if assets, ok := releaseInfo["assets"].([]interface{}); ok && runtime.GOOS == "windows" {
 			var fallbackURL string
 			var fallbackName string
 			var exeURL string
