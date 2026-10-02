@@ -3013,7 +3013,7 @@ function renderCustomRules() {
   
   if (customRules.length === 0) {
     const emptyDiv = document.createElement('div');
-    emptyDiv.style.cssText = 'color: var(--text-dim); font-size: var(--fs-body); font-style: italic; padding: 8px; text-align: center; border: 1px dashed var(--glass-border); border-radius: 8px;';
+    emptyDiv.className = 'custom-rules-empty';
     emptyDiv.textContent = translations[currentLanguage].customRulesEmpty;
     container.appendChild(emptyDiv);
     return;
@@ -3021,26 +3021,17 @@ function renderCustomRules() {
   
   customRules.forEach((rule, idx) => {
     const row = document.createElement('div');
-    row.style.cssText = 'display: flex; justify-content: space-between; align-items: center; background: var(--glass-01); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: 8px; gap: 8px;';
+    row.className = 'custom-rule-row';
     
     const infoSpan = document.createElement('span');
-    infoSpan.style.cssText = 'font-size: var(--fs-body); display: flex; align-items: center; gap: 6px;';
+    infoSpan.className = 'custom-rule-info';
     
     const t = translations[currentLanguage];
 
-    // Значок действия. Форма и слово различают их сами по себе — стрелка
-    // насквозь, щит, перечёркнутый круг, — а цвет только усиливает то, что уже
-    // сказано. Раньше здесь стояли цветные кружки 🟢🔵🔴: их различал один
-    // цвет, и на светлой теме они вдобавок оставались чужими пятнами.
-    //
-    // Подпись переводится. Здесь стояли литералы Direct / Proxy / Block, то
-    // есть в русском интерфейсе список своих правил был наполовину английским
-    // — при том что те же три действия строкой ниже, в «Соединениях», давно
-    // переведены и ключи для них есть.
     let actionBadge = '';
-    if (rule.action === 'direct') actionBadge = `<span class="rule-action rule-action--direct">${iconSvg('arrowRight', 13)}${escapeHtml(t.connActionDirect)}</span>`;
-    else if (rule.action === 'proxy') actionBadge = `<span class="rule-action rule-action--proxy">${iconSvg('shield', 13)}${escapeHtml(t.connActionProxy)}</span>`;
-    else if (rule.action === 'block') actionBadge = `<span class="rule-action rule-action--block">${iconSvg('slash', 13)}${escapeHtml(t.connActionBlock)}</span>`;
+    if (rule.action === 'direct') actionBadge = `<span class="rule-action rule-action--direct">${iconSvg('arrowRight', 12)}<span>${escapeHtml(t.connActionDirect)}</span></span>`;
+    else if (rule.action === 'proxy') actionBadge = `<span class="rule-action rule-action--proxy">${iconSvg('shield', 12)}<span>${escapeHtml(t.connActionProxy)}</span></span>`;
+    else if (rule.action === 'block') actionBadge = `<span class="rule-action rule-action--block">${iconSvg('slash', 12)}<span>${escapeHtml(t.connActionBlock)}</span></span>`;
 
     let typeName: string = rule.type;
     if (rule.type === 'domain_suffix') typeName = t.ruleBadgeSuffix;
@@ -3049,17 +3040,14 @@ function renderCustomRules() {
     else if (rule.type === 'ip_cidr') typeName = t.ruleBadgeIp;
     else if (rule.type === 'process') typeName = t.ruleBadgeProcess;
     
-    // typeName падает обратно на сырой rule.type для неизвестных значений, а
-    // settings.json правится вручную — экранируем и его, не только value.
-    // Класс, а не style=: CSP запрещает инлайновый атрибут стиля, а этот кусок
-    // разметки собирается строкой и уезжает через innerHTML — то есть попадает
-    // под запрет ровно так же, как атрибут в index.html.
-    infoSpan.innerHTML = `${actionBadge} <span class="rule-type-badge">[${escapeHtml(typeName)}]</span> <strong>${escapeHtml(rule.value)}</strong>`;
+    infoSpan.innerHTML = `${actionBadge} <span class="rule-type-badge">${escapeHtml(typeName)}</span> <code class="rule-value-mono">${escapeHtml(rule.value)}</code>`;
     
     const delBtn = document.createElement('button');
-    delBtn.className = 'btn-glass';
-    delBtn.style.cssText = 'padding: 4px 8px; font-size: var(--fs-micro); color: var(--danger); border-color: rgb(var(--danger-rgb) / 0.2);';
-    delBtn.textContent = translations[currentLanguage].deleteBtn;
+    delBtn.type = 'button';
+    delBtn.className = 'btn-glass btn-icon-only rule-delete-btn';
+    delBtn.title = translations[currentLanguage].deleteBtn;
+    delBtn.setAttribute('aria-label', translations[currentLanguage].deleteBtn);
+    delBtn.innerHTML = iconSvg('trash', 14);
     
     delBtn.onclick = () => {
       customRules.splice(idx, 1);

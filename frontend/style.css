@@ -3847,96 +3847,337 @@ input.color-hex {
   resize: none;
 }
 
-.routes-direct-actions {
-  margin-top: 15px;
+/* ── Routing View ─────────────────────────────────────────── */
+.routes-card {
+  background: var(--glass-01);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  padding: 20px;
   margin-bottom: 20px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: border-color 0.25s ease;
 }
 
-#splitTunnelingTitle {
-  margin-top: 20px;
+.routes-card:hover {
+  border-color: rgba(var(--accent-rgb) / 0.35);
+}
+
+.routes-card-head {
+  margin-bottom: 16px;
+}
+
+.routes-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.routes-card-icon {
   color: var(--accent-color);
+  flex-shrink: 0;
 }
 
-#splitTunnelingDesc {
-  color: var(--text-dim);
-  margin-bottom: 10px;
+.routes-card-title {
+  margin: 0;
+  font-size: var(--fs-subhead);
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.routes-card-desc {
+  margin: 0;
   font-size: var(--fs-body);
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.routes-mode-pill {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--accent-color);
+  background: var(--accent-fill);
+  border: 1px solid rgb(var(--accent-rgb) / 0.25);
+  padding: 1px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.3px;
+}
+
+.routes-instrument-box {
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.routes-toggle-label {
+  font-weight: 600;
+  font-size: var(--fs-body);
+  color: var(--text-color);
+}
+
+.routes-instrument-hint {
+  margin: 6px 0 0 28px;
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+  line-height: 1.4;
 }
 
 .process-mode-tabs {
   display: flex;
-  gap: 5px;
-  margin-bottom: 10px;
   background: var(--glass-02);
-  padding: 5px;
-  border-radius: 8px;
-}
-
-.process-tab.active {
-  flex: 1;
-  padding: 8px;
-  border: none;
-  border-radius: 6px;
-  background: var(--accent-color);
-  color: var(--on-accent);
-  font-weight: bold;
-  cursor: pointer;
-  transition: 0.2s;
+  border: 1px solid var(--glass-border);
+  padding: 3px;
+  border-radius: 10px;
+  gap: 4px;
+  margin-bottom: 14px;
+  max-width: 320px;
 }
 
 .process-tab {
   flex: 1;
-  padding: 8px;
+  padding: 7px 12px;
   border: none;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
-  color: var(--text-main);
+  color: var(--text-dim);
+  font-size: var(--fs-label);
+  font-weight: 500;
   cursor: pointer;
-  transition: 0.2s;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.process-tab:hover {
+  color: var(--text-color);
+  background: var(--glass-02);
+}
+
+.process-tab.active {
+  background: var(--accent-color);
+  color: var(--on-accent);
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgb(var(--accent-rgb) / 0.3);
+}
+
+.routes-editor-wrap {
+  position: relative;
+  margin-bottom: 14px;
+}
+
+#processListBlacklist,
+#processListWhitelist {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 12px 14px;
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  color: var(--text-color);
+  resize: vertical;
+  min-height: 120px;
+  transition: all 0.2s ease;
+}
+
+#processListBlacklist:focus,
+#processListWhitelist:focus {
+  background: var(--glass-03);
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+  outline: none;
 }
 
 #processListBlacklist {
-  resize: none;
   display: block;
 }
 
 #processListWhitelist {
-  resize: none;
   display: none;
+}
+
+.routes-save-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 #saveAppsBtn {
+  height: 38px;
+  padding: 0 20px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  border-radius: 8px;
   background: var(--accent-color);
   color: var(--on-accent);
-  width: 220px;
-  justify-content: center;
+  box-shadow: 0 2px 8px rgb(var(--accent-rgb) / 0.3);
+  transition: all 0.2s ease;
 }
 
-#appsStatus {
+#saveAppsBtn:hover {
+  box-shadow: 0 4px 14px rgb(var(--accent-rgb) / 0.5);
+  transform: translateY(-1px);
+}
+
+.routes-status-indicator {
+  font-size: var(--fs-micro);
+  font-family: var(--font-mono);
   color: var(--success);
+  font-weight: 600;
   display: none;
-}
-
-#customRoutesTitle {
-  margin-top: 30px;
-  color: var(--accent-color);
-}
-
-#customRoutesDesc {
-  color: var(--text-dim);
-  font-size: var(--fs-body);
-  margin-bottom: 12px;
 }
 
 #rulesPendingRoutes {
   display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
 }
 
-#customRulesList {
+.rules-pending-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fbbf24;
+  font-size: var(--fs-label);
+  font-weight: 500;
+}
+
+.rules-pending-apply {
+  padding: 5px 12px;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.custom-rules-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+}
+
+.custom-rules-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: var(--fs-label);
+  border: 1px dashed var(--glass-border);
+  border-radius: 10px;
+  background: var(--glass-01);
+}
+
+.custom-rule-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  padding: 10px 14px;
+  border-radius: 10px;
+  transition: border-color 0.2s ease;
+}
+
+.custom-rule-row:hover {
+  border-color: rgba(var(--accent-rgb) / 0.3);
+}
+
+.custom-rule-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--fs-label);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.rule-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.rule-action--direct {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--success);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.rule-action--proxy {
+  background: var(--accent-fill);
+  color: var(--accent-color);
+  border: 1px solid rgb(var(--accent-rgb) / 0.25);
+}
+
+.rule-action--block {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.rule-type-badge {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.rule-value-mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--text-color);
+  word-break: break-all;
+}
+
+.rule-delete-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+  background: transparent;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.rule-delete-btn:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.rule-builder-panel {
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 14px 16px;
 }
 
 .rule-builder-row {
@@ -3947,23 +4188,38 @@ input.color-hex {
 }
 
 #newRuleAction {
-  width: 110px;
+  width: 120px;
+  height: 38px;
 }
 
 #newRuleType {
-  width: 140px;
+  width: 150px;
+  height: 38px;
 }
 
 #newRuleValue {
   flex: 1;
-  min-width: 160px;
+  min-width: 180px;
+  height: 38px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
 }
 
 #addCustomRuleBtn {
   background: var(--accent-color);
   color: var(--on-accent);
-  font-weight: bold;
+  font-weight: 600;
   white-space: nowrap;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgb(var(--accent-rgb) / 0.3);
+  transition: all 0.2s ease;
+}
+
+#addCustomRuleBtn:hover {
+  box-shadow: 0 4px 14px rgb(var(--accent-rgb) / 0.5);
+  transform: translateY(-1px);
 }
 
 #connectionsFlash {

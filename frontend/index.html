@@ -375,63 +375,98 @@
 
     <!-- Вкладка МАРШРУТЫ -->
     <section id="view-routes" class="view" role="tabpanel" aria-labelledby="tab-view-routes">
-      <h2 id="routeSettingsTitle">Настройка маршрутов</h2>
-      <!-- Поля «домены для прямого доступа» здесь больше нет: оно умело ровно
-           одно — .суффикс домена → напрямую, — а это одна из строк таблицы
-           кастомных правил ниже. Домены из него перенесены в правила
-           (foldCustomDirect в backend/service/settings.go). Кнопки «Сохранить»
-           тоже нет: галка сохраняется сама, а применяется перезапуском ядра —
-           про это говорит плашка над правилами. -->
-      <div class="routes-direct-actions">
-        <label class="check-row">
-          <input type="checkbox" id="bypassRuCheckbox"> <span id="bypassRuLabel">Обход блокировок РФ (автоматически)</span>
-        </label>
+      <div class="view-header">
+        <h2 id="routeSettingsTitle">Настройка маршрутов</h2>
       </div>
 
-      <!-- НОВЫЙ БЛОК: Раздельное туннелирование (Split Tunneling) -->
-      <h3 id="splitTunnelingTitle">Туннелирование приложений (Только для TUN)</h3>
-      <p id="splitTunnelingDesc">Укажите названия .exe файлов (каждый с новой строки), например: <b>chrome.exe</b></p>
-
-      <div class="process-mode-tabs" role="group" aria-label="Режим списка приложений">
-        <button type="button" class="process-tab active" data-mode="blacklist" aria-pressed="true">Черный список</button>
-        <button type="button" class="process-tab" data-mode="whitelist" aria-pressed="false">Белый список</button>
+      <!-- Панель 1: Региональные правила -->
+      <div class="routes-card" id="routesCardGeo">
+        <div class="routes-card-head">
+          <div class="routes-card-title-row">
+            <svg class="routes-card-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+            <h3 class="routes-card-title">Региональные правила</h3>
+          </div>
+          <p class="routes-card-desc">Автоматическая маршрутизация трафика для сохранения доступа к локальным ресурсам.</p>
+        </div>
+        <div class="routes-card-body">
+          <div class="routes-instrument-box">
+            <label class="check-row check-row--flush" for="bypassRuCheckbox">
+              <input type="checkbox" id="bypassRuCheckbox">
+              <span id="bypassRuLabel" class="routes-toggle-label">Обход блокировок РФ (автоматически)</span>
+            </label>
+            <p class="routes-instrument-hint">Трафик к российским сайтам, банкам и сервисам направляется напрямую вне VPN без потери скорости.</p>
+          </div>
+        </div>
       </div>
-      <input type="hidden" id="processModeHidden" value="blacklist">
 
-      <textarea id="processListBlacklist" rows="6" placeholder="..." aria-label="Приложения в обход VPN"></textarea>
-      <textarea id="processListWhitelist" rows="6" placeholder="..." aria-label="Приложения через VPN"></textarea>
-      <div class="save-row save-row--top">
-        <button id="saveAppsBtn" class="btn-glass">Сохранить приложения</button>
-        <span id="appsStatus">Готово!</span>
+      <!-- Панель 2: Раздельное туннелирование (Split Tunneling) -->
+      <div class="routes-card" id="routesCardSplit">
+        <div class="routes-card-head">
+          <div class="routes-card-title-row">
+            <svg class="routes-card-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+            <h3 class="routes-card-title" id="splitTunnelingTitle">Туннелирование приложений (Только для TUN)</h3>
+            <span class="routes-mode-pill">TUN Only</span>
+          </div>
+          <p class="routes-card-desc" id="splitTunnelingDesc">Укажите названия .exe файлов (каждый с новой строки), например: <b>chrome.exe</b></p>
+        </div>
+        <div class="routes-card-body">
+          <div class="process-mode-tabs" role="group" aria-label="Режим списка приложений">
+            <button type="button" class="process-tab active" data-mode="blacklist" aria-pressed="true">Черный список</button>
+            <button type="button" class="process-tab" data-mode="whitelist" aria-pressed="false">Белый список</button>
+          </div>
+          <input type="hidden" id="processModeHidden" value="blacklist">
+
+          <div class="routes-editor-wrap">
+            <textarea id="processListBlacklist" rows="5" placeholder="..." aria-label="Приложения в обход VPN" spellcheck="false"></textarea>
+            <textarea id="processListWhitelist" rows="5" placeholder="..." aria-label="Приложения через VPN" spellcheck="false"></textarea>
+          </div>
+
+          <div class="routes-save-row">
+            <button id="saveAppsBtn" class="btn-glass">Сохранить приложения</button>
+            <span id="appsStatus" class="routes-status-indicator">Готово!</span>
+          </div>
+        </div>
       </div>
 
-      <!-- Custom routing rules -->
-      <h3 id="customRoutesTitle">Кастомные правила маршрутизации</h3>
-      <p id="customRoutesDesc">Добавьте точные правила для конкретных доменов или IP-адресов. Эти правила имеют приоритет над гео-правилами.</p>
-      <div id="rulesPendingRoutes" class="rules-pending-bar">
-        <span class="rules-pending-text"></span>
-        <button class="btn-glass rules-pending-apply">Применить сейчас</button>
-      </div>
-      <div id="customRulesList"></div>
-      <div class="rule-builder-row">
-        <select id="newRuleAction" aria-label="Действие правила">
-          <option id="optActionDirect" value="direct">Напрямую</option>
-          <option id="optActionProxy" value="proxy">Через VPN</option>
-          <option id="optActionBlock" value="block">Заблокировать</option>
-        </select>
-        <select id="newRuleType" aria-label="Тип правила">
-          <option id="optTypeSuffix" value="domain_suffix">.суффикс домена</option>
-          <option id="optTypeDomain" value="domain">Точный домен</option>
-          <option id="optTypeKeyword" value="domain_keyword">Ключевое слово</option>
-          <option id="optTypeIp" value="ip_cidr">IP / CIDR</option>
-          <!-- Правило по программе создаётся в основном действием на группе во
-               вкладке «Соединения», но раз тип попадает в общую таблицу правил,
-               он должен быть и здесь — иначе такое правило нельзя ни завести
-               вручную, ни понять, откуда оно взялось. -->
-          <option id="optTypeProcess" value="process">Программа (.exe)</option>
-        </select>
-        <input type="text" id="newRuleValue" placeholder="example.com или 1.2.3.0/24" aria-label="example.com или 1.2.3.0/24">
-        <button id="addCustomRuleBtn" class="btn-glass">+ Добавить</button>
+      <!-- Панель 3: Кастомные правила маршрутизации -->
+      <div class="routes-card" id="routesCardCustom">
+        <div class="routes-card-head">
+          <div class="routes-card-title-row">
+            <svg class="routes-card-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+            <h3 class="routes-card-title" id="customRoutesTitle">Кастомные правила маршрутизации</h3>
+          </div>
+          <p class="routes-card-desc" id="customRoutesDesc">Добавьте точные правила для конкретных доменов или IP-адресов. Эти правила имеют приоритет над гео-правилами.</p>
+        </div>
+        <div class="routes-card-body">
+          <div id="rulesPendingRoutes" class="rules-pending-bar">
+            <div class="rules-pending-left">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span class="rules-pending-text"></span>
+            </div>
+            <button class="btn-glass rules-pending-apply">Применить сейчас</button>
+          </div>
+
+          <div id="customRulesList" class="custom-rules-list"></div>
+
+          <div class="rule-builder-panel">
+            <div class="rule-builder-row">
+              <select id="newRuleAction" aria-label="Действие правила">
+                <option id="optActionDirect" value="direct">Напрямую</option>
+                <option id="optActionProxy" value="proxy">Через VPN</option>
+                <option id="optActionBlock" value="block">Заблокировать</option>
+              </select>
+              <select id="newRuleType" aria-label="Тип правила">
+                <option id="optTypeSuffix" value="domain_suffix">.суффикс домена</option>
+                <option id="optTypeDomain" value="domain">Точный домен</option>
+                <option id="optTypeKeyword" value="domain_keyword">Ключевое слово</option>
+                <option id="optTypeIp" value="ip_cidr">IP / CIDR</option>
+                <option id="optTypeProcess" value="process">Программа (.exe)</option>
+              </select>
+              <input type="text" id="newRuleValue" placeholder="example.com или 1.2.3.0/24" aria-label="example.com или 1.2.3.0/24" spellcheck="false">
+              <button id="addCustomRuleBtn" class="btn-glass">+ Добавить</button>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
