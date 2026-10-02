@@ -75,6 +75,8 @@ func (s *AppService) InitTray(iconOn, iconOff []byte) {
 			systray.SetTitle("NeoBox")
 			systray.SetTooltip(i18n.T(i18n.TrayTipDisconnected))
 
+			// Left click toggles the main window (show/hide), matching standard desktop UX.
+			// Right click is left without a custom handler so systray opens the native context menu.
 			systray.SetOnTapped(func() {
 				if s.isWindowVisible() {
 					s.hideWindow()
@@ -84,7 +86,6 @@ func (s *AppService) InitTray(iconOn, iconOff []byte) {
 					s.onWindowRestored()
 				}
 			})
-			systray.SetOnSecondaryTapped(func() {})
 
 			s.trayMu.Lock()
 			// Add read-only status header
