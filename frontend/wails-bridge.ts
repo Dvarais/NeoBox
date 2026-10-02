@@ -56,6 +56,83 @@ import type {
 let pingCallback: ((result: PingResult) => void) | null = null;
 let subResultCallback: ((links: string[]) => void) | null = null;
 
+// Браузерный fallback для dev-режима (vite dev / npm run dev):
+// позволяет просматривать и тестировать весь фронтенд в браузере без запуска Go-бэкенда.
+if (typeof window !== 'undefined') {
+  if (!(window as any).runtime) {
+    (window as any).runtime = {
+      EventsOn: () => () => {},
+      EventsOnMultiple: () => () => {},
+      WindowMinimise: () => {},
+      WindowHide: () => {},
+      LogPrint: () => {},
+      LogTrace: () => {},
+      LogDebug: () => {},
+      LogInfo: () => {},
+      LogWarning: () => {},
+      LogError: () => {},
+      LogFatal: () => {},
+    };
+  }
+
+  if (!(window as any).go) {
+    const mockStorageKey = 'neobox_dev_settings';
+    (window as any).go = {
+      service: {
+        AppService: {
+          GetAppVersion: async () => '1.8.1',
+          GetSettings: async () => {
+            const raw = localStorage.getItem(mockStorageKey);
+            return raw ? JSON.parse(raw) : {
+              language: 'RU',
+              dns: '1.1.1.1',
+              systemProxy: true,
+              tunMode: false,
+              killSwitch: false,
+              dnsLeak: true,
+              ipv6Leak: true,
+              fakeDns: true,
+            };
+          },
+          SaveSettings: async (jsonStr: string) => {
+            localStorage.setItem(mockStorageKey, jsonStr);
+          },
+          GetKillSwitchState: async () => ({ active: false, stuck: false }),
+          CheckTunStatus: async () => false,
+          CheckAdmin: async () => true,
+          GetSubscriptions: async () => [],
+          SaveSubscriptions: async () => {},
+          GetHistory: async () => [],
+          SaveHistory: async () => {},
+          GetConnections: async () => ({ connections: [], totalUpload: 0, totalDownload: 0 }),
+          ValidateDNS: async () => '',
+          CheckUpdates: async () => ({ available: false }),
+          SetGlobalHotkeys: async () => '',
+          BringToFront: async () => {},
+          CloseConnection: async () => {},
+          DownloadAndInstallUpdate: async () => {},
+          ExportSettings: async () => 'C:/Users/User/Desktop/neobox-settings.json',
+          ImportClipboard: async () => '',
+          ImportSettings: async () => '',
+          NotifyWindowHidden: async () => {},
+          NotifyWindowShown: async () => {},
+          OpenLogsFolder: async () => {},
+          PingServer: async () => -1,
+          RebuildTrayProfiles: async () => {},
+          RequestAdmin: async () => {},
+          RestartXray: async () => ({ success: true }),
+          StartXray: async () => ({ success: true }),
+          StopXray: async () => ({ success: true }),
+          SessionTraffic: async () => ({ upload: 0, download: 0 }),
+          SaveLogs: async () => 'C:/Users/User/Desktop/neobox.log',
+          UpdateSubscriptionNow: async () => {},
+          DNSResolverOwners: async () => ({}),
+        },
+      },
+    };
+  }
+}
+
 // Аннотация типом NeoBoxApi — это то, ради чего затевался перевод на TS: она
 // сверяет реализацию с контрактом, который видят все остальные модули.
 const api: NeoBoxApi = {
