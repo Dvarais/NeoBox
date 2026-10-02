@@ -512,197 +512,241 @@
 
     <!-- Вкладка НАСТРОЙКИ -->
     <section id="view-settings" class="view" role="tabpanel" aria-labelledby="tab-view-settings">
-      <h2 id="appSettingsTitle">Настройки приложения</h2>
+      <div class="section-toolbar">
+        <h2 id="appSettingsTitle">Настройки приложения</h2>
+        <span id="settingsAutoSaveBadge" class="settings-save-pill" role="status" aria-live="polite">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+          <span id="settingsAutoSaveText">Сохранено</span>
+        </span>
+      </div>
 
-      <div class="form-group form-group--section">
-        <label id="dnsServerLabel" for="dnsSelect">DNS Сервер</label>
-        <select id="dnsSelect">
-          <option value="1.1.1.1">Cloudflare (1.1.1.1)</option>
-          <option value="8.8.8.8">Google (8.8.8.8)</option>
-          <option value="9.9.9.9">Quad9 (9.9.9.9)</option>
-          <option value="custom">Свой сервер...</option>
-        </select>
-        <input type="text" id="customDnsInput" placeholder="1.1.1.1, dns.example.com или https://dns.example.com/dns-query" aria-label="Адрес своего DNS-сервера">
-        <!-- Годность адреса проверяет бэкенд тем же кодом, что собирает конфиг.
-             Раньше непригодное значение вскрывалось только при нажатии
-             «Подключиться», ошибкой сборки конфига. -->
-        <p id="customDnsHint" class="field-hint">Адрес, имя хоста или ссылка — всё работает по DoH. Обычный DNS не поддерживается: он шёл бы внутри туннеля и был бы виден оператору сервера.</p>
-        <div id="dnsPendingBar" class="rules-pending-bar">
-          <span class="rules-pending-text"></span>
-          <button class="btn-glass rules-pending-apply">Применить сейчас</button>
+      <!-- Панель 1: Сетевое ядро -->
+      <div class="settings-card" id="settingsCardNetwork">
+        <div class="settings-card-head">
+          <h3 class="settings-card-title" id="networkSectionTitle">Сетевое ядро</h3>
+          <p class="settings-card-desc" id="networkSectionDesc">Настройка DNS-резолвера и режима перехвата трафика Windows.</p>
         </div>
-      </div>
+        <div class="settings-card-body">
+          <div class="form-group form-group--flush">
+            <label id="dnsServerLabel" for="dnsSelect">DNS Сервер</label>
+            <select id="dnsSelect">
+              <option value="1.1.1.1">Cloudflare (1.1.1.1)</option>
+              <option value="8.8.8.8">Google (8.8.8.8)</option>
+              <option value="9.9.9.9">Quad9 (9.9.9.9)</option>
+              <option value="custom">Свой сервер...</option>
+            </select>
+            <input type="text" id="customDnsInput" placeholder="1.1.1.1, dns.example.com или https://dns.example.com/dns-query" aria-label="Адрес своего DNS-сервера">
+            <!-- Годность адреса проверяет бэкенд тем же кодом, что собирает конфиг. -->
+            <p id="customDnsHint" class="field-hint">Адрес, имя хоста или ссылка — всё работает по DoH. Обычный DNS не поддерживается: он шёл бы внутри туннеля и был бы виден оператору сервера.</p>
+            <div id="dnsPendingBar" class="rules-pending-bar">
+              <span class="rules-pending-text"></span>
+              <button class="btn-glass rules-pending-apply">Применить сейчас</button>
+            </div>
+          </div>
 
-      <div class="form-group">
-        <label class="check-row">
-          <input type="checkbox" id="tunModeCheckbox"> 
-          <span id="tunModeLabel">TUN Режим</span> <span id="tunModeDesc">(Весь трафик ПК через прокси)</span>
-        </label>
-        <label class="check-row">
-          <input type="checkbox" id="systemProxyCheckbox" checked> <span id="systemProxyLabel">Системный прокси (HTTP/SOCKS)</span>
-        </label>
-        <label class="check-row">
-          <input type="checkbox" id="autoConnectCheckbox"> <span id="autoConnectLabel">Авто-подключение при запуске</span>
-        </label>
-        <label class="check-row">
-          <input type="checkbox" id="autoUpdateSubsCheckbox"> <span id="autoUpdateSubsLabel">Авто-обновление подписок</span>
-        </label>
-        <label class="check-row">
-          <input type="checkbox" id="rememberServerCheckbox"> <span id="rememberServerLabel">Запоминать последний сервер</span>
-        </label>
-        <label class="check-row">
-          <input type="checkbox" id="openAtLoginCheckbox"> <span id="openAtLoginLabel">Запускать вместе с Windows</span>
-        </label>
-        <label class="check-row">
-          <input type="checkbox" id="startMinimizedCheckbox"> <span id="startMinimizedLabel">Запускать свернутым в трей</span>
-        </label>
-        <!-- Выключено по умолчанию и включается руками: RegisterHotKey забирает
-             сочетание у всей системы, и делать это без спроса нельзя. Отказ —
-             когда сочетание уже занято другим приложением — виден сразу,
-             галка при этом снимается обратно. -->
-        <label class="check-row">
-          <input type="checkbox" id="globalHotkeysCheckbox"> <span id="globalHotkeysLabel">Системные горячие клавиши</span> <span id="globalHotkeysDesc">(работают, когда окно закрыто)</span>
-        </label>
-        <!-- Поля только для чтения: сочетание не печатают, его нажимают. Что
-             именно Windows согласится отдать, знает только бэкенд, поэтому
-             разбирает строку он же. -->
-        <div class="hotkey-row">
-          <label id="hotkeyToggleLabel" for="hotkeyToggleInput">Подключение</label>
-          <input type="text" id="hotkeyToggleInput" readonly value="Ctrl+Shift+V" aria-label="Сочетание клавиш для подключения">
-          <label id="hotkeyShowLabel" for="hotkeyShowInput">Окно</label>
-          <input type="text" id="hotkeyShowInput" readonly value="Ctrl+Shift+B" aria-label="Сочетание клавиш для показа окна">
-        </div>
-        <p id="hotkeyHint" class="field-hint">Нажмите поле и введите сочетание. Нужен хотя бы один модификатор — Ctrl, Shift, Alt или Win.</p>
-      </div>
-
-      <h3 id="securityTitle">Безопасность</h3>
-      <div class="form-group form-group--row">
-        <label class="check-row">
-          <input type="checkbox" id="killSwitchCheckbox"> <span id="killSwitchLabel">Kill Switch</span> <span id="killSwitchDesc">(Блокировать интернет вне VPN через Windows Firewall)</span>
-        </label>
-        <label class="check-row">
-          <input type="checkbox" id="dnsLeakCheckbox" checked> <span id="dnsLeakLabel">Защита от утечек DNS</span>
-        </label>
-        <label class="check-row">
-          <input type="checkbox" id="ipv6LeakCheckbox" checked> <span id="ipv6LeakLabel">Блокировка IPv6 (утечки IP)</span>
-        </label>
-        <label class="check-row">
-          <input type="checkbox" id="fakeDnsCheckbox" checked> <span id="fakeDnsLabel">FakeDNS</span> <span id="fakeDnsDesc">(Ускорение DNS и защита от утечек)</span>
-        </label>
-        <label class="check-row">
-          <input type="checkbox" id="verboseLoggingCheckbox"> <span id="verboseLoggingLabel">Подробные логи</span> <span id="verboseLoggingDesc">(Записывать каждое соединение. Повышает расход памяти и CPU)</span>
-        </label>
-      </div>
-
-      <button id="saveSettingsBtn" class="btn-glass">Сохранить всё</button>
-
-      <!-- Внешний вид. Ниже кнопки «Сохранить всё» намеренно: всё, что выше,
-           ждёт нажатия, а цвет применяется в тот же миг — предпросмотром здесь
-           служит само приложение, и держать такое над кнопкой значило бы
-           обещать, что оно тоже ждёт.
-
-           Движок пересчитывает под выбранный цвет всю палитру и подтягивает
-           роли до контраста 4.5:1 — обязательство продукта не зависит от
-           вкуса. Что именно он подвинул, написано в строке под полями. -->
-      <h3 id="appearanceTitle">Внешний вид</h3>
-      <p id="appearanceDesc">Цвет действия и фон приложения. Применяется сразу; остальную палитру — текст, панели, состояния — приложение выводит само и держит читаемой.</p>
-
-      <!-- Плитки собирает renderer: у каждой свой градиент, а название
-           переводится. -->
-      <div class="theme-presets" id="themePresets" role="radiogroup" aria-labelledby="appearanceTitle"></div>
-
-      <div class="theme-fields">
-        <!-- Режим стоит первым, потому что он самый решающий: от него зависит,
-             во что движок приводит всё остальное. Раньше его не было вовсе, и
-             движок выбирал сам по цвету фона — из-за чего выбор синего делал
-             приложение белым, а выбор бирюзы той же яркости не делал. -->
-        <div class="theme-field">
-          <span class="theme-field-label" id="themeSchemeLabel">Режим</span>
-          <div class="theme-field-body">
-            <div class="theme-modes" role="radiogroup" aria-labelledby="themeSchemeLabel">
-              <button type="button" class="theme-mode" data-scheme="dark" role="radio" aria-checked="true" id="themeSchemeDark">Тёмный</button>
-              <button type="button" class="theme-mode" data-scheme="light" role="radio" aria-checked="false" id="themeSchemeLight">Светлый</button>
+          <div class="settings-subgroup">
+            <label class="check-row">
+              <input type="checkbox" id="tunModeCheckbox"> 
+              <span id="tunModeLabel">TUN Режим</span> <span id="tunModeDesc" class="check-desc">(Весь трафик ПК через прокси)</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="systemProxyCheckbox" checked> <span id="systemProxyLabel">Системный прокси (HTTP/SOCKS)</span>
+            </label>
+            <div id="networkInterceptionHint" class="settings-interception-banner" role="status">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <span id="networkInterceptionText">Полный перехват: драйвер Wintun (TUN) перехватывает весь трафик системы, а системный прокси активен для браузеров.</span>
             </div>
           </div>
         </div>
+      </div>
 
-        <div class="theme-field">
-          <span class="theme-field-label" id="themeAccentLabel">Акцент</span>
-          <div class="theme-field-body">
-            <input type="color" id="themeAccentInput" class="color-well" aria-labelledby="themeAccentLabel">
-            <input type="text" id="themeAccentHex" class="color-hex" spellcheck="false" maxlength="7" aria-label="Акцент, шестнадцатеричный код">
+      <!-- Панель 2: Щит безопасности -->
+      <div class="settings-card" id="settingsCardSecurity">
+        <div class="settings-card-head">
+          <h3 class="settings-card-title" id="securityTitle">Щит безопасности</h3>
+          <p class="settings-card-desc" id="securityDesc">Защита от утечек трафика, брандмауэр и параметры изоляции соединения.</p>
+        </div>
+        <div class="settings-card-body">
+          <div class="settings-instrument-box" id="killSwitchWidget">
+            <div class="settings-instrument-header">
+              <label class="check-row check-row--flush" for="killSwitchCheckbox">
+                <input type="checkbox" id="killSwitchCheckbox">
+                <span id="killSwitchLabel" class="settings-instrument-label">Kill Switch</span>
+              </label>
+              <div id="killSwitchStatusBadge" class="security-status-pill security-status-pill--off" role="status" aria-live="polite">
+                <span class="security-status-dot" aria-hidden="true"></span>
+                <span id="killSwitchStatusText">Выключен</span>
+              </div>
+            </div>
+            <p id="killSwitchDesc" class="settings-instrument-desc">Блокировать интернет вне VPN через Windows Firewall при обрыве связи.</p>
+            <div class="settings-failsafe-note">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+              <span id="killSwitchFailsafeNotice">Автозащита от сбоев: маркер активности гарантирует автоматическое снятие правил брандмауэра при аварийном завершении работы.</span>
+            </div>
+          </div>
+
+          <div class="settings-grid settings-grid--2col">
+            <label class="check-row">
+              <input type="checkbox" id="dnsLeakCheckbox" checked> <span id="dnsLeakLabel">Защита от утечек DNS</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="ipv6LeakCheckbox" checked> <span id="ipv6LeakLabel">Блокировка IPv6 (утечки IP)</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="fakeDnsCheckbox" checked> <span id="fakeDnsLabel">FakeDNS</span> <span id="fakeDnsDesc" class="check-desc">(Ускорение DNS)</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="verboseLoggingCheckbox"> <span id="verboseLoggingLabel">Подробные логи</span> <span id="verboseLoggingDesc" class="check-desc">(Трассировка)</span>
+            </label>
           </div>
         </div>
+      </div>
 
-        <div class="theme-field">
-          <span class="theme-field-label" id="themeBgLabel">Фон</span>
-          <div class="theme-field-body">
-            <div class="theme-modes" role="radiogroup" aria-labelledby="themeBgLabel">
-              <button type="button" class="theme-mode" data-mode="solid" role="radio" aria-checked="false" id="themeModeSolid">Сплошной</button>
-              <button type="button" class="theme-mode" data-mode="linear" role="radio" aria-checked="true" id="themeModeLinear">Линейный</button>
-              <button type="button" class="theme-mode" data-mode="radial" role="radio" aria-checked="false" id="themeModeRadial">Радиальный</button>
+      <!-- Панель 3: Интеграция с Windows -->
+      <div class="settings-card" id="settingsCardSystem">
+        <div class="settings-card-head">
+          <h3 class="settings-card-title" id="systemIntegrationTitle">Интеграция с Windows</h3>
+          <p class="settings-card-desc" id="systemIntegrationDesc">Автозапуск системы, поведение в трее и системные горячие клавиши.</p>
+        </div>
+        <div class="settings-card-body">
+          <div class="settings-grid settings-grid--2col">
+            <label class="check-row">
+              <input type="checkbox" id="openAtLoginCheckbox"> <span id="openAtLoginLabel">Запускать вместе с Windows</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="startMinimizedCheckbox"> <span id="startMinimizedLabel">Запускать свернутым в трей</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="autoConnectCheckbox"> <span id="autoConnectLabel">Авто-подключение при запуске</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="rememberServerCheckbox"> <span id="rememberServerLabel">Запоминать последний сервер</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="autoUpdateSubsCheckbox"> <span id="autoUpdateSubsLabel">Авто-обновление подписок</span>
+            </label>
+          </div>
+
+          <div class="settings-hotkeys-block">
+            <label class="check-row">
+              <input type="checkbox" id="globalHotkeysCheckbox"> <span id="globalHotkeysLabel">Системные горячие клавиши</span> <span id="globalHotkeysDesc" class="check-desc">(работают, когда окно закрыто)</span>
+            </label>
+            <div class="hotkey-row">
+              <label id="hotkeyToggleLabel" for="hotkeyToggleInput">Подключение</label>
+              <input type="text" id="hotkeyToggleInput" readonly value="Ctrl+Shift+V" aria-label="Сочетание клавиш для подключения">
+              <label id="hotkeyShowLabel" for="hotkeyShowInput">Окно</label>
+              <input type="text" id="hotkeyShowInput" readonly value="Ctrl+Shift+B" aria-label="Сочетание клавиш для показа окна">
+            </div>
+            <p id="hotkeyHint" class="field-hint">Нажмите поле и введите сочетание. Нужен хотя бы один модификатор — Ctrl, Shift, Alt или Win.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Панель 4: Внешний вид -->
+      <div class="settings-card" id="settingsCardAppearance">
+        <div class="settings-card-head">
+          <h3 class="settings-card-title" id="appearanceTitle">Внешний вид</h3>
+          <p class="settings-card-desc" id="appearanceDesc">Цвет действия и фон приложения. Применяется сразу; остальную палитру — текст, панели, состояния — приложение выводит само и держит читаемой.</p>
+        </div>
+        <div class="settings-card-body">
+          <div class="theme-presets" id="themePresets" role="radiogroup" aria-labelledby="appearanceTitle"></div>
+
+          <div class="theme-fields">
+            <div class="theme-field">
+              <span class="theme-field-label" id="themeSchemeLabel">Режим</span>
+              <div class="theme-field-body">
+                <div class="theme-modes" role="radiogroup" aria-labelledby="themeSchemeLabel">
+                  <button type="button" class="theme-mode" data-scheme="dark" role="radio" aria-checked="true" id="themeSchemeDark">Тёмный</button>
+                  <button type="button" class="theme-mode" data-scheme="light" role="radio" aria-checked="false" id="themeSchemeLight">Светлый</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="theme-field">
+              <span class="theme-field-label" id="themeAccentLabel">Акцент</span>
+              <div class="theme-field-body">
+                <input type="color" id="themeAccentInput" class="color-well" aria-labelledby="themeAccentLabel">
+                <input type="text" id="themeAccentHex" class="color-hex" spellcheck="false" maxlength="7" aria-label="Акцент, шестнадцатеричный код">
+              </div>
+            </div>
+
+            <div class="theme-field">
+              <span class="theme-field-label" id="themeBgLabel">Фон</span>
+              <div class="theme-field-body">
+                <div class="theme-modes" role="radiogroup" aria-labelledby="themeBgLabel">
+                  <button type="button" class="theme-mode" data-mode="solid" role="radio" aria-checked="false" id="themeModeSolid">Сплошной</button>
+                  <button type="button" class="theme-mode" data-mode="linear" role="radio" aria-checked="true" id="themeModeLinear">Линейный</button>
+                  <button type="button" class="theme-mode" data-mode="radial" role="radio" aria-checked="false" id="themeModeRadial">Радиальный</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="theme-field">
+              <span class="theme-field-label" id="themeStopsLabel">Цвета</span>
+              <div class="theme-field-body">
+                <div class="theme-stops" id="themeStops"></div>
+                <button type="button" id="themeStopAdd" class="btn-glass btn-compact">Ещё цвет</button>
+                <button type="button" id="themeStopRemove" class="btn-glass btn-compact">Убрать</button>
+              </div>
+            </div>
+
+            <div class="theme-field" id="themeAngleField">
+              <label class="theme-field-label" id="themeAngleLabel" for="themeAngle">Направление</label>
+              <div class="theme-field-body">
+                <input type="range" id="themeAngle" min="0" max="360" step="15" value="90">
+                <span class="theme-angle" id="themeAngleValue">90°</span>
+              </div>
+            </div>
+          </div>
+
+          <p class="theme-contrast" id="themeContrast" role="status"></p>
+
+          <button id="themeResetBtn" class="btn-glass">
+            <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+            <span id="themeResetBtnText">Вернуть стандартную</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Панель 5: Профили и Резервные копии -->
+      <div class="settings-card" id="settingsCardProfiles">
+        <div class="settings-card-head">
+          <h3 class="settings-card-title" id="profilesTitle">Профили и Резервные копии</h3>
+          <p class="settings-card-desc" id="profilesDesc">Сохранённый набор маршрутов, DNS, раздельного туннелирования и защиты. Переключается одним нажатием — например «дома» и «на работе». Язык, тема и автозапуск в профиль не входят.</p>
+        </div>
+        <div class="settings-card-body">
+          <div id="profilesList" class="profiles-list"></div>
+          <p id="profilesEmpty" class="profiles-empty">Профилей пока нет. Настройте приложение так, как нужно, и сохраните набор под именем.</p>
+          <div class="sub-actions-row sub-actions-row--flush">
+            <button id="saveProfileBtn" class="btn-glass">
+              <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              <span id="saveProfileBtnText">Сохранить текущие настройки</span>
+            </button>
+            <label class="check-row check-row--inline">
+              <input type="checkbox" id="profileIncludeServerCheckbox"> <span id="profileIncludeServerLabel">Запомнить и сервер</span>
+            </label>
+          </div>
+
+          <div class="settings-card-subblock">
+            <h4 class="settings-card-subtitle" id="transferTitle">Перенос настроек</h4>
+            <p class="settings-card-desc" id="transferDesc">Маршруты, списки приложений, DNS и переключатели можно сохранить в файл и перенести на другой компьютер. Подписки и избранное в файл не попадают: это ссылки с паролями, они шифруются и привязаны к машине.</p>
+            <div class="sub-actions-row sub-actions-row--flush">
+              <button id="exportSettingsBtn" class="btn-glass">
+                <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span id="exportSettingsBtnText">Сохранить в файл</span>
+              </button>
+              <button id="importSettingsBtn" class="btn-glass">
+                <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span id="importSettingsBtnText">Загрузить из файла</span>
+              </button>
+            </div>
+            <div class="settings-transfer-note">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="m7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <span id="transferSafeNotice">Безопасность: ключи шифрования, подписки и текущий сервер защищены и не перезаписываются при импорте.</span>
             </div>
           </div>
         </div>
-
-        <div class="theme-field">
-          <span class="theme-field-label" id="themeStopsLabel">Цвета</span>
-          <div class="theme-field-body">
-            <div class="theme-stops" id="themeStops"></div>
-            <button type="button" id="themeStopAdd" class="btn-glass btn-compact">Ещё цвет</button>
-            <button type="button" id="themeStopRemove" class="btn-glass btn-compact">Убрать</button>
-          </div>
-        </div>
-
-        <div class="theme-field" id="themeAngleField">
-          <label class="theme-field-label" id="themeAngleLabel" for="themeAngle">Направление</label>
-          <div class="theme-field-body">
-            <input type="range" id="themeAngle" min="0" max="360" step="15" value="90">
-            <span class="theme-angle" id="themeAngleValue">90°</span>
-          </div>
-        </div>
       </div>
-
-      <p class="theme-contrast" id="themeContrast" role="status"></p>
-
-      <button id="themeResetBtn" class="btn-glass">
-        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
-        <span id="themeResetBtnText">Вернуть стандартную</span>
-      </button>
-
-      <!-- Профили. Именованные наборы того, что различается между сценариями:
-           маршрутизация, DNS, раздельное туннелирование, защита. Язык, тема и
-           автозапуск сюда не входят — они относятся к приложению, а не к
-           сценарию, и профиль, меняющий язык, был бы неожиданностью. -->
-      <h3 id="profilesTitle">Профили</h3>
-      <p id="profilesDesc">Сохранённый набор маршрутов, DNS, раздельного туннелирования и защиты. Переключается одним нажатием — например «дома» и «на работе». Язык, тема и автозапуск в профиль не входят.</p>
-      <div id="profilesList" class="profiles-list"></div>
-      <p id="profilesEmpty" class="profiles-empty">Профилей пока нет. Настройте приложение так, как нужно, и сохраните набор под именем.</p>
-      <div class="sub-actions-row sub-actions-row--flush">
-        <button id="saveProfileBtn" class="btn-glass">
-          <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-          <span id="saveProfileBtnText">Сохранить текущие настройки</span>
-        </button>
-        <label class="check-row check-row--inline">
-          <input type="checkbox" id="profileIncludeServerCheckbox"> <span id="profileIncludeServerLabel">Запомнить и сервер</span>
-        </label>
-      </div>
-
-      <!-- Перенос настроек на другую машину. Отдельным блоком ниже кнопки
-           сохранения: это не настройка, а действие над настройками. -->
-      <h3 id="transferTitle">Перенос настроек</h3>
-      <p id="transferDesc">Маршруты, списки приложений, DNS и переключатели можно сохранить в файл и перенести на другой компьютер. Подписки и избранное в файл не попадают: это ссылки с паролями, они шифруются и привязаны к машине.</p>
-      <div class="sub-actions-row sub-actions-row--flush">
-        <button id="exportSettingsBtn" class="btn-glass">
-          <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          <span id="exportSettingsBtnText">Сохранить в файл</span>
-        </button>
-        <button id="importSettingsBtn" class="btn-glass">
-          <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          <span id="importSettingsBtnText">Загрузить из файла</span>
-        </button>
-      </div>
-      <span id="settingsStatus">Готово!</span>
     </section>
 
     <!-- Вкладка ЛОГИ -->

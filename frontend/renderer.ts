@@ -273,16 +273,32 @@ document.addEventListener('keydown', handleAppShortcut);
 // сочетание — общесистемный ресурс, и второму желающему отказывают. Отказ
 // показывается и галка снимается обратно. Стоящая, но не работающая галка —
 // худший из возможных исходов: человек будет уверен, что клавиши есть.
+function syncHotkeysDisabled(): void {
+  const checkbox = optionalEl<HTMLInputElement>('globalHotkeysCheckbox');
+  if (!checkbox) return;
+  const isEnabled = checkbox.checked;
+  const row = query('.hotkey-row');
+  const toggleInput = optionalEl<HTMLInputElement>('hotkeyToggleInput');
+  const showInput = optionalEl<HTMLInputElement>('hotkeyShowInput');
+  if (row) row.classList.toggle('hotkey-row--disabled', !isEnabled);
+  if (toggleInput) toggleInput.disabled = !isEnabled;
+  if (showInput) showInput.disabled = !isEnabled;
+}
+
 async function applyGlobalHotkeys(enable: boolean, announce: boolean): Promise<void> {
   const failure = await window.api.setGlobalHotkeys(
     enable,
     el<HTMLInputElement>('hotkeyToggleInput').value,
     el<HTMLInputElement>('hotkeyShowInput').value,
   );
-  if (!failure) return;
+  if (!failure) {
+    syncHotkeysDisabled();
+    return;
+  }
 
   const t = translations[currentLanguage];
   el<HTMLInputElement>('globalHotkeysCheckbox').checked = false;
+  syncHotkeysDisabled();
   // При восстановлении настройки на старте показывать диалог поверх ещё не
   // собранного интерфейса незачем — там достаточно снятой галки.
   if (announce) {
@@ -292,6 +308,8 @@ async function applyGlobalHotkeys(enable: boolean, announce: boolean): Promise<v
 }
 
 el<HTMLInputElement>('globalHotkeysCheckbox').addEventListener('change', (e) => {
+  syncHotkeysDisabled();
+  collectAndSaveSettings();
   void applyGlobalHotkeys((e.target as HTMLInputElement).checked, true);
 });
 
@@ -671,11 +689,15 @@ function applyLanguage() {
   renderRulesPending();
 
   el('appSettingsTitle').textContent = t.appSettingsTitle;
+  setText('networkSectionTitle', t.networkSectionTitle);
+  setText('networkSectionDesc', t.networkSectionDesc);
   el('dnsServerLabel').textContent = t.dnsServerLabel;
   query('#dnsSelect option[value="custom"]').textContent = t.placeholderDns;
   el('tunModeLabel').textContent = t.tunModeLabel;
   el('tunModeDesc').textContent = t.tunModeDesc;
   el('systemProxyLabel').textContent = t.systemProxyLabel;
+  setText('systemIntegrationTitle', t.systemIntegrationTitle);
+  setText('systemIntegrationDesc', t.systemIntegrationDesc);
   el('autoConnectLabel').textContent = t.autoConnectLabel;
   el('autoUpdateSubsLabel').textContent = t.autoUpdateSubsLabel;
   el('rememberServerLabel').textContent = t.rememberServerLabel;
@@ -695,8 +717,13 @@ function applyLanguage() {
   el('hotkeyShowLabel').textContent = t.hotkeyShowLabel;
   el('hotkeyHint').textContent = t.hotkeyHint;
   el('securityTitle').textContent = t.securityTitle;
+  setText('securityDesc', t.securityDesc);
   el('killSwitchLabel').textContent = t.killSwitchLabel;
   el('killSwitchDesc').textContent = t.killSwitchDesc;
+  setText('killSwitchFailsafeNotice', t.killSwitchFailsafeNotice);
+  setText('transferSafeNotice', t.transferSafeNotice);
+  updateInterceptionGuidance();
+  void refreshKillSwitchStatus();
   el('dnsLeakLabel').textContent = t.dnsLeakLabel;
   el('ipv6LeakLabel').textContent = t.ipv6LeakLabel;
   el('fakeDnsLabel').textContent = t.fakeDnsLabel;
@@ -705,8 +732,8 @@ function applyLanguage() {
   setText('verboseLoggingDesc', t.verboseLoggingDesc);
   el('saveAppsBtn').textContent = t.saveAppsBtn;
   el('appsStatus').textContent = t.statusDone;
-  el('saveSettingsBtn').textContent = t.saveAllBtn;
-  el('settingsStatus').textContent = t.statusDone;
+  const autoSaveText = optionalEl('settingsAutoSaveText');
+  if (autoSaveText) autoSaveText.textContent = t.statusSaved;
   el('logsTitle').textContent = t.logsTitle;
   el('clearLogsBtn').textContent = t.logsClearBtn;
   setText('saveLogsBtnText', t.saveLogsBtn);
@@ -2148,8 +2175,21 @@ function restartCore() {
 
 restartBtn.onclick = restartCore;
 
+let settingsSavedTimer: ReturnType<typeof setTimeout> | null = null;
+function flashSettingsSaved(): void {
+  const badge = optionalEl('settingsAutoSaveBadge');
+  if (!badge) return;
+  badge.classList.add('visible');
+  if (settingsSavedTimer !== null) clearTimeout(settingsSavedTimer);
+  settingsSavedTimer = setTimeout(() => {
+    badge.classList.remove('visible');
+    settingsSavedTimer = null;
+  }, 1800);
+}
+
 // Настройки
-function collectAndSaveSettings() {
+function collectAndSaveSettings(showFeedback = true) {
+  if (showFeedback) flashSettingsSaved();
   const settings: AppSettings = {
     language: currentLanguage,
     dns: el<HTMLSelectElement>('dnsSelect').value === 'custom' ? el<HTMLInputElement>('customDnsInput').value : el<HTMLSelectElement>('dnsSelect').value,
@@ -2241,6 +2281,8 @@ function applyProfileSettings(p: ProfileSettings): void {
   el<HTMLInputElement>('dnsLeakCheckbox').checked = p.dnsLeak;
   el<HTMLInputElement>('ipv6LeakCheckbox').checked = p.ipv6Leak;
   el<HTMLInputElement>('fakeDnsCheckbox').checked = p.fakeDns;
+  updateInterceptionGuidance();
+  void refreshKillSwitchStatus();
 }
 
 function renderProfiles(): void {
@@ -2358,6 +2400,8 @@ window.api.onTrayToggleSetting(async (key) => {
   } as const;
   const box = el<HTMLInputElement>(boxes[key]);
   box.checked = !box.checked;
+  updateInterceptionGuidance();
+  void refreshKillSwitchStatus();
   await collectAndSaveSettings();
   if (appState === 'on') {
     restartCore();
@@ -2440,14 +2484,6 @@ function setDnsSetting(value: string): void {
   syncCustomSelectLabels('dnsSelect');
 }
 
-el('saveSettingsBtn').onclick = () => {
-  collectAndSaveSettings();
-  // Сверяем после сохранения, а не по вводу: до нажатия менять ещё нечего.
-  if (currentDnsSetting() !== appliedDns) markRulesPending();
-  const status = el('settingsStatus');
-  status.style.display = 'inline';
-  setTimeout(() => status.style.display = 'none', 2000);
-};
 
 // Управление окном
 async function animateAndAction(action: () => void) {
@@ -2747,11 +2783,14 @@ async function init() {
     if (settings.hotkeyToggle) el<HTMLInputElement>('hotkeyToggleInput').value = settings.hotkeyToggle;
     if (settings.hotkeyShow) el<HTMLInputElement>('hotkeyShowInput').value = settings.hotkeyShow;
     if (settings.globalHotkeys) void applyGlobalHotkeys(true, false);
+    syncHotkeysDisabled();
     el<HTMLInputElement>('killSwitchCheckbox').checked = !!settings.killSwitch;
     el<HTMLInputElement>('dnsLeakCheckbox').checked = settings.dnsLeak !== undefined ? !!settings.dnsLeak : true;
     el<HTMLInputElement>('ipv6LeakCheckbox').checked = settings.ipv6Leak !== undefined ? !!settings.ipv6Leak : true;
     el<HTMLInputElement>('fakeDnsCheckbox').checked = settings.fakeDns !== undefined ? !!settings.fakeDns : true;
     el<HTMLInputElement>('verboseLoggingCheckbox').checked = !!settings.verboseLogging;
+    updateInterceptionGuidance();
+    void refreshKillSwitchStatus();
     
     if (settings.processListBlacklist) processListBlacklistEl.value = settings.processListBlacklist.join('\n');
     if (settings.processListWhitelist) processListWhitelistEl.value = settings.processListWhitelist.join('\n');
@@ -4133,9 +4172,18 @@ el('exportSettingsBtn').onclick = async () => {
 el('importSettingsBtn').onclick = async () => {
   const t = translations[currentLanguage];
   if (!(await showConfirm(t.importSettingsConfirm))) return;
+  const btn = optionalEl<HTMLButtonElement>('importSettingsBtn');
+  const btnText = optionalEl('importSettingsBtnText');
+  const prevText = btnText ? btnText.textContent : '';
   try {
+    if (btn) btn.disabled = true;
+    if (btnText) btnText.textContent = t.statusConnecting || '...';
     const path = await window.api.importSettings();
-    if (!path) return;
+    if (!path) {
+      if (btn) btn.disabled = false;
+      if (btnText && prevText) btnText.textContent = prevText;
+      return;
+    }
     await showAlert(t.alertDialogTitle, t.importSettingsDone, false, t);
     // Перезагрузка окна вместо расстановки два десятка контролов вручную:
     // разбор настроек в элементы интерфейса живёт в пути инициализации, и
@@ -4143,19 +4191,95 @@ el('importSettingsBtn').onclick = async () => {
     // с первой. Ядро при этом не перезапускается — оно в Go.
     window.location.reload();
   } catch (e) {
+    if (btn) btn.disabled = false;
+    if (btnText && prevText) btnText.textContent = prevText;
     console.error('importSettings failed:', e);
     showAlert(t.errorDialogTitle, `${t.importSettingsFailed}: ${e}`, true, t);
   }
 };
 
-// ── KILL SWITCH: ВИДИМОСТЬ СОСТОЯНИЯ ─────────────────────────────────────────
+// ── KILL SWITCH: ВИДИМОСТЬ СОСТОЯНИЯ И ТЕЛЕМЕТРИЯ ────────────────────────────
 //
 // Правила брандмауэра переживают процесс, который их поставил. Пока состояние
 // жило только галкой в «Настройках», у пользователя не было ни одного способа
 // связать пропавший интернет с приложением — а именно приложение его и резало.
-// Здесь состояние спрашивается у бэкенда и показывается на «Главной».
+// Здесь состояние спрашивается у бэкенда и показывается как на «Главной»,
+// так и в приборном виджете настроек.
+
+async function refreshKillSwitchStatus(): Promise<void> {
+  const box = optionalEl<HTMLInputElement>('killSwitchCheckbox');
+  const badge = optionalEl('killSwitchStatusBadge');
+  const textEl = optionalEl('killSwitchStatusText');
+  if (!box || !badge || !textEl) return;
+
+  const t = translations[currentLanguage];
+  let state = { active: false, stuck: false };
+  try {
+    state = await window.api.getKillSwitchState();
+  } catch (e) {
+    console.error('getKillSwitchState failed:', e);
+  }
+
+  badge.className = 'security-status-pill';
+
+  if (state.stuck) {
+    badge.classList.add('security-status-pill--danger');
+    textEl.textContent = t.killSwitchStatusStuck;
+    badge.title = t.killSwitchStuckAlert;
+    return;
+  }
+
+  if (!box.checked) {
+    badge.classList.add('security-status-pill--off');
+    textEl.textContent = t.killSwitchStatusOff;
+    badge.title = '';
+    return;
+  }
+
+  if (appState === 'on') {
+    if (state.active) {
+      badge.classList.add('security-status-pill--active');
+      textEl.textContent = t.killSwitchStatusActive;
+      badge.title = t.killSwitchBadgeTitle;
+    } else {
+      badge.classList.add('security-status-pill--pending');
+      textEl.textContent = t.killSwitchStatusPending;
+      badge.title = t.killSwitchBadgeTitle;
+    }
+  } else {
+    badge.classList.add('security-status-pill--standby');
+    textEl.textContent = t.killSwitchStatusStandby;
+    badge.title = '';
+  }
+}
+
+function updateInterceptionGuidance(): void {
+  const tunBox = optionalEl<HTMLInputElement>('tunModeCheckbox');
+  const proxyBox = optionalEl<HTMLInputElement>('systemProxyCheckbox');
+  const banner = optionalEl('networkInterceptionHint');
+  const textEl = optionalEl('networkInterceptionText');
+  if (!tunBox || !proxyBox || !banner || !textEl) return;
+
+  const t = translations[currentLanguage];
+  const isTun = tunBox.checked;
+  const isProxy = proxyBox.checked;
+
+  banner.classList.remove('settings-interception-banner--warning');
+
+  if (isTun && isProxy) {
+    textEl.textContent = t.interceptionBoth;
+  } else if (isTun && !isProxy) {
+    textEl.textContent = t.interceptionTunOnly;
+  } else if (!isTun && isProxy) {
+    textEl.textContent = t.interceptionProxyOnly;
+  } else {
+    banner.classList.add('settings-interception-banner--warning');
+    textEl.textContent = t.interceptionNone;
+  }
+}
 
 async function refreshKillSwitchBadge(): Promise<void> {
+  void refreshKillSwitchStatus();
   const badge = optionalEl('killSwitchBadge');
   if (!badge) return;
 
@@ -4496,7 +4620,12 @@ el('pingAllBtn').onclick = () => {
 el<HTMLSelectElement>('dnsSelect').onchange = (e) => {
     const custom = (e.target as HTMLSelectElement).value === 'custom';
     showCustomDnsField(custom);
-    if (custom) void checkCustomDns();
+    if (custom) {
+      void checkCustomDns();
+    } else {
+      collectAndSaveSettings();
+      if (currentDnsSetting() !== appliedDns) markRulesPending();
+    }
 };
 
 // Проверка «своего DNS» на месте ввода.
@@ -4535,6 +4664,10 @@ async function checkCustomDns(): Promise<void> {
 
   hint.textContent = problem || t.dnsCustomHint;
   hint.classList.toggle('field-hint--invalid', problem !== '');
+  if (!problem && value) {
+    collectAndSaveSettings();
+    if (currentDnsSetting() !== appliedDns) markRulesPending();
+  }
 }
 
 const customDnsInput = optionalEl<HTMLInputElement>('customDnsInput');
@@ -4549,6 +4682,7 @@ if (customDnsInput) {
 }
 
 el<HTMLInputElement>('tunModeCheckbox').onchange = async (e) => {
+  updateInterceptionGuidance();
   if ((e.target as HTMLInputElement).checked) {
     const isAdmin = await window.api.checkAdmin();
     if (!isAdmin) {
@@ -4697,6 +4831,7 @@ el<HTMLInputElement>('bypassRuCheckbox').onchange = () => {
 };
 
 el<HTMLInputElement>('systemProxyCheckbox').onchange = () => {
+  updateInterceptionGuidance();
   collectAndSaveSettings();
 };
 
@@ -4707,6 +4842,46 @@ processListBlacklistEl.oninput = debounce(() => {
 processListWhitelistEl.oninput = debounce(() => {
   collectAndSaveSettings();
 }, 500);
+
+// --- Автосохранение настроек приложения на лету ---
+const autoSaveGeneralCheckboxes = [
+  'autoConnectCheckbox',
+  'autoUpdateSubsCheckbox',
+  'rememberServerCheckbox',
+  'openAtLoginCheckbox',
+  'startMinimizedCheckbox',
+];
+
+autoSaveGeneralCheckboxes.forEach((id) => {
+  const checkbox = optionalEl<HTMLInputElement>(id);
+  if (checkbox) {
+    checkbox.onchange = () => {
+      collectAndSaveSettings();
+    };
+  }
+});
+
+const autoSaveSecurityCheckboxes = [
+  'killSwitchCheckbox',
+  'dnsLeakCheckbox',
+  'ipv6LeakCheckbox',
+  'fakeDnsCheckbox',
+  'verboseLoggingCheckbox',
+];
+
+autoSaveSecurityCheckboxes.forEach((id) => {
+  const checkbox = optionalEl<HTMLInputElement>(id);
+  if (checkbox) {
+    checkbox.onchange = () => {
+      collectAndSaveSettings();
+      if (id === 'killSwitchCheckbox') {
+        void refreshKillSwitchStatus();
+        void refreshKillSwitchBadge();
+      }
+      if (appState === 'on') markRulesPending();
+    };
+  }
+});
 
 // --- Специальный интерактивный виджет прокрутки ---
 let isDraggingScroll = false;

@@ -592,13 +592,22 @@ main {
 /* Строка «чекбокс + подпись + пояснение». Пояснения вроде «(Блокировать
    интернет вне VPN через Windows Firewall)» длиннее самой подписи, и при
    узком окне ряд обязан переноситься. */
-.check-row {
+.check-row,
+label.check-row,
+.form-group label.check-row {
+  display: flex;
   align-items: center;
   gap: 10px;
   cursor: pointer;
 }
 
 .form-group .check-row { margin-bottom: 12px; }
+.form-group--flush { margin-bottom: 0; }
+
+.check-desc {
+  color: var(--text-dim);
+  font-size: var(--fs-label);
+}
 
 .view {
   display: none;
@@ -2993,6 +3002,11 @@ input.color-hex {
   cursor: pointer;
 }
 
+#themeAngle:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 4px;
+}
+
 #themeAngle::-webkit-slider-thumb {
   appearance: none;
   width: 16px;
@@ -3001,6 +3015,11 @@ input.color-hex {
   background: var(--accent-color);
   border: none;
   cursor: pointer;
+  transition: box-shadow var(--dur-state) var(--ease-arrive);
+}
+
+#themeAngle:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.35);
 }
 
 .theme-angle {
@@ -3425,65 +3444,270 @@ input.color-hex {
   font-weight: bold;
 }
 
-#securityTitle {
-  margin-top: 25px;
+.settings-save-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--rounded-full);
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
   color: var(--accent-color);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  opacity: 0;
+  transform: translateY(-2px);
+  pointer-events: none;
+  transition: opacity var(--dur-state) var(--ease-arrive),
+              transform var(--dur-state) var(--ease-arrive);
 }
 
-.form-group--row {
-  margin-top: 15px;
+.settings-save-pill.visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 
-#killSwitchCheckbox {
-  color: var(--text-dim);
+/* Карточки приборной стены для настроек */
+.settings-card {
+  background: var(--glass-01);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transition: border-color var(--dur-state) var(--ease-arrive);
+}
+
+.settings-card:hover {
+  border-color: var(--glass-03);
+}
+
+.settings-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.settings-card-title {
+  font-size: var(--fs-subhead);
+  font-weight: 600;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.settings-card-desc {
   font-size: var(--fs-label);
-}
-
-#fakeDnsCheckbox {
   color: var(--text-dim);
-  font-size: var(--fs-label);
+  margin: 0;
+  line-height: 1.5;
 }
 
-#verboseLoggingCheckbox {
-  color: var(--text-dim);
-  font-size: var(--fs-label);
+.settings-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
-#saveSettingsBtn {
-  background: var(--accent-color);
-  color: var(--on-accent);
-  width: 200px;
-  justify-content: center;
+.settings-grid {
+  display: grid;
+  gap: 12px;
 }
 
-#appearanceTitle {
-  margin-top: 30px;
-  color: var(--accent-color);
+.settings-grid--2col {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
-#appearanceDesc {
-  color: var(--text-dim);
-  margin-bottom: 14px;
+.settings-subgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 6px;
 }
 
-#transferTitle {
-  margin-top: 30px;
-  color: var(--accent-color);
+.settings-hotkeys-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--glass-border);
 }
 
-#transferDesc {
-  color: var(--text-dim);
-  margin-bottom: 12px;
+.settings-card-subblock {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--glass-border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-card-subtitle {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-main);
+  margin: 0;
 }
 
 .sub-actions-row--flush {
   margin-top: 0;
 }
 
-#settingsStatus {
-  margin-left: 15px;
+/* Приборный блок Kill Switch */
+.settings-instrument-box {
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color var(--dur-state) var(--ease-arrive);
+}
+
+.settings-instrument-box:hover {
+  border-color: var(--glass-03);
+}
+
+.settings-instrument-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-instrument-label {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.settings-instrument-desc {
+  font-size: var(--fs-label);
+  color: var(--text-dim);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.settings-failsafe-note,
+.settings-transfer-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  line-height: 1.4;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.settings-failsafe-note svg,
+.settings-transfer-note svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--text-faint);
+}
+
+/* Статусный бейдж безопасности */
+.security-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--rounded-full);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  white-space: nowrap;
+  user-select: none;
+  transition: all var(--dur-state) var(--ease-arrive);
+}
+
+.security-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.security-status-pill--off {
+  background: var(--glass-02);
+  color: var(--text-dim);
+  border: 1px solid var(--glass-border);
+}
+.security-status-pill--off .security-status-dot {
+  background: var(--text-faint);
+}
+
+.security-status-pill--standby {
+  background: rgb(var(--warning-rgb) / 0.1);
+  color: var(--warning);
+  border: 1px solid rgb(var(--warning-rgb) / 0.3);
+}
+.security-status-pill--standby .security-status-dot {
+  background: var(--warning);
+}
+
+.security-status-pill--active {
+  background: rgb(var(--success-rgb) / 0.12);
   color: var(--success);
-  display: none;
+  border: 1px solid rgb(var(--success-rgb) / 0.3);
+}
+.security-status-pill--active .security-status-dot {
+  background: var(--success);
+  box-shadow: 0 0 6px rgb(var(--success-rgb) / 0.6);
+}
+
+.security-status-pill--pending {
+  background: rgb(var(--accent-rgb) / 0.12);
+  color: var(--accent-color);
+  border: 1px solid rgb(var(--accent-rgb) / 0.3);
+}
+.security-status-pill--pending .security-status-dot {
+  background: var(--accent-color);
+}
+
+.security-status-pill--danger {
+  background: rgb(var(--danger-rgb) / 0.12);
+  color: var(--danger);
+  border: 1px solid rgb(var(--danger-rgb) / 0.3);
+}
+.security-status-pill--danger .security-status-dot {
+  background: var(--danger);
+}
+
+/* Информационный баннер перехвата сети */
+.settings-interception-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  font-size: var(--fs-label);
+  color: var(--text-dim);
+  line-height: 1.45;
+  margin-top: 8px;
+  transition: all var(--dur-state) var(--ease-arrive);
+}
+
+.settings-interception-banner svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: currentColor;
+}
+
+.settings-interception-banner--warning {
+  background: rgb(var(--warning-rgb) / 0.08);
+  border-color: rgb(var(--warning-rgb) / 0.3);
+  color: var(--warning);
 }
 
 #saveLogsBtn {
@@ -3786,18 +4010,77 @@ input.color-hex {
 
 .hotkey-row label {
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: var(--fs-label);
   white-space: nowrap;
 }
 
 .hotkey-row input[type="text"] {
   width: 150px;
   text-align: center;
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   cursor: pointer;
 }
 
-/* Пока поле в фокусе, оно ждёт нажатия, и это должно быть видно. */
 .hotkey-row input[type="text"]:focus {
-  cursor: none;
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+.hotkey-row--disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* ─── Тактильные тумблеры настроек («Приборная стена») ─────────────────────── */
+.settings-card .check-row input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 34px;
+  height: 18px;
+  border-radius: 10px;
+  background: var(--glass-03);
+  border: 1px solid var(--glass-border);
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color var(--dur-state) var(--ease-arrive), border-color var(--dur-state) var(--ease-arrive);
+  margin: 0;
+}
+
+.settings-card .check-row input[type="checkbox"]::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  transition: transform var(--dur-state) var(--ease-arrive), background-color var(--dur-state) var(--ease-arrive), box-shadow var(--dur-state) var(--ease-arrive);
+}
+
+.settings-card .check-row input[type="checkbox"]:hover {
+  border-color: var(--glass-05);
+  background: var(--glass-04);
+}
+
+.settings-card .check-row input[type="checkbox"]:checked {
+  background: var(--accent-tint);
+  border-color: rgb(var(--accent-rgb) / 0.4);
+}
+
+.settings-card .check-row input[type="checkbox"]:checked::after {
+  transform: translateX(16px);
+  background: var(--accent-color);
+  box-shadow: 0 0 6px rgb(var(--accent-rgb) / 0.6);
+}
+
+.settings-card .check-row input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+.settings-card .check-row input[type="checkbox"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }

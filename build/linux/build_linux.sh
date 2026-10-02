@@ -19,6 +19,8 @@ mkdir -p "${DEB_DIR}/DEBIAN"
 mkdir -p "${DEB_DIR}/usr/bin"
 mkdir -p "${DEB_DIR}/usr/share/applications"
 mkdir -p "${DEB_DIR}/usr/share/icons/hicolor/512x512/apps"
+mkdir -p "${DEB_DIR}/usr/share/icons/hicolor/scalable/apps"
+mkdir -p "${DEB_DIR}/usr/share/polkit-1/actions"
 
 cp "${ROOT_DIR}/build/linux/debian/control" "${DEB_DIR}/DEBIAN/"
 cp "${ROOT_DIR}/build/linux/debian/postinst" "${DEB_DIR}/DEBIAN/"
@@ -29,7 +31,10 @@ cp "${ROOT_DIR}/build/bin/neobox" "${DEB_DIR}/usr/bin/neobox"
 chmod 755 "${DEB_DIR}/usr/bin/neobox"
 cp "${ROOT_DIR}/build/linux/neobox.desktop" "${DEB_DIR}/usr/share/applications/"
 cp "${ROOT_DIR}/build/linux/icon.png" "${DEB_DIR}/usr/share/icons/hicolor/512x512/apps/neobox.png"
+cp "${ROOT_DIR}/build/neobox.svg" "${DEB_DIR}/usr/share/icons/hicolor/scalable/apps/neobox.svg"
+cp "${ROOT_DIR}/build/linux/app.neobox.policy" "${DEB_DIR}/usr/share/polkit-1/actions/"
 
 dpkg-deb --build "${DEB_DIR}" "${ROOT_DIR}/build/bin/neobox_${VERSION}_amd64.deb"
 
 echo "=== Linux Build Complete ==="
+

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="100%" height="100%">
+  <!-- NeoBox Mark 2: Geometric Folded 'N' Glyph (Pure flat vector, transparent bg) -->
+  <g>
+    <!-- Left Pillar (Cyan) -->
+    <polygon points="52,44 100,44 100,212 52,212" fill="#38BDF8"/>
+
+    <!-- Diagonal Fold (Vibrant Blue) -->
+    <polygon points="100,44 100,108 156,212 156,148" fill="#0284C7"/>
+
+    <!-- Right Pillar (Electric Indigo) -->
+    <polygon points="156,44 204,44 204,212 156,212" fill="#4F46E5"/>
+
+    <!-- Precision Arrow / Velocity Cutout in Center -->
+    <polygon points="100,44 156,148 100,108" fill="#0EA5E9" opacity="0.6"/>
+  </g>
+</svg>

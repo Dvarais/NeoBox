@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 if command -v setcap >/dev/null 2>&1; then
-    setcap cap_net_admin,cap_net_bind_service+ep /usr/bin/neobox || true
+    setcap cap_net_admin,cap_net_bind_service+eip /usr/bin/neobox || true
 fi
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database -q || true

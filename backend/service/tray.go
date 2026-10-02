@@ -75,6 +75,17 @@ func (s *AppService) InitTray(iconOn, iconOff []byte) {
 			systray.SetTitle("NeoBox")
 			systray.SetTooltip(i18n.T(i18n.TrayTipDisconnected))
 
+			systray.SetOnTapped(func() {
+				if s.isWindowVisible() {
+					s.hideWindow()
+				} else {
+					s.BringToFront()
+					s.emitSafe("window-restored", nil)
+					s.onWindowRestored()
+				}
+			})
+			systray.SetOnSecondaryTapped(func() {})
+
 			s.trayMu.Lock()
 			// Add read-only status header
 			mStatus := systray.AddMenuItem(i18n.T(i18n.TrayStatusDisconnected), i18n.T(i18n.TrayStatusTooltip))
@@ -139,45 +150,47 @@ func (s *AppService) InitTray(iconOn, iconOff []byte) {
 				s.RebuildTrayToggles()
 			}()
 
-			for {
-				select {
-				case <-mToggle.ClickedCh:
-					// isWindowVisible asks Windows, not the last thing the
-					// frontend said. That is the whole point: every path that
-					// moved the window without telling us used to leave this
-					// menu offering the wrong half of the toggle.
-					if s.isWindowVisible() {
-						s.hideWindow()
-					} else {
-						s.BringToFront()
-						s.emitSafe("window-restored", nil)
-						s.onWindowRestored()
+			go func() {
+				for {
+					select {
+					case <-mToggle.ClickedCh:
+						// isWindowVisible asks Windows, not the last thing the
+						// frontend said. That is the whole point: every path that
+						// moved the window without telling us used to leave this
+						// menu offering the wrong half of the toggle.
+						if s.isWindowVisible() {
+							s.hideWindow()
+						} else {
+							s.BringToFront()
+							s.emitSafe("window-restored", nil)
+							s.onWindowRestored()
+						}
+
+					case <-mKillSwitch.ClickedCh:
+						s.emitSafe("tray-toggle-setting", "killSwitch")
+
+					case <-mTun.ClickedCh:
+						s.emitSafe("tray-toggle-setting", "tunMode")
+
+					case <-mSysProxy.ClickedCh:
+						s.emitSafe("tray-toggle-setting", "systemProxy")
+
+					case <-mRestart.ClickedCh:
+						s.emitSafe("tray-restart", nil)
+
+					case <-mDisconnect.ClickedCh:
+						s.emitSafe("tray-toggle-connection", nil)
+
+					case <-mQuit.ClickedCh:
+						s.Quit()
+						wCtxQuit := s.context()
+						if wCtxQuit != nil {
+							wailsruntime.Quit(wCtxQuit)
+						}
+						return
 					}
-
-				case <-mKillSwitch.ClickedCh:
-					s.emitSafe("tray-toggle-setting", "killSwitch")
-
-				case <-mTun.ClickedCh:
-					s.emitSafe("tray-toggle-setting", "tunMode")
-
-				case <-mSysProxy.ClickedCh:
-					s.emitSafe("tray-toggle-setting", "systemProxy")
-
-				case <-mRestart.ClickedCh:
-					s.emitSafe("tray-restart", nil)
-
-				case <-mDisconnect.ClickedCh:
-					s.emitSafe("tray-toggle-connection", nil)
-
-				case <-mQuit.ClickedCh:
-					s.Quit()
-					wCtxQuit := s.context()
-					if wCtxQuit != nil {
-						wailsruntime.Quit(wCtxQuit)
-					}
-					return
 				}
-			}
+			}()
 		}, func() {})
 	}()
 }

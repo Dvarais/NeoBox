@@ -38,4 +38,6 @@ package() {
     install -Dm755 "${src_root}/build/bin/neobox" "${pkgdir}/usr/bin/neobox"
     install -Dm644 "${src_root}/build/linux/neobox.desktop" "${pkgdir}/usr/share/applications/neobox.desktop"
     install -Dm644 "${src_root}/build/linux/icon.png" "${pkgdir}/usr/share/icons/hicolor/512x512/apps/neobox.png"
+    install -Dm644 "${src_root}/build/neobox.svg" "${pkgdir}/usr/share/icons/hicolor/scalable/apps/neobox.svg"
+    install -Dm644 "${src_root}/build/linux/app.neobox.policy" "${pkgdir}/usr/share/polkit-1/actions/app.neobox.policy"
 }

@@ -1,5 +1,5 @@
 post_install() {
-    setcap cap_net_admin,cap_net_bind_service+ep /usr/bin/neobox || true
+    setcap cap_net_admin,cap_net_bind_service+eip /usr/bin/neobox || true
     update-desktop-database -q || true
 }
 
