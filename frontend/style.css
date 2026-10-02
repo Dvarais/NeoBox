@@ -2531,12 +2531,19 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 /* ── Соединения ─────────────────────────────────────────────────────────── */
 
 .conn-panel {
-  background: rgb(var(--panel-rgb) / 0.4);
+  background: var(--glass-01);
   border: 1px solid var(--glass-border);
-  border-radius: 16px;
+  border-radius: 14px;
   overflow: hidden;
-  box-shadow: inset 0 4px 30px rgb(var(--shadow-rgb) / 0.2);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
   position: relative;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: border-color 0.25s ease;
+}
+
+.conn-panel:hover {
+  border-color: rgba(var(--accent-rgb) / 0.3);
 }
 
 .conn-empty {
@@ -2545,12 +2552,13 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Оверлей накрывает и залипшую шапку таблицы — отступ сдвигает надпись под неё. */
   padding-top: 38px;
   color: var(--text-dim);
   font-size: var(--fs-body);
-  font-style: italic;
   pointer-events: none;
+  z-index: 2;
+  background: rgba(var(--panel-rgb) / 0.5);
+  backdrop-filter: blur(4px);
 }
 
 .conn-table {
@@ -2562,32 +2570,34 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 .conn-table th {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
   text-align: left;
-  padding: 10px 12px;
+  padding: 10px 14px;
   font-size: var(--fs-micro);
-  font-weight: 600;
-  letter-spacing: 0.03em;
+  font-weight: 700;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-dim);
-  /* Непрозрачный фон: строки уезжают под шапку при прокрутке. */
   background: var(--panel-solid);
   border-bottom: 1px solid var(--glass-border);
   white-space: nowrap;
 }
 
 .conn-table td {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--glass-02);
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--glass-01);
   vertical-align: middle;
 }
 
-.conn-row:hover td {
-  background: var(--glass-01);
+.conn-row {
+  transition: background-color 0.15s ease;
 }
 
-/* Хост и процесс — единственные колонки переменной ширины, и обе приходят из
-   сети: длинное имя должно обрезаться, а не растягивать таблицу вбок. */
+.conn-row:hover td {
+  background: rgba(var(--accent-rgb) / 0.04);
+}
+
+/* Хост и процесс — колонки переменной ширины, обрезаются многоточием */
 .conn-cell-host,
 .conn-cell-process,
 .conn-cell-rule {
@@ -2598,8 +2608,27 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .conn-cell-host {
-  color: var(--text-main);
+  color: var(--text-color);
   font-weight: 600;
+  font-size: 13px;
+}
+
+.conn-cell-dest {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.conn-cell-process {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.conn-cell-rule {
+  color: var(--accent-color);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  white-space: nowrap;
 }
 
 .conn-cell-dest,
@@ -2607,11 +2636,8 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 .conn-cell-age {
   color: var(--text-dim);
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.conn-cell-rule {
-  color: var(--text-dim);
 }
 
 .conn-cell-actions {
@@ -2619,43 +2645,59 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .conn-action {
-  padding: 3px 7px;
+  padding: 3px 8px;
   margin-right: 4px;
+  font-family: inherit;
   font-size: var(--fs-micro);
+  font-weight: 600;
   line-height: 1.4;
   border-radius: 6px;
   border: 1px solid var(--glass-border);
   background: var(--glass-02);
-  color: var(--text-main);
+  color: var(--text-dim);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
 }
 
 .conn-action:hover:not(:disabled) {
-  background: var(--glass-04);
+  background: var(--glass-03);
+  color: var(--text-color);
+  transform: translateY(-1px);
+}
+
+.conn-action:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 1px;
 }
 
 .conn-action:disabled {
-  opacity: 0.3;
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
 .conn-action-direct:hover:not(:disabled) {
-  border-color: var(--success);
-  color: var(--success);
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
 }
 
 .conn-action-proxy:hover:not(:disabled) {
-  border-color: var(--accent-color);
+  border-color: rgba(var(--accent-rgb) / 0.4);
+  background: var(--accent-tint);
   color: var(--accent-color);
 }
 
 .conn-action-block:hover:not(:disabled),
-/* Кнопка разрыва соединения несёт рисунок, а не букву, поэтому её содержимое
-   центрируется флексом — у остальных кнопок строки там текст. */
 .conn-action-close {
   display: inline-flex;
   align-items: center;
+}
+
+.conn-action-block:hover:not(:disabled) {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
 }
 
 .conn-action-close:hover:not(:disabled) {
@@ -2856,30 +2898,42 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 
 .conn-view-switch {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   background: var(--glass-02);
-  padding: 3px;
+  border: 1px solid var(--glass-border);
+  padding: 2px;
   border-radius: 8px;
 }
 
 .conn-view-btn {
-  background: none;
+  background: transparent;
   border: none;
   color: var(--text-dim);
-  font: inherit;
-  font-size: var(--fs-label);
+  font-family: inherit;
+  font-size: var(--fs-micro);
+  font-weight: 500;
   padding: 4px 10px;
   border-radius: 6px;
   cursor: pointer;
-  transition: color 0.2s, background 0.2s;
+  transition: all 0.2s ease;
+  line-height: 1.3;
 }
 
-.conn-view-btn:hover { color: var(--text-main); }
+.conn-view-btn:hover {
+  color: var(--text-color);
+  background: var(--glass-02);
+}
 
 .conn-view-btn.active {
-  background: var(--accent-fill);
-  color: var(--accent-color);
+  background: var(--accent-color);
+  color: var(--on-accent);
   font-weight: 600;
+  box-shadow: 0 1px 6px rgba(var(--accent-rgb) / 0.3);
+}
+
+.conn-view-btn:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 1px;
 }
 
 .conn-groups {
@@ -2895,30 +2949,33 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 .conn-section-title {
   font-size: var(--fs-micro);
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-faint);
-  padding: 8px 14px 6px;
+  color: var(--text-dim);
+  padding: 10px 16px 6px;
 }
 
 .conn-section-empty {
   font-size: var(--fs-label);
   color: var(--text-faint);
-  padding: 4px 14px 10px;
+  padding: 4px 16px 10px;
   font-style: italic;
 }
 
 .conn-group {
-  border-bottom: 1px solid var(--glass-01);
+  border-bottom: 1px solid var(--glass-02);
+  transition: background-color 0.15s ease;
 }
 
-/* Шапка папки. Кнопка раскрытия занимает всю свободную ширину, а действия
-   стоят рядом отдельными кнопками: вложить кнопку в кнопку нельзя. */
+.conn-group:hover {
+  background: rgba(var(--accent-rgb) / 0.02);
+}
+
 .conn-group-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
+  gap: 10px;
+  padding: 8px 16px;
 }
 
 .conn-group-toggle {
@@ -2926,7 +2983,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   background: none;
   border: none;
   color: inherit;
@@ -2934,21 +2991,31 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   text-align: left;
   cursor: pointer;
   padding: 4px 0;
+  outline: none;
+}
+
+.conn-group-toggle:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .conn-group-toggle:hover .conn-group-key { color: var(--accent-color); }
 
-/* Треугольник раскрытия. Поворот вместо двух разных глифов: одна фигура,
-   которая явно показывает переход между состояниями. */
 .conn-group-chevron {
   flex-shrink: 0;
-  width: 10px;
-  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   color: var(--text-faint);
 }
 
 .conn-group[data-expanded="true"] .conn-group-chevron {
   transform: rotate(90deg);
+  color: var(--accent-color);
 }
 
 .conn-group-key {
@@ -2956,49 +3023,60 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-color);
   transition: color 0.2s;
 }
 
 .conn-group-count {
   flex-shrink: 0;
+  font-family: var(--font-mono);
   font-size: var(--fs-micro);
-  color: var(--text-faint);
-  /* Тёмная основа, а не стеклянная плёнка: сквозь glass-02 светит яркий край
-     градиента, и подпись на нём давала 4.41 — ниже порога. */
-  background: var(--chip-base);
-  padding: 1px 7px;
-  border-radius: 10px;
+  font-weight: 600;
+  color: var(--accent-color);
+  background: var(--accent-tint);
+  border: 1px solid rgba(var(--accent-rgb) / 0.2);
+  padding: 1px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.3px;
 }
 
 .conn-group-traffic {
   flex-shrink: 0;
-  font-size: var(--fs-label);
-  color: var(--text-dim);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
 }
 
 .conn-group-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
-/* Вложенные соединения. Отступ слева выравнивает их под именем папки, а не под
-   треугольником, чтобы вложенность читалась без линий-направляющих. */
 .conn-group-members {
-  padding: 0 14px 8px 32px;
+  padding: 4px 16px 10px 40px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .conn-member {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   font-size: var(--fs-label);
   color: var(--text-dim);
-  padding: 3px 0;
+  padding: 5px 8px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.conn-member:hover {
+  background: var(--glass-02);
+  color: var(--text-color);
 }
 
 .conn-member-host {
@@ -3007,13 +3085,16 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 13px;
 }
 
 .conn-member-meta {
   flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: var(--fs-micro);
   color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
 }
 
 @media (forced-colors: active) {
@@ -4334,25 +4415,36 @@ input.color-hex {
 }
 
 #connectionsFlash {
-  color: var(--success);
-  font-size: var(--fs-label);
   display: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--success);
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 2px 8px;
+  border-radius: 6px;
+  animation: fadeIn 0.2s ease;
 }
 
 #connectionsCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-micro);
+  font-weight: 600;
   color: var(--text-dim);
-  font-size: var(--fs-label);
 }
 
 #connectionsDesc {
   color: var(--text-dim);
   font-size: var(--fs-body);
-  margin-bottom: 12px;
+  margin-bottom: 14px;
+  line-height: 1.45;
 }
 
 .conn-panel {
   height: calc(100vh - 210px);
-  min-height: 320px;
+  min-height: 340px;
   display: flex;
   flex-direction: column;
 }
@@ -4370,7 +4462,14 @@ input.color-hex {
 
 #rulesPendingConnections {
   display: none;
-  margin-top: 12px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-top: 14px;
 }
 
 .form-group--section {
