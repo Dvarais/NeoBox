@@ -3439,9 +3439,9 @@ input.color-hex {
   margin-top: 10px;
 }
 
-#tunModeLabel {
+#tunModeCheckbox:checked ~ #tunModeLabel {
   color: var(--accent-color);
-  font-weight: bold;
+  font-weight: 600;
 }
 
 .settings-save-pill {
