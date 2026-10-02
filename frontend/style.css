@@ -219,6 +219,7 @@ input[type="checkbox"] {
 .history-stat-value,
 .history-traffic-down,
 .history-traffic-up,
+.history-traffic-badge,
 #connectionsCount,
 #sessionTimerText,
 #currentIp {
@@ -2001,46 +2002,70 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 .history-stat-card {
   background: var(--glass-01);
   border: 1px solid var(--glass-border);
-  border-radius: 14px;
-  padding: 16px 12px;
+  border-radius: 12px;
+  padding: 14px 16px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  transition: all 0.2s ease;
+  gap: 14px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .history-stat-card:hover {
   background: var(--glass-02);
-  border-color: var(--glass-06);
-  transform: translateY(-2px);
+  border-color: rgba(var(--accent-rgb) / 0.35);
+  transform: translateY(-1px);
+}
+
+.history-stat-icon-wrap {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-dim);
+  transition: all 0.2s ease;
+}
+
+.history-stat-card:hover .history-stat-icon-wrap {
+  color: var(--accent-color);
+  border-color: rgba(var(--accent-rgb) / 0.3);
+  background: rgba(var(--accent-rgb) / 0.08);
 }
 
 .history-stat-icon {
   display: flex;
   flex-shrink: 0;
-  /* Иконка сводки подчинена числу рядом и берёт его цвет: она подписывает
-     величину, а не спорит с ней за внимание. */
-  color: var(--text-faint);
 }
 
 .history-stat-info {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .history-stat-value {
-  font-size: var(--fs-subhead);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 18px;
   font-weight: 700;
-  color: var(--accent-color);
+  color: var(--text-color);
   line-height: 1.2;
+  letter-spacing: -0.02em;
 }
 
 .history-stat-label {
   font-size: var(--fs-micro);
   color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.5px;
+  font-weight: 600;
 }
 
 .history-list {
@@ -2050,50 +2075,54 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 }
 
 .history-card {
-  /* Стекло, а не сплошная заливка: карточка стоит на градиенте, и он должен
-     сквозь неё просвечивать — тогда экран читается как одна стена с
-     плавающими панелями, а не как набор непрозрачных плашек. Та же
-     поверхность, что у таблицы «Передача данных». */
   background: var(--glass-01);
   border: 1px solid var(--glass-border);
-  border-radius: 14px;
-  padding: 16px 20px;
+  border-radius: 12px;
+  padding: 14px 18px;
   display: flex;
   align-items: center;
   gap: 16px;
-  transition: all 0.2s ease;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   animation: fadeIn 0.3s ease forwards;
 }
 
 .history-card:hover {
-  border-color: rgb(var(--accent-rgb) / 0.3);
-  background: rgb(var(--accent-rgb) / 0.03);
-  transform: translateX(3px);
+  border-color: rgba(var(--accent-rgb) / 0.35);
+  background: rgba(var(--accent-rgb) / 0.03);
+  transform: translateX(2px);
 }
 
 .history-card-icon {
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   border-radius: 10px;
-  background: var(--accent-tint);
-  border: 1px solid var(--accent-fill);
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Кегль задавал размер эмодзи-глифа; теперь внутри рисунок со своими
-     размерами, а цвет он берёт отсюда — как у .server-icon. */
-  color: var(--accent-color);
+  color: var(--text-dim);
   flex-shrink: 0;
+  cursor: pointer;
   position: relative;
-  transition: all 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+  padding: 0;
 }
 
 .history-card-icon:hover {
-  cursor: pointer;
-  background: var(--accent-fill);
-  border-color: rgb(var(--accent-rgb) / 0.4);
-  color: var(--accent-color);
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: var(--on-accent);
+  box-shadow: 0 2px 10px rgba(var(--accent-rgb) / 0.35);
   transform: scale(1.05);
+}
+
+.history-card-icon:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
 }
 
 .history-card-icon.youtube-easter-egg:hover {
@@ -2139,17 +2168,32 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 .history-card-server {
   font-size: var(--fs-body);
   font-weight: 600;
-  color: var(--text-main);
+  color: var(--text-color);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .history-card-meta {
   display: flex;
-  gap: 12px;
+  align-items: center;
+  gap: 10px;
   flex-wrap: wrap;
+}
+
+.history-proto-chip {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  color: var(--accent-color);
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  flex-shrink: 0;
 }
 
 .history-meta-item {
@@ -2157,15 +2201,39 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   color: var(--text-dim);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.history-meta-item svg {
+  color: var(--text-faint);
+  flex-shrink: 0;
 }
 
 .history-card-traffic {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 3px;
+  gap: 4px;
   flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.history-traffic-badge {
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.history-traffic-badge.down {
+  color: var(--traffic-down);
+}
+
+.history-traffic-badge.up {
+  color: var(--traffic-up);
 }
 
 .history-traffic-down {
@@ -2180,9 +2248,36 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   color: var(--traffic-up);
 }
 
-/* Общий вид пустого состояния. Раньше правило было только у «Истории»; теперь
-   тем же классом пользуется и список серверов, чтобы два пустых экрана в одном
-   приложении не выглядели по-разному. */
+.history-delete-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  outline: none;
+  padding: 0;
+  margin-left: 4px;
+}
+
+.history-delete-btn:hover {
+  color: var(--danger-color);
+  background: rgba(var(--danger-rgb) / 0.12);
+  border-color: rgba(var(--danger-rgb) / 0.25);
+}
+
+.history-delete-btn:focus-visible {
+  outline: 2px solid var(--danger-color);
+  outline-offset: 1px;
+}
+
+/* Общий вид пустого состояния */
 .empty-state,
 .history-empty {
   display: flex;
@@ -2191,7 +2286,22 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   justify-content: center;
   padding: 60px 20px;
   text-align: center;
-  opacity: 0.6;
+  background: var(--glass-01);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  color: var(--text-dim);
+  gap: 12px;
+}
+
+.history-empty .empty-state-icon {
+  color: var(--text-faint);
+  opacity: 0.7;
+}
+
+.history-empty p {
+  font-size: var(--fs-body);
+  color: var(--text-dim);
+  margin: 0;
 }
 
 /* ── DNS Leak Modal ──────────────────────────────────────────────────────────── */

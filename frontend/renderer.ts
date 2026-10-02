@@ -2010,15 +2010,17 @@ function renderHistoryTab() {
     const card = document.createElement('div');
     card.className = 'history-card';
 
-    // Иконка запуска
-    const icon = document.createElement('div');
+    // Кнопка повторного подключения
+    const icon = document.createElement('button');
+    icon.type = 'button';
     icon.className = isStableEgg ? 'history-card-icon youtube-easter-egg' : 'history-card-icon';
     icon.dataset.id = entry.id;
     icon.title = t.historyConnectTitle;
+    icon.setAttribute('aria-label', `${t.historyConnectTitle}: ${serverName}`);
 
     const mark = document.createElement('span');
     mark.className = 'history-icon-mark';
-    mark.innerHTML = iconSvg('globe', 20);
+    mark.innerHTML = iconSvg('globe', 18);
 
     const playGeneric = document.createElement('span');
     playGeneric.className = 'history-icon-play generic';
@@ -2044,20 +2046,29 @@ function renderHistoryTab() {
 
     const meta = document.createElement('div');
     meta.className = 'history-card-meta';
-    // Иконка вставляется разметкой (это константа из набора), а текст —
-    // текстовым узлом: протокол приходит из ссылки подписки, то есть из
-    // недоверенного источника, и в innerHTML ему делать нечего.
-    ([
-      ['radio', proto],
-      ['clock', dur],
-      ['calendar', `${dateStr} ${timeStr}`],
-    ] as const).forEach(([name, text]) => {
-      const item = document.createElement('span');
-      item.className = 'history-meta-item';
-      item.innerHTML = iconSvg(name, 12);
-      item.appendChild(document.createTextNode(text));
-      meta.appendChild(item);
-    });
+
+    // Моноширинный бейдж протокола
+    const protoChip = document.createElement('span');
+    protoChip.className = 'history-proto-chip';
+    protoChip.textContent = proto;
+    meta.appendChild(protoChip);
+
+    // Длительность и время подключения
+    const durItem = document.createElement('span');
+    durItem.className = 'history-meta-item';
+    durItem.innerHTML = iconSvg('clock', 12);
+    const durText = document.createElement('span');
+    durText.textContent = dur;
+    durItem.appendChild(durText);
+    meta.appendChild(durItem);
+
+    const dateItem = document.createElement('span');
+    dateItem.className = 'history-meta-item';
+    dateItem.innerHTML = iconSvg('calendar', 12);
+    const dateText = document.createElement('span');
+    dateText.textContent = `${dateStr} ${timeStr}`;
+    dateItem.appendChild(dateText);
+    meta.appendChild(dateItem);
 
     body.appendChild(server);
     body.appendChild(meta);
@@ -2067,27 +2078,60 @@ function renderHistoryTab() {
     traffic.className = 'history-card-traffic';
 
     const downSpan = document.createElement('span');
-    downSpan.className = 'history-traffic-down';
-    downSpan.textContent = `↓ ${down}`;
+    downSpan.className = 'history-traffic-badge down';
+    downSpan.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+    const downText = document.createElement('span');
+    downText.textContent = down;
+    downSpan.appendChild(downText);
 
     const upSpan = document.createElement('span');
-    upSpan.className = 'history-traffic-up';
-    upSpan.textContent = `↑ ${up}`;
+    upSpan.className = 'history-traffic-badge up';
+    upSpan.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="17 14 12 9 7 14"/><line x1="12" y1="9" x2="12" y2="21"/></svg>`;
+    const upText = document.createElement('span');
+    upText.textContent = up;
+    upSpan.appendChild(upText);
 
     traffic.appendChild(downSpan);
     traffic.appendChild(upSpan);
 
+    // Кнопка удаления отдельной записи
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'history-delete-btn';
+    delBtn.dataset.deleteId = entry.id;
+    delBtn.title = t.historyDeleteTitle;
+    delBtn.setAttribute('aria-label', `${t.historyDeleteTitle}: ${serverName}`);
+    delBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`;
+
     card.appendChild(icon);
     card.appendChild(body);
     card.appendChild(traffic);
+    card.appendChild(delBtn);
     fragment.appendChild(card);
   });
 
   list.appendChild(fragment);
 
-  // Обработчик клика по иконке запуска (через делегирование)
+  // Обработчик клика по иконке запуска и кнопке удаления (через делегирование)
   list.onclick = (e) => {
-    const iconBtn = (e.target as HTMLElement).closest('.history-card-icon');
+    const target = e.target as HTMLElement;
+
+    // Удаление отдельной записи
+    const delBtn = target.closest<HTMLElement>('.history-delete-btn');
+    if (delBtn) {
+      e.stopPropagation();
+      const deleteId = delBtn.dataset.deleteId;
+      if (deleteId) {
+        const hist = loadHistory();
+        const updated = hist.filter(item => item.id !== deleteId);
+        saveHistory(updated);
+        renderHistoryTab();
+      }
+      return;
+    }
+
+    // Подключение к серверу
+    const iconBtn = target.closest<HTMLElement>('.history-card-icon');
     if (iconBtn) {
       const entryId = iconBtn.getAttribute('data-id');
       const hist = loadHistory();
@@ -2099,6 +2143,17 @@ function renderHistoryTab() {
         } else {
           showAlert(translations[currentLanguage].alertDialogTitle, translations[currentLanguage].historyServerNotFound, false, translations[currentLanguage]);
         }
+      }
+    }
+  };
+
+  // Клавиатурная доступность
+  list.onkeydown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      const activeEl = document.activeElement as HTMLElement | null;
+      if (activeEl && (activeEl.classList.contains('history-card-icon') || activeEl.classList.contains('history-delete-btn'))) {
+        e.preventDefault();
+        activeEl.click();
       }
     }
   };
