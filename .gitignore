@@ -38,6 +38,7 @@ test_user_data/
 .claude/
 .DS_Store
 Thumbs.db
+Баги и изменения.txt
 
 # Go Build and Test Artifacts
 *.test

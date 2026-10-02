@@ -39,10 +39,25 @@ if [ ! -d "${ROOT_DIR}/frontend/dist" ] || [ ! -f "${ROOT_DIR}/frontend/dist/ind
   (cd "${ROOT_DIR}/frontend" && npm run build)
 fi
 
-# Wails CLI <= v2.12 bundles x/tools v0.30, which fails on Go 1.25+ with
-# "package ... without types was imported from". Pin a CLI built with newer x/tools.
-# Pass -s to skip frontend rebuild inside Wails CLI to avoid node_modules platform churn.
-go run github.com/wailsapp/wails/v2/cmd/wails@v2.16.0 build -s -skipbindings -tags "webkit2_41,with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor" -o neobox
+# Clean previous build artifacts
+rm -rf "${ROOT_DIR}/build/linux/pkg" "${ROOT_DIR}/build/linux/src"
+
+# If makepkg is available, run it to build the native Arch package
+if command -v makepkg >/dev/null 2>&1; then
+  echo "=== Packaging .pkg.tar.zst (Arch Linux) ==="
+  (cd "${ROOT_DIR}/build/linux" && makepkg -f)
+  if [ -f "${ROOT_DIR}/build/linux/neobox-${VERSION}-1-x86_64.pkg.tar.zst" ]; then
+    mv -f "${ROOT_DIR}/build/linux/neobox-${VERSION}-1-x86_64.pkg.tar.zst" "${ROOT_DIR}/build/bin/"
+    rm -rf "${ROOT_DIR}/build/linux/pkg" "${ROOT_DIR}/build/linux/src"
+  fi
+else
+  # Wails CLI build
+  go run github.com/wailsapp/wails/v2/cmd/wails@v2.16.0 build -s -skipbindings -tags "webkit2_41,with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor" -o neobox
+fi
+
+# Create standardized linux binary copy
+cp -f "${ROOT_DIR}/build/bin/neobox" "${ROOT_DIR}/build/bin/neobox-linux-amd64"
+chmod 755 "${ROOT_DIR}/build/bin/neobox" "${ROOT_DIR}/build/bin/neobox-linux-amd64"
 
 echo "=== Packaging .deb ==="
 # Build deb inside /tmp to avoid NTFS 777 permission restrictions on WSL mounts
@@ -80,24 +95,31 @@ rm -rf "${DEB_DIR}"
 echo "=== Packaging .tar.gz (Generic Linux / Arch) ==="
 TAR_DIR="$(mktemp -d /tmp/neobox-tar-XXXXXX)"
 mkdir -p "${TAR_DIR}"
-cp "${ROOT_DIR}/build/bin/neobox" "${TAR_DIR}/"
+cp "${ROOT_DIR}/build/bin/neobox" "${TAR_DIR}/neobox"
 chmod 755 "${TAR_DIR}/neobox"
-cp "${ROOT_DIR}/build/linux/neobox.desktop" "${TAR_DIR}/"
-cp "${ROOT_DIR}/build/linux/icon.png" "${TAR_DIR}/"
-cp "${ROOT_DIR}/build/neobox.svg" "${TAR_DIR}/"
-cp "${ROOT_DIR}/build/linux/app.neobox.policy" "${TAR_DIR}/"
-tar -czf "${ROOT_DIR}/build/bin/neobox-linux-amd64.tar.gz" -C "${TAR_DIR}" .
+cp "${ROOT_DIR}/build/linux/neobox.desktop" "${TAR_DIR}/neobox.desktop"
+chmod 644 "${TAR_DIR}/neobox.desktop"
+cp "${ROOT_DIR}/build/linux/icon.png" "${TAR_DIR}/icon.png"
+chmod 644 "${TAR_DIR}/icon.png"
+tar -czf "${ROOT_DIR}/build/bin/neobox-linux-amd64.tar.gz" -C "${TAR_DIR}" neobox neobox.desktop icon.png
 rm -rf "${TAR_DIR}"
 
 if [[ -n "${PRIVATE_KEY}" ]]; then
   echo "=== Signing release artifacts ==="
   go run "${ROOT_DIR}/cmd/sign/main.go" -key "${PRIVATE_KEY}" -file "${ROOT_DIR}/build/bin/neobox"
+  cp -f "${ROOT_DIR}/build/bin/neobox.sig" "${ROOT_DIR}/build/bin/neobox-linux-amd64.sig"
   go run "${ROOT_DIR}/cmd/sign/main.go" -key "${PRIVATE_KEY}" -file "${ROOT_DIR}/build/bin/neobox_${VERSION}_amd64.deb"
   go run "${ROOT_DIR}/cmd/sign/main.go" -key "${PRIVATE_KEY}" -file "${ROOT_DIR}/build/bin/neobox-linux-amd64.tar.gz"
+  if [ -f "${ROOT_DIR}/build/bin/neobox-${VERSION}-1-x86_64.pkg.tar.zst" ]; then
+    go run "${ROOT_DIR}/cmd/sign/main.go" -key "${PRIVATE_KEY}" -file "${ROOT_DIR}/build/bin/neobox-${VERSION}-1-x86_64.pkg.tar.zst"
+  fi
   echo "Signatures created (.sig files)."
 else
   echo "NOTE: No private key provided. Skipping signing."
   echo "      Pass --key <hex_or_file> or set PRIVATE_KEY to sign release artifacts."
 fi
+
+# Clean up temporary build folders left in build/linux
+rm -rf "${ROOT_DIR}/build/linux/pkg" "${ROOT_DIR}/build/linux/src"
 
 echo "=== Linux Build Complete ==="
