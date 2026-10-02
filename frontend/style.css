@@ -338,6 +338,10 @@ body.app-idle *::after {
 /* У полей ввода уже есть авторская подсветка фокуса (рамка + свечение ниже по
    файлу), но она гасит outline. Возвращаем кольцо с тем же приоритетом. */
 input[type="text"]:focus-visible,
+input[type="search"]:focus-visible,
+input[type="password"]:focus-visible,
+input[type="url"]:focus-visible,
+input[type="number"]:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
   outline: 2px solid var(--accent-color);
@@ -357,6 +361,10 @@ textarea:focus-visible {
 @media (forced-colors: active) {
   :focus-visible,
   input[type="text"]:focus-visible,
+  input[type="search"]:focus-visible,
+  input[type="password"]:focus-visible,
+  input[type="url"]:focus-visible,
+  input[type="number"]:focus-visible,
   select:focus-visible,
   textarea:focus-visible {
     outline-color: Highlight;
@@ -946,16 +954,28 @@ label.check-row,
 /* Settings Form */
 .form-group { margin-bottom: 20px; }
 .form-group label { display: block; margin-bottom: 8px; font-size: var(--fs-body); color: var(--text-dim); }
-input[type="text"], select, textarea {
+input[type="text"],
+input[type="search"],
+input[type="password"],
+input[type="url"],
+input[type="number"],
+select,
+textarea {
   width: 100%;
   background: var(--glass-02);
   border: 1px solid var(--glass-border);
   padding: 12px;
   border-radius: 10px;
   color: var(--text-main);
+  font-family: var(--font-ui);
   outline: none;
   transition: all 0.2s;
   font-size: var(--fs-body);
+}
+
+::placeholder {
+  color: var(--text-faint);
+  opacity: 1;
 }
 
 select {
@@ -977,7 +997,13 @@ option {
   color: var(--text-main);
 }
 
-input[type="text"]:focus, select:focus, textarea:focus {
+input[type="text"]:focus,
+input[type="search"]:focus,
+input[type="password"]:focus,
+input[type="url"]:focus,
+input[type="number"]:focus,
+select:focus,
+textarea:focus {
   border-color: var(--accent-color);
   background: var(--glass-03);
   box-shadow: 0 0 15px var(--accent-tint);
@@ -2692,16 +2718,43 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 
 .log-search svg {
   position: absolute;
-  left: 9px;
+  left: 10px;
   color: var(--text-faint);
   pointer-events: none;
+  transition: color 0.2s ease;
+}
+
+.log-search:focus-within svg {
+  color: var(--accent-color);
 }
 
 .log-search input {
   width: 200px;
-  padding: 5px 10px 5px 28px;
+  padding: 6px 12px 6px 30px;
   font-size: var(--fs-label);
   border-radius: 8px;
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  color: var(--text-main);
+  box-sizing: border-box;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.log-search input:hover {
+  background: var(--glass-03);
+  border-color: var(--glass-04);
+}
+
+.log-search input:focus {
+  background: var(--glass-03);
+  border-color: var(--accent-color);
+  box-shadow: 0 0 12px var(--accent-tint);
+}
+
+.log-search input:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 1px;
 }
 
 /* Системный крестик очистки в Chromium светлый и на тёмном стекле выглядит
@@ -3210,6 +3263,11 @@ input.color-hex {
   transform: translateY(-50%);
   color: var(--text-dim);
   pointer-events: none;
+  transition: color 0.2s ease;
+}
+
+.search-field:focus-within .search-field-icon {
+  color: var(--accent-color);
 }
 
 #serverSearchInput {
