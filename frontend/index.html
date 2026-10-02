@@ -91,73 +91,61 @@
     <section id="view-home" class="view active" role="tabpanel" aria-labelledby="tab-view-home">
       <h2 id="homeViewHeading" class="sr-only">Главная</h2>
       <div class="status-header">
-        <!-- role="status" — вежливая live-область: смена «Отключено» на
-             «Подключено» произносится скринридером сама, без перевода фокуса.
-             Точка рядом декоративна, состояние несёт текст. -->
-        <div class="status-badge" role="status">
-          <div id="statusDot" class="status-dot" aria-hidden="true"></div>
-          <span id="statusText">Отключено</span>
-        </div>
-        <div class="status-badge status-badge--accent">
-          <span>IP: </span>
-          <span id="currentIp">Определяется...</span>
-        </div>
-        <!-- Kill Switch. До сих пор его состояние жило только галкой в
-             «Настройках», а когда он режет сеть, пользователь видел просто
-             «интернет пропал» и связать одно с другим не мог. Второй принцип
-             продукта требует обратного: падать в закрытое состояние и говорить
-             об этом. -->
-        <div id="killSwitchBadge" class="status-badge status-badge--warning" role="status">
-          <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          <span id="killSwitchBadgeText">Kill Switch активен</span>
+        <div class="status-header-group status-header-left">
+          <!-- role="status" — вежливая live-область: смена «Отключено» на
+               «Подключено» произносится скринридером сама, без перевода фокуса.
+               Точка рядом декоративна, состояние несёт текст. -->
+          <div class="status-badge" role="status">
+            <div id="statusDot" class="status-dot" aria-hidden="true"></div>
+            <span id="statusText">Отключено</span>
+          </div>
+
+          <!-- Connection timer -->
+          <div id="sessionTimerBadge" class="status-badge" style="display: none;">
+            <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span id="sessionTimerText">00:00:00</span>
+          </div>
         </div>
 
-        <!-- Connection timer -->
-        <div id="sessionTimerBadge" class="status-badge">
-          <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          <span id="sessionTimerText">00:00:00</span>
+        <div class="status-header-group status-header-right">
+          <div class="status-badge status-badge--accent">
+            <span>IP: </span>
+            <span id="currentIp">Определяется...</span>
+          </div>
+
+          <!-- Kill Switch -->
+          <div id="killSwitchBadge" class="status-badge status-badge--warning" role="status">
+            <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span id="killSwitchBadgeText">Kill Switch активен</span>
+          </div>
         </div>
       </div>
 
       <div class="power-container">
-        <!-- Главное действие продукта. Было <div>: подключиться с клавиатуры
-             было нельзя вообще. Имя кнопки меняется вместе с состоянием в
-             updateAppInterface. -->
+        <!-- Главное действие продукта -->
         <button type="button" id="powerBtn" class="power-btn" aria-label="Подключиться">
           <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
         </button>
+        <div id="powerStatusHint" class="power-status-hint">Нажмите для подключения</div>
         
-        <div class="current-server-card">
+        <!-- Карточка активного сервера (интерактивная) -->
+        <div class="current-server-card current-server-card--interactive" id="activeServerCard" role="button" tabindex="0" aria-label="Выбрать сервер">
           <div class="server-icon" aria-hidden="true">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
           </div>
           <div class="server-info">
-            <h3 id="activeServerName">Сервер не выбран</h3>
+            <div class="server-title-row">
+              <h3 id="activeServerName">Сервер не выбран</h3>
+              <span id="activeServerPing" class="active-server-ping" style="display: none;">—</span>
+            </div>
             <p id="activeServerDetails">Выберите локацию во вкладке Серверы</p>
+          </div>
+          <div class="server-card-action" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
           </div>
         </div>
 
-        <!-- Трафик: скорость сейчас и объём за сессию.
-             Это два измерения по двум направлениям, то есть настоящая таблица —
-             отсюда и разметка. Заголовки строк и столбцов дают скринридеру
-             «Сессия, загрузка, 1,2 ГБ» без единой скрытой подписи, а глазу —
-             выравнивание по направлению: один столбец, одно направление.
-
-             Не live-область намеренно: цифры меняются раз в секунду, и
-             скринридер, читающий их вслух, сделал бы экран невыносимым.
-
-             Карточка — та же, что у «Сервера» и «TUN-интерфейса» по соседству.
-             Раньше здесь стояла голая таблица: она сжималась по содержимому, а
-             значит была уже соседей, имела свой радиус и не имела заголовка —
-             посреди столбца из двух карточек это читалось как чужой элемент,
-             попавший туда случайно.
-
-             Иконка — те же две стрелки, что стоят в шапке таблицы, а не эмодзи,
-             как у соседей: у эмодзи свой цвет, и на чужой теме они остались бы
-             единственным местом экрана, которое ей не подчиняется.
-
-             Показывается только на подключённом туннеле: без него это четыре
-             нуля, которые ничего не сообщают. -->
+        <!-- Трафик: скорость сейчас и объём за сессию -->
         <div id="trafficCard" class="current-server-card card--stack">
           <div class="card-head">
             <div class="server-icon" aria-hidden="true">
@@ -165,17 +153,21 @@
             </div>
             <h3 id="trafficCardTitle">Передача данных</h3>
           </div>
-          <table class="traffic-meter" aria-labelledby="trafficCardTitle">
+          <table class="traffic-meter traffic-meter--dashboard" aria-labelledby="trafficCardTitle">
             <thead>
               <tr>
                 <td></td>
                 <th scope="col">
-                  <svg class="traffic-arrow" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
-                  <span class="sr-only" id="trafficColDown">Загрузка</span>
+                  <div class="traffic-col-head">
+                    <svg class="traffic-arrow traffic-arrow--down" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+                    <span class="sr-only" id="trafficColDown">Загрузка</span>
+                  </div>
                 </th>
                 <th scope="col">
-                  <svg class="traffic-arrow" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
-                  <span class="sr-only" id="trafficColUp">Выгрузка</span>
+                  <div class="traffic-col-head">
+                    <svg class="traffic-arrow traffic-arrow--up" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+                    <span class="sr-only" id="trafficColUp">Выгрузка</span>
+                  </div>
                 </th>
               </tr>
             </thead>

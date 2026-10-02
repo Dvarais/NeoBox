@@ -636,34 +636,64 @@ label.check-row,
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 50px;
+  margin-bottom: 36px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.status-header-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .status-badge {
-  padding: 6px 16px;
+  padding: 6px 14px;
   border-radius: 20px;
   background: var(--glass-02);
   border: 1px solid var(--glass-border);
-  font-size: var(--fs-body);
+  font-size: var(--fs-label);
   display: flex;
   align-items: center;
   gap: 8px;
+  backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
+}
+
+.status-badge:hover {
+  background: var(--glass-03);
+  border-color: var(--glass-04);
+}
+
+.status-badge--accent {
+  border-color: var(--accent-edge);
+  background: var(--accent-wash);
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: var(--text-dim);
+  transition: all 0.3s ease;
 }
 
-.status-dot.on { background: var(--success); box-shadow: 0 0 10px var(--success); }
-.status-dot.connecting { background: var(--accent-color); animation: pulse-fade 1.5s infinite; }
+.status-dot.on {
+  background: var(--success);
+  box-shadow: 0 0 10px var(--success), 0 0 20px rgb(var(--success-rgb) / 0.4);
+}
+
+.status-dot.connecting {
+  background: var(--accent-color);
+  box-shadow: 0 0 10px var(--accent-color);
+  animation: pulse-fade 1.2s infinite ease-in-out;
+}
 
 @keyframes pulse-fade {
-  0% { opacity: 1; }
-  50% { opacity: 0.4; }
-  100% { opacity: 1; }
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.9); }
+  100% { opacity: 1; transform: scale(1); }
 }
 
 /* Кольцо состояния кнопки питания.
@@ -717,72 +747,155 @@ label.check-row,
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  margin: 40px 0;
+  margin: 10px 0 24px;
 }
 
 .power-btn {
-  width: 180px;
-  height: 180px;
+  width: 176px;
+  height: 176px;
   border-radius: 50%;
-  background: var(--card-bg);
+  background: radial-gradient(circle at 50% 38%, var(--glass-03) 0%, var(--card-bg) 80%);
   border: 4px solid var(--glass-border);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  /* Было `all 0.4s` с перелётом. Перечисление вместо all — чтобы переход не
-     цеплял свойства, которые меняются мгновенно; кривая — экспоненциальное
-     замедление вместо отскока: реальные предметы к покою приходят, а не
-     проскакивают его. */
   transition: border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1),
               box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              background 0.3s cubic-bezier(0.16, 1, 0.3, 1),
               transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
+  box-shadow: 0 14px 40px rgb(var(--shadow-rgb) / 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.power-btn:hover {
+  border-color: var(--glass-06);
+  box-shadow: 0 16px 45px rgb(var(--shadow-rgb) / 0.5), 0 0 24px var(--accent-wash);
+  transform: translateY(-2px);
 }
 
 .power-btn svg {
-  width: 60px;
-  height: 60px;
+  width: 58px;
+  height: 58px;
   color: var(--text-dim);
+  transition: color 0.3s ease, filter 0.3s ease, transform 0.2s ease;
+}
+
+.power-btn:hover svg {
+  color: var(--text-main);
+  transform: scale(1.04);
 }
 
 .power-btn.on {
+  background: radial-gradient(circle at 50% 35%, var(--accent-fill) 0%, var(--card-bg) 85%);
   border-color: var(--accent-color);
-  box-shadow: 0 0 40px rgb(var(--accent-rgb) / 0.3);
+  box-shadow: 0 0 35px rgb(var(--accent-rgb) / 0.35),
+              0 0 70px rgb(var(--accent-rgb) / 0.15),
+              inset 0 0 24px rgb(var(--accent-rgb) / 0.12);
 }
 
 .power-btn.on svg {
   color: var(--accent-color);
+  filter: drop-shadow(0 0 10px rgb(var(--accent-rgb) / 0.7));
 }
 
-.power-btn:active { transform: scale(0.95); }
+.power-btn:active {
+  transform: scale(0.96) translateY(0);
+}
 
-/* Кнопка питания и столбец карточек под ней — разные вещи, и расстояние это
-   говорит: между карточками 20px, до кнопки 30px. */
-.power-btn { margin-bottom: 10px; }
+.power-status-hint {
+  margin-top: 14px;
+  margin-bottom: 24px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+  text-align: center;
+  transition: color 0.3s ease;
+}
 
-/* Три блока «Главной» — сервер, передача данных, TUN-интерфейс — это одна
-   карточка в трёх экземплярах. Ширина, радиус, поверхность и отступ заданы
-   здесь один раз, поэтому столбец читается как столбец, а не как три случайно
-   оказавшихся рядом элемента.
+.power-btn.on + .power-status-hint {
+  color: var(--accent-soft);
+}
 
-   Отступ был у каждого свой: 30px у сервера, 14px у таблицы трафика, 20px
-   инлайном у TUN. Теперь один — расстояние между карточками должно быть
-   расстоянием, а не тремя разными мнениями о нём. */
+/* Карточки «Главной» — сервер, передача данных, TUN-интерфейс */
 .current-server-card {
   width: 100%;
-  max-width: 400px;
-  /* Стекло, а не сплошная заливка: карточка стоит на градиенте, и он должен
-     сквозь неё просвечивать — тогда экран читается как одна стена с
-     плавающими панелями. */
+  max-width: 420px;
   background: var(--glass-01);
   border: 1px solid var(--glass-border);
   border-radius: 16px;
-  padding: 20px;
+  padding: 16px 20px;
   display: flex;
   align-items: center;
   gap: 15px;
-  margin-top: 20px;
+  margin-bottom: 14px;
+  box-sizing: border-box;
+  backdrop-filter: blur(8px);
+}
+
+.current-server-card--interactive {
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.current-server-card--interactive:hover {
+  background: var(--glass-03);
+  border-color: var(--accent-color);
+  box-shadow: 0 10px 30px rgb(var(--shadow-rgb) / 0.4), 0 0 16px var(--accent-wash);
+  transform: translateY(-2px);
+}
+
+.current-server-card--interactive:active {
+  transform: translateY(0) scale(0.99);
+}
+
+.current-server-card--interactive:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+.server-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.server-title-row h3 {
+  margin-bottom: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.active-server-ping {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.server-card-action {
+  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.current-server-card--interactive:hover .server-card-action {
+  color: var(--accent-color);
+  transform: translateX(3px);
 }
 
 /* Карточка, у которой содержимое не строка, а шапка и блок под ней. */
@@ -810,14 +923,9 @@ label.check-row,
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Акцент, а не цвет текста: плитка уже стоит на подложке из акцента, и
-     рисунок принадлежит ей, а не строке рядом. */
   color: var(--accent-color);
 }
 
-/* Состояние TUN-интерфейса. Было двумя инлайновыми правками background из
-   renderer — и красило только подложку, оставляя рисунок акцентным поверх
-   красного. Классом красится и то и другое, разом и согласованно. */
 .server-icon--ok {
   background: rgb(var(--success-rgb) / 0.12);
   color: var(--success);
@@ -826,6 +934,11 @@ label.check-row,
 .server-icon--bad {
   background: rgb(var(--danger-rgb) / 0.12);
   color: var(--danger);
+}
+
+.server-info {
+  flex: 1;
+  min-width: 0;
 }
 
 .server-info h3 { font-size: var(--fs-subhead); margin-bottom: 4px; }
@@ -2793,21 +2906,14 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
 
 .traffic-meter th,
 .traffic-meter td {
-  /* Горизонтальных отступов у крайних ячеек нет: их держит padding карточки,
-     и второй слой отступа сдвинул бы числа внутрь относительно заголовка. */
-  padding: 7px 0;
+  padding: 8px 4px;
   text-align: right;
   white-space: nowrap;
 }
 
-/* Ширина столбцов. При table-layout: fixed её задаёт первая строка, и задать
-   надо: иначе три столбца делятся поровну и подпись «За сессию» получает треть
-   карточки, отобрав её у чисел — а сравнивают глазом именно числа. */
-.traffic-meter thead td { width: 36%; }
-.traffic-meter thead th { width: 32%; }
+.traffic-meter thead td { width: 34%; }
+.traffic-meter thead th { width: 33%; }
 
-/* Подпись строки. Левый столбец — единственный, где текст выключен влево:
-   он именует строку, а не участвует в сравнении чисел. */
 .traffic-meter tbody th {
   text-align: left;
   font-size: var(--fs-micro);
@@ -2816,62 +2922,77 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   letter-spacing: 0.03em;
 }
 
-/* Шапка со стрелками. Тонкая линия под ней отделяет заголовки от данных, не
-   вводя ещё одну рамку. Сверху отступа нет: над шапкой уже стоит промежуток
-   карточки, и второй сложился бы с ним в провал.
-
-   Линию несёт и пустая ячейка над подписями строк: без неё черта начиналась
-   с середины карточки и читалась как обрывок, а не как разделитель. */
 .traffic-meter thead th,
 .traffic-meter thead td {
   padding-top: 0;
-  padding-bottom: 3px;
+  padding-bottom: 6px;
   border-bottom: 1px solid var(--glass-border);
 }
 
+.traffic-col-head {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
 .traffic-arrow {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   vertical-align: middle;
 }
 
-/* Направления различаются цветом один раз — в шапке. Дублировать его на всех
-   четырёх числах значило бы раскрасить таблицу без нужды: столбец уже
-   подписан. */
-.traffic-meter thead th:nth-child(2) .traffic-arrow { color: var(--accent-color); }
-.traffic-meter thead th:nth-child(3) .traffic-arrow { color: var(--text-main); }
+.traffic-arrow--down {
+  color: var(--traffic-down, var(--accent-color));
+  filter: drop-shadow(0 0 6px rgb(var(--accent-rgb) / 0.4));
+}
+
+.traffic-arrow--up {
+  color: var(--traffic-up, #c58efc);
+  filter: drop-shadow(0 0 6px rgba(197, 142, 252, 0.4));
+}
 
 .traffic-value {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
 
-/* Единица подчинена числу: мельче и тусклее, но на той же строке — пара
-   читается как одна величина, а не как «число и подпись». */
 .traffic-unit {
   font-size: var(--fs-micro);
   color: var(--text-faint);
   letter-spacing: 0.02em;
+  margin-left: 2px;
 }
 
-/* Скорость — то, на что смотрят; объём за сессию справочен. Разница в весе, а
-   не в цвете: два одинаково ярких ряда спорили бы за внимание. */
-.traffic-row--rate .traffic-value {
-  font-size: var(--fs-subhead);
+/* Скорость — акцентный приборный стиль */
+.traffic-row--rate th {
+  color: var(--text-dim);
   font-weight: 600;
+}
+
+.traffic-row--rate .traffic-value {
+  font-size: var(--fs-heading);
+  font-weight: 700;
   color: var(--text-main);
+  letter-spacing: -0.02em;
+}
+
+.traffic-row--rate td:nth-child(2) .traffic-value {
+  color: var(--accent-soft);
+}
+
+.traffic-row--total th {
+  color: var(--text-faint);
 }
 
 .traffic-row--total .traffic-value {
-  font-size: var(--fs-body);
+  font-size: var(--fs-label);
   color: var(--text-dim);
 }
 
 .traffic-row--total td,
 .traffic-row--total th {
-  padding-top: 3px;
-  /* Низ держит padding карточки — свой добавил бы карточке лишний воздух под
-     последней строкой и сломал бы её симметрию. */
+  padding-top: 6px;
   padding-bottom: 0;
 }
 

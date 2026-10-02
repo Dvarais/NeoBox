@@ -211,7 +211,7 @@ const pingCells = new Map<string, HTMLElement>();
  * pingDisplay — то, как замер выглядит в карточке. Общий для первой отрисовки и
  * для обновления на месте, иначе они разъедутся.
  */
-function pingDisplay(value: PingValue | undefined): { text: string; color: string } {
+export function pingDisplay(value: PingValue | undefined): { text: string; color: string } {
   if (value === -1) return { text: 'Err', color: 'var(--text-dim)' };
   if (value === 'pinging') return { text: '...', color: 'var(--text-dim)' };
   if (typeof value !== 'number') return { text: '—', color: 'var(--text-dim)' };

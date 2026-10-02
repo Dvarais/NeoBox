@@ -29,7 +29,8 @@ import {
     currentSortMode,
     setSortMode,
     setPingData,
-    updateCardPing
+    updateCardPing,
+    pingDisplay
 } from './modules/server-manager';
 import type { SortMode } from './modules/server-manager';
 import { groupConnections } from './modules/grouping';
@@ -93,6 +94,39 @@ let currentLanguage: Language = 'RU';
 let isRestarting = false;
 let appState: AppState = 'off';
 let tunStatusInterval: ReturnType<typeof setInterval> | null = null;
+
+function updateActiveServerPing(): void {
+  const pingEl = optionalEl('activeServerPing');
+  if (!pingEl) return;
+  if (!activeServerLink) {
+    pingEl.style.display = 'none';
+    return;
+  }
+  const pingVal = pingData[activeServerLink];
+  if (pingVal === undefined || pingVal === null) {
+    pingEl.style.display = 'none';
+    return;
+  }
+  const { text, color } = pingDisplay(pingVal);
+  pingEl.style.display = 'inline-flex';
+  pingEl.textContent = text;
+  pingEl.style.color = color;
+}
+
+const activeServerCard = optionalEl('activeServerCard');
+if (activeServerCard) {
+  const openServersTab = () => {
+    const serversTab = document.querySelector<HTMLElement>('.nav-item[data-target="view-servers"]');
+    if (serversTab) serversTab.click();
+  };
+  activeServerCard.addEventListener('click', openServersTab);
+  activeServerCard.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openServersTab();
+    }
+  });
+}
 
 let sessionConnectedAt: number | null = null; // timestamp начала сессии
 let sessionTimerInterval: ReturnType<typeof setInterval> | null = null;
@@ -1007,6 +1041,18 @@ function updateAppInterface(state: AppState) {
     if (tunStatusContainer) tunStatusContainer.style.display = 'none';
   }
 
+  const hintEl = optionalEl('powerStatusHint');
+  if (hintEl) {
+    if (state === 'on') {
+      hintEl.textContent = currentLanguage === 'RU' ? 'Защищённый туннель активен' : 'Secured tunnel active';
+    } else if (state === 'connecting') {
+      hintEl.textContent = currentLanguage === 'RU' ? 'Установка соединения...' : 'Connecting...';
+    } else {
+      hintEl.textContent = currentLanguage === 'RU' ? 'Нажмите для подключения' : 'Press to connect';
+    }
+  }
+  updateActiveServerPing();
+
   // Опрос соединений имеет смысл только при запущенном ядре, а текст плашки
   // отложенных правил зависит от того, есть ли что перезапускать.
   syncConnectionsPolling();
@@ -1497,6 +1543,9 @@ window.api.onStopped(() => {
 // см. pingCells в server-manager.ts. Вписываем результат в одну ячейку.
 window.api.onPingResult((data) => {
   setPingData(data.link, data.latency);
+  if (data.link === activeServerLink) {
+    updateActiveServerPing();
+  }
 
   // Сортировка по задержке — единственный случай, когда новый замер меняет ещё
   // и порядок, так что список приходится собирать заново. Такие перерисовки
