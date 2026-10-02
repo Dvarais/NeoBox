@@ -307,6 +307,7 @@ export function renderCards(
 
     const protoTag = document.createElement('span');
     protoTag.className = 'protocol-tag';
+    protoTag.dataset.proto = displayType.toLowerCase();
     // Инлайновый стиль здесь раньше перебивал класс .protocol-tag и ставил
     // белый текст на сплошном акценте — контраст 2.14:1 при кегле 10px. Класс
     // задаёт акцентный текст на его же полупрозрачной подложке и проходит AA;
@@ -322,7 +323,7 @@ export function renderCards(
     titleH4.appendChild(nameSpan);
 
     const addressP = document.createElement('p');
-    addressP.style.cssText = 'font-size:var(--fs-micro); color:var(--text-dim); margin:2px 0 0;';
+    addressP.style.cssText = 'font-size:var(--fs-micro); color:var(--text-dim); margin:2px 0 0; font-family:var(--font-mono);';
     addressP.textContent = info.address || t.unknownAddress;
 
     infoDiv.appendChild(titleH4);
@@ -342,12 +343,13 @@ export function renderCards(
     // Star toggle button
     const starBtn = document.createElement('button');
     starBtn.type = 'button';
-    starBtn.className = 'server-star';
+    const isFav = favoriteLinks && favoriteLinks.has(link);
+    starBtn.className = `server-star ${isFav ? 'starred' : ''}`;
     // font-size здесь задаёт размер глифа ★/☆, а не кегль текста, поэтому
     // значение литеральное и в шкалу кеглей не входит — как у .server-icon.
     starBtn.style.cssText =
-      'background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:16px; padding:4px; display:flex; align-items:center; transition:color 0.2s;';
-    const isFav = favoriteLinks && favoriteLinks.has(link);
+      'background:none; border:none; cursor:pointer; font-size:16px; padding:4px; display:flex; align-items:center; transition:all 0.2s;';
+    starBtn.style.color = isFav ? 'var(--attention)' : 'var(--text-dim)';
     const starLabel = isFav
       ? t.favoriteRemove
       : t.favoriteAdd;

@@ -216,32 +216,53 @@
 
     <!-- Вкладка СЕРВЕРЫ -->
     <section id="view-servers" class="view" role="tabpanel" aria-labelledby="tab-view-servers">
-      <div class="sub-manage-panel">
-        <!-- Был <h4> перед <h2> «Мои локации» — порядок уровней шёл вниз, а не
-             вверх. Уровень исправлен, кегль зафиксирован на прежних 16px, чтобы
-             вид не поехал. -->
-        <h2 id="subManagementTitle">Управление подписками</h2>
-        <div class="sub-add-row">
-          <!-- aria-label дублирует placeholder: подпись, исчезающая при вводе,
-               не является именем поля. Оба значения ставятся из одного ключа. -->
-          <input type="text" id="subName" placeholder="Имя (например, Основная)" aria-label="Имя (например, Основная)">
-          <input type="text" id="subUrl" placeholder="URL подписки (vless/sub/base64)" aria-label="URL подписки (vless/sub/base64)">
-          <button id="addSubBtn" class="btn-glass">Добавить</button>
+      <div class="sub-manage-panel" id="subManagePanel">
+        <div class="sub-manage-header" id="subManageHeader" role="button" tabindex="0" aria-expanded="false" aria-controls="subManageBody">
+          <div class="sub-manage-title-wrap">
+            <svg class="sub-manage-icon" aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            <h2 id="subManagementTitle">Управление подписками</h2>
+            <span class="sub-manage-badge" id="subManageBadge"></span>
+          </div>
+          <button type="button" id="toggleSubPanelBtn" class="btn-glass btn-icon-only sub-toggle-btn" aria-label="Свернуть / развернуть управление подписками" tabindex="-1">
+            <svg class="sub-toggle-chevron" aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
         </div>
-        <div class="sub-actions-row">
-           <button id="updateSubBtn" class="btn-glass" title="Загрузить свежие серверы для текущей подписки">Обновить текущую</button>
-           <button id="importClipboardBtn" class="btn-glass">Импорт из буфера</button>
-           <button id="importQrBtn" class="btn-glass">Импорт через QR-код</button>
+        <div class="sub-manage-body" id="subManageBody">
+          <div class="sub-add-row">
+            <input type="text" id="subName" placeholder="Имя (например, Основная)" aria-label="Имя (например, Основная)">
+            <input type="text" id="subUrl" placeholder="URL подписки (vless/sub/base64)" aria-label="URL подписки (vless/sub/base64)">
+            <button id="addSubBtn" class="btn-glass">Добавить</button>
+          </div>
+          <div class="sub-actions-row">
+             <button id="updateSubBtn" class="btn-glass" title="Загрузить свежие серверы для текущей подписки">Обновить текущую</button>
+             <button id="importClipboardBtn" class="btn-glass">Импорт из буфера</button>
+             <button id="importQrBtn" class="btn-glass">Импорт через QR-код</button>
+          </div>
         </div>
       </div>
 
-      <div class="section-toolbar section-toolbar--baseline">
-        <div class="section-toolbar-group">
+      <div class="locations-section-header">
+        <div class="locations-title-row">
           <h2 id="myLocationsTitle">Мои локации</h2>
-          <!-- Меню сортировки открывалось только по наведению мыши, то есть с
-               клавиатуры было недостижимо. Теперь у него есть кнопка-триггер с
-               aria-expanded, а открытие продублировано фокусом (см. CSS
-               :focus-within и обработчики в renderer.ts). -->
+          <span class="servers-count-badge" id="serversCountBadge"></span>
+        </div>
+        <div id="subscription-tabs" class="subscription-tabs" role="tablist" aria-label="Вкладки подписок">
+          <!-- Динамические вкладки -->
+        </div>
+        <p id="subStatusLine" class="sub-status-line" role="status"></p>
+      </div>
+
+      <div class="servers-toolbar">
+        <div class="search-field servers-search-field">
+          <svg class="search-field-icon" aria-hidden="true" focusable="false" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input id="serverSearchInput" type="text" placeholder="Поиск серверов..." aria-label="Поиск серверов...">
+          <kbd class="search-kbd" aria-hidden="true">Ctrl K</kbd>
+        </div>
+        <div class="servers-toolbar-actions">
+          <button id="bestServerBtn" class="btn-glass btn-best-server" title="Пинговать все и подключиться к самому быстрому">
+            <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <span id="bestServerBtnText">Лучший сервер</span>
+          </button>
           <div class="sort-dropdown">
             <button type="button" id="sortBtn" class="btn-glass" aria-haspopup="true" aria-expanded="false" aria-controls="sortMenu">
               <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-3 3-3-3"/><path d="M12 3v18"/><path d="m9 6 3-3 3 3"/></svg>
@@ -266,35 +287,15 @@
               </button>
             </div>
           </div>
-        </div>
-        <div class="section-toolbar-actions">
+          <button id="pingAllBtn" class="btn-glass">
+            <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 20h.01"/><path d="M7 20v-4"/><path d="M12 20v-8"/><path d="M17 20V4"/></svg>
+            <span id="pingAllBtnText">Проверить пинг всех</span>
+          </button>
           <button id="dnsLeakBtn" class="btn-glass">
             <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             <span id="dnsLeakBtnText">DNS Leak</span>
           </button>
-          <button id="pingAllBtn" class="btn-glass">Проверить пинг всех</button>
         </div>
-      </div>
-
-      <div id="subscription-tabs">
-        <!-- Динамические вкладки -->
-      </div>
-      <!-- Состояние автообновления выбранной подписки. До него провалившаяся
-           загрузка не оставляла следа нигде, и устаревший список серверов
-           выглядел необъяснимо. role="status" — строка меняется сама, по итогу
-           фоновой загрузки, а не по действию человека. -->
-      <p id="subStatusLine" class="sub-status-line" role="status"></p>
-
-      <!-- Search + Auto-best bar -->
-      <div class="search-row">
-        <div class="search-field">
-          <svg class="search-field-icon" aria-hidden="true" focusable="false" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input id="serverSearchInput" type="text" placeholder="Поиск серверов..." aria-label="Поиск серверов...">
-        </div>
-        <button id="bestServerBtn" class="btn-glass" title="Пинговать все и подключиться к самому быстрому">
-          <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-          <span id="bestServerBtnText">Лучший сервер</span>
-        </button>
       </div>
 
       <div id="serversGrid" class="server-grid" role="list" aria-label="Список серверов">

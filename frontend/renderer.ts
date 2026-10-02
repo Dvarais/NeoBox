@@ -397,6 +397,71 @@ bindHotkeyInput('hotkeyShowInput');
 window.api.onHotkeyToggleConnection(() => powerBtn.click());
 window.api.onHotkeyShowWindow(() => void window.api.bringToFront());
 
+function setSubManagePanelCollapsed(collapsed: boolean) {
+  const panel = optionalEl('subManagePanel');
+  const header = optionalEl('subManageHeader');
+  const toggleBtn = optionalEl<HTMLButtonElement>('toggleSubPanelBtn');
+  if (!panel || !header) return;
+
+  panel.classList.toggle('is-collapsed', collapsed);
+  header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  if (toggleBtn) {
+    toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  }
+}
+
+function syncSubManagePanelBadge() {
+  const badge = optionalEl('subManageBadge');
+  if (badge) {
+    const subCount = allSubscriptions.length;
+    badge.textContent = subCount > 0 ? (currentLanguage === 'RU' ? `${subCount} подп.` : `${subCount} subs`) : '';
+  }
+  const stored = localStorage.getItem('neobox_sub_panel_collapsed');
+  if (stored === null && allSubscriptions.length === 0) {
+    setSubManagePanelCollapsed(false);
+  }
+}
+
+function initSubManagePanel() {
+  const panel = optionalEl('subManagePanel');
+  const header = optionalEl('subManageHeader');
+  const toggleBtn = optionalEl<HTMLButtonElement>('toggleSubPanelBtn');
+  if (!panel || !header) return;
+
+  const toggle = () => {
+    const isCollapsed = panel.classList.contains('is-collapsed');
+    const next = !isCollapsed;
+    setSubManagePanelCollapsed(next);
+    localStorage.setItem('neobox_sub_panel_collapsed', next ? '1' : '0');
+  };
+
+  header.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('input, button, a')) return;
+    toggle();
+  });
+
+  header.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggle();
+    }
+  });
+
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggle();
+    });
+  }
+
+  const stored = localStorage.getItem('neobox_sub_panel_collapsed');
+  if (stored !== null) {
+    setSubManagePanelCollapsed(stored === '1');
+  } else {
+    setSubManagePanelCollapsed(allSubscriptions.length > 0);
+  }
+}
+
 function updateCards() {
     let servers: string[] = [];
     if (currentActiveSubId === 'all') {
@@ -418,6 +483,12 @@ function updateCards() {
             restartBtn.click();
         }
     }, serverSearchQuery, favoriteLinks, onToggleFavorite, translations[currentLanguage]);
+
+    const countBadge = optionalEl('serversCountBadge');
+    if (countBadge) {
+      const count = serversGrid.children.length;
+      countBadge.textContent = count > 0 ? (currentLanguage === 'RU' ? `${count} серв.` : `${count} servers`) : '';
+    }
 
     // Пустое состояние списка. Сообщений два, и выбираются они так, чтобы ни
     // один случай не оказался ложным: «нет подписок» — только когда подписок
@@ -447,6 +518,7 @@ async function loadSubscriptions() {
         }, loadSubscriptions);
         updateCards();
         renderSubStatus(optionalEl('subStatusLine'), translations, currentLanguage);
+        syncSubManagePanelBadge();
     });
 }
 
@@ -584,7 +656,12 @@ function applyLanguage() {
   setTitle('updateSubBtn', t.updateCurrentBtnTitle);
   el('importClipboardBtn').textContent = t.importClipboardBtn;
   el('myLocationsTitle').textContent = t.myLocations;
-  el('pingAllBtn').textContent = t.pingAllBtn;
+  const pingAllText = optionalEl('pingAllBtnText');
+  if (pingAllText) {
+    pingAllText.textContent = t.pingAllBtn;
+  } else {
+    el('pingAllBtn').textContent = t.pingAllBtn;
+  }
   el('sortBtnText').textContent = t.sortBtn;
   setFieldLabel('serverSearchInput', t.serverSearchPlaceholder);
   // Подсказки о сочетаниях живут в title, а не в доступном имени: диктору они
@@ -2873,6 +2950,7 @@ async function init() {
   } else {
     applyLanguage();
   }
+  initSubManagePanel();
   await loadSubscriptions();
   // Второй проход по вкладке: initHistory отрисовал её до того, как подписки
   // были загружены, а карточка сессии ищет по ним ссылку сервера.

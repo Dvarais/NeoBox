@@ -978,36 +978,93 @@ label.check-row,
 /* Servers View */
 .server-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 20px;
-  margin-top: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 14px;
+  margin-top: 0;
 }
 
 .server-card {
-  /* Стекло, а не сплошная заливка: карточка стоит на градиенте, и он должен
-     сквозь неё просвечивать — тогда экран читается как одна стена с
-     плавающими панелями, а не как набор непрозрачных плашек. Та же
-     поверхность, что у таблицы «Передача данных». */
-  background: var(--glass-01);
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, var(--glass-02), var(--glass-01));
   border: 1px solid var(--glass-border);
-  border-radius: 12px;
-  padding: 16px;
+  border-radius: 14px;
+  padding: 14px 16px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.22s ease,
+              background 0.22s ease,
+              box-shadow 0.22s ease;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
-.server-card:hover { border-color: var(--accent-color); transform: translateY(-2px); }
-.server-card.selected { border-color: var(--accent-color); background: var(--accent-wash); }
+.server-card:hover {
+  border-color: rgba(var(--accent-rgb) / 0.45);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgb(var(--shadow-rgb) / 0.35), 0 0 12px var(--accent-wash);
+  background: linear-gradient(135deg, var(--glass-03), var(--glass-02));
+}
 
-.server-card .details { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.server-card .ping { font-size: var(--fs-label); color: var(--text-dim); flex-shrink: 0; }
+.server-card.selected {
+  border-color: var(--accent-color);
+  background: linear-gradient(135deg, var(--accent-wash), var(--glass-02));
+  box-shadow: 0 0 20px var(--accent-wash), 0 4px 18px rgb(var(--shadow-rgb) / 0.4);
+}
 
-/* Кликабельная часть карточки. Кнопка занимает всю карточку кроме звёздочки и
-   не имеет собственного вида: фон, рамку и отступы по-прежнему рисует
-   .server-card. */
+.server-card.selected::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--accent-color);
+  border-radius: 14px 0 0 14px;
+  box-shadow: 0 0 10px var(--accent-color);
+}
+
+.server-card .details {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.server-card .server-icon {
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--glass-01);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 2px 6px rgb(var(--shadow-rgb) / 0.2);
+}
+
+.server-card .ping {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  letter-spacing: 0.2px;
+  transition: all 0.2s ease;
+}
+
+/* Кликабельная часть карточки. */
 .server-card-main {
   flex: 1;
   min-width: 0;
@@ -1025,17 +1082,42 @@ label.check-row,
 }
 
 .server-card-main:focus-visible {
+  outline: 2px solid var(--accent-color);
   outline-offset: 4px;
+  border-radius: 6px;
 }
 
 .server-star {
   flex-shrink: 0;
   margin-left: 8px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.2s ease;
 }
 
-/* Имя сервера приходит из подписки и длину не гарантирует: встречаются строки
-   с рекламой, эмодзи и полным адресом. Без обрезки такая карточка растягивала
-   колонку сетки и ломала ряд. */
+.server-star:hover {
+  color: var(--attention);
+  background: var(--glass-02);
+  transform: scale(1.15);
+}
+
+.server-star.starred {
+  color: var(--attention);
+}
+
+.server-star:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
 .server-card .details > div { min-width: 0; }
 .server-card .details h4 { min-width: 0; }
 
@@ -1046,16 +1128,65 @@ label.check-row,
   white-space: nowrap;
 }
 
+.server-name-text {
+  font-weight: 600;
+  font-size: var(--fs-body);
+  color: var(--text-color);
+}
+
 .protocol-tag {
+  font-family: var(--font-mono);
   font-size: var(--fs-micro);
-  background: var(--accent-fill);
-  color: var(--accent-color);
+  font-weight: 700;
+  letter-spacing: 0.5px;
   padding: 2px 6px;
   border-radius: 4px;
-  margin-right: 6px;
-  font-weight: 600;
+  background: var(--accent-fill);
+  color: var(--accent-color);
+  border: 1px solid rgb(var(--accent-rgb) / 0.25);
   text-transform: uppercase;
   vertical-align: middle;
+  flex-shrink: 0;
+  margin-right: 6px;
+}
+
+.protocol-tag[data-proto="vless"] {
+  background: rgba(14, 165, 233, 0.15);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.protocol-tag[data-proto="vmess"] {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border-color: rgba(192, 132, 252, 0.3);
+}
+
+.protocol-tag[data-proto="trojan"] {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.3);
+}
+
+.protocol-tag[data-proto="shadowsocks"],
+.protocol-tag[data-proto="ss"] {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+.protocol-tag[data-proto="wireguard"],
+.protocol-tag[data-proto="wg"] {
+  background: rgba(236, 72, 153, 0.15);
+  color: #f472b6;
+  border-color: rgba(244, 114, 182, 0.3);
+}
+
+.protocol-tag[data-proto="hysteria2"],
+.protocol-tag[data-proto="hy2"] {
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+  border-color: rgba(129, 140, 248, 0.3);
 }
 
 /* Scrollbar */
@@ -3329,57 +3460,262 @@ input.color-hex {
   display: none;
 }
 
+/* Subscriptions Management Panel (Collapsible) */
 .sub-manage-panel {
-  margin-bottom: 30px;
-  padding: 20px;
+  margin-bottom: 24px;
   background: var(--glass-01);
   border: 1px solid var(--glass-border);
-  border-radius: 12px;
+  border-radius: 14px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  overflow: hidden;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.sub-manage-panel:hover {
+  border-color: rgba(var(--accent-rgb) / 0.35);
+}
+
+.sub-manage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  cursor: pointer;
+  user-select: none;
+  background: transparent;
+  transition: background 0.2s ease;
+}
+
+.sub-manage-header:hover {
+  background: var(--glass-02);
+}
+
+.sub-manage-header:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -2px;
+}
+
+.sub-manage-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sub-manage-icon {
+  color: var(--accent-color);
+  flex-shrink: 0;
 }
 
 #subManagementTitle {
-  margin-bottom: 15px;
+  margin: 0;
+  color: var(--text-color);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.sub-manage-badge {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: 600;
   color: var(--accent-color);
-  font-size: var(--fs-subhead);
+  background: var(--accent-fill);
+  border: 1px solid rgb(var(--accent-rgb) / 0.25);
+  padding: 1px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.2px;
+}
+
+.sub-manage-badge:empty {
+  display: none;
+}
+
+.sub-toggle-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+  background: transparent;
+  transition: all 0.2s ease;
+}
+
+.sub-manage-header:hover .sub-toggle-btn {
+  color: var(--text-color);
+  background: var(--glass-02);
+  border-color: var(--glass-border);
+}
+
+.sub-toggle-chevron {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sub-manage-panel.is-collapsed .sub-toggle-chevron {
+  transform: rotate(-90deg);
+}
+
+.sub-manage-body {
+  padding: 0 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 400px;
+  opacity: 1;
+  transition: max-height 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.25s ease,
+              padding 0.3s ease;
+}
+
+.sub-manage-panel.is-collapsed .sub-manage-body {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.sub-add-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+#subName {
+  flex: 1;
+  min-width: 150px;
+  height: 38px;
+}
+
+#subUrl {
+  flex: 2;
+  min-width: 240px;
+  height: 38px;
 }
 
 #addSubBtn {
   background: var(--accent-color);
   color: var(--on-accent);
-  font-weight: bold;
+  font-weight: 600;
+  height: 38px;
+  padding: 0 18px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgb(var(--accent-rgb) / 0.3);
+  transition: all 0.2s ease;
+}
+
+#addSubBtn:hover {
+  box-shadow: 0 4px 14px rgb(var(--accent-rgb) / 0.5);
+  transform: translateY(-1px);
+}
+
+.sub-actions-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sub-actions-row .btn-glass {
+  padding: 6px 14px;
+  font-size: var(--fs-label);
+  border-radius: 8px;
+}
+
+/* Locations Header & Subscription Tabs */
+.locations-section-header {
+  margin-bottom: 16px;
+}
+
+.locations-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 #myLocationsTitle {
-  margin-bottom: 0;
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
-#sortBtn {
-  padding: 6px 12px;
-  font-size: var(--fs-label);
-  gap: 5px;
+.servers-count-badge {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.2px;
 }
 
-#dnsLeakBtn {
-  padding: 6px 12px;
-  font-size: var(--fs-label);
-}
-
-#pingAllBtn {
-  padding: 6px 12px;
-  font-size: var(--fs-label);
+.servers-count-badge:empty {
+  display: none;
 }
 
 #subscription-tabs {
   display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
+  gap: 8px;
   overflow-x: auto;
-  padding-bottom: 5px;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+}
+
+#subscription-tabs .btn-glass {
+  border-radius: 8px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  white-space: nowrap;
+  padding: 6px 14px;
+  transition: all 0.2s ease;
+}
+
+#subscription-tabs .btn-glass.active {
+  background: var(--accent-wash);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+  font-weight: 600;
+  box-shadow: 0 0 12px var(--accent-wash);
+}
+
+.sub-status-line {
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+  margin: 4px 0 0;
+  min-height: 16px;
+}
+
+/* Unified Servers Command Toolbar */
+.servers-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.servers-search-field {
+  position: relative;
+  flex: 1;
+  min-width: 220px;
+  max-width: 440px;
+  display: flex;
+  align-items: center;
 }
 
 .search-field-icon {
   position: absolute;
-  left: 10px;
+  left: 12px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-dim);
@@ -3387,20 +3723,90 @@ input.color-hex {
   transition: color 0.2s ease;
 }
 
-.search-field:focus-within .search-field-icon {
+.servers-search-field:focus-within .search-field-icon {
   color: var(--accent-color);
 }
 
 #serverSearchInput {
-  padding-left: 34px;
+  padding-left: 36px;
+  padding-right: 68px;
   width: 100%;
+  height: 38px;
   box-sizing: border-box;
+  font-size: var(--fs-label);
+  border-radius: 10px;
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  color: var(--text-color);
+  transition: all 0.2s ease;
+}
+
+#serverSearchInput:focus {
+  background: var(--glass-03);
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.search-kbd {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-faint);
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+  letter-spacing: 0.5px;
+}
+
+.servers-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.servers-toolbar-actions .btn-glass {
+  height: 38px;
+  padding: 0 14px;
+  font-size: var(--fs-label);
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
 }
 
 #bestServerBtn {
-  white-space: nowrap;
-  padding: 6px 14px;
-  font-size: var(--fs-label);
+  color: var(--accent-color);
+  border-color: rgb(var(--accent-rgb) / 0.35);
+  background: var(--accent-wash);
+}
+
+#bestServerBtn:hover {
+  box-shadow: 0 0 16px var(--accent-wash);
+  border-color: var(--accent-color);
+}
+
+#bestServerBtn svg {
+  color: var(--accent-color);
+}
+
+#sortBtn {
+  gap: 6px;
+}
+
+#dnsLeakBtn {
+  gap: 6px;
+}
+
+#pingAllBtn {
+  gap: 6px;
 }
 
 #serversEmpty {
