@@ -568,7 +568,8 @@ main {
 }
 
 .section-toolbar--baseline { align-items: flex-end; }
-.section-toolbar--loose { margin-bottom: 25px; }
+.section-toolbar--loose,
+.view-header { margin-bottom: 25px; }
 .section-toolbar--tight { margin-bottom: 6px; }
 
 .section-toolbar-group { align-items: center; gap: 15px; }
