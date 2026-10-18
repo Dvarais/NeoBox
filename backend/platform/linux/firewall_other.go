@@ -2,10 +2,15 @@
 
 package linux
 
-import "os/exec"
+import (
+	"context"
+	"os/exec"
+	"time"
+)
 
 func runFirewallCmd(name string, args ...string) ([]byte, error) {
-	cmd := exec.Command(name, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
 	return cmd.CombinedOutput()
 }
-

@@ -38,28 +38,46 @@ var bootstrapDoH = []struct{ ip, sni, endpoint string }{
 	{"8.8.8.8", "dns.google", "https://dns.google/resolve"},
 }
 
-// dohClients живут столько же, сколько процесс.
-//
-// Transport на каждый вызов означал бы новое TLS-рукопожатие и брошенное
-// соединение при каждой проверке kill switch и каждом пинге сервера. Приложение
-// сутками висит в трее — накапливалось бы.
-var dohClients = func() []*http.Client {
-	clients := make([]*http.Client, len(bootstrapDoH))
-	for i, provider := range bootstrapDoH {
-		addr := net.JoinHostPort(provider.ip, "443")
-		clients[i] = &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-					return (&net.Dialer{}).DialContext(ctx, network, addr)
+var (
+	dohClientsOnce sync.Once
+	dohClientsList []*http.Client
+)
+
+// getDoHClient returns an http.Client for the given bootstrap DoH provider.
+// Initialized lazily via sync.Once so that roots_windows.go init() has already
+// registered fallback roots and Windows CryptoAPI certificate stores before
+// SecureTLSConfig() is evaluated.
+func getDoHClient(provider int) *http.Client {
+	dohClientsOnce.Do(func() {
+		dohClientsList = make([]*http.Client, len(bootstrapDoH))
+		for i, p := range bootstrapDoH {
+			addr := net.JoinHostPort(p.ip, "443")
+			dohClientsList[i] = &http.Client{
+				Timeout: 4 * time.Second,
+				Transport: &http.Transport{
+					DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+						dialer := &net.Dialer{
+							Timeout:   2 * time.Second,
+							KeepAlive: 30 * time.Second,
+						}
+						return dialer.DialContext(ctx, network, addr)
+					},
+					TLSClientConfig:       SecureTLSConfig(p.sni),
+					TLSHandshakeTimeout:   2 * time.Second,
+					ResponseHeaderTimeout: 2 * time.Second,
+					ExpectContinueTimeout: 1 * time.Second,
+					MaxIdleConns:          10,
+					IdleConnTimeout:       30 * time.Second,
+					ForceAttemptHTTP2:     true,
 				},
-				TLSClientConfig: SecureTLSConfig(provider.sni),
-				MaxIdleConns:    1,
-				IdleConnTimeout: 30 * time.Second,
-			},
+			}
 		}
+	})
+	if provider >= 0 && provider < len(dohClientsList) {
+		return dohClientsList[provider]
 	}
-	return clients
-}()
+	return http.DefaultClient
+}
 
 // dohAttemptTimeout ограничивает один запрос к одному резолверу.
 //
@@ -213,7 +231,7 @@ func dohQuery(ctx context.Context, provider int, host, qtype string) ([]byte, er
 	// разбирать вручную; Google отдаёт JSON и так.
 	req.Header.Set("Accept", "application/dns-json")
 
-	resp, err := dohClients[provider].Do(req)
+	resp, err := getDoHClient(provider).Do(req)
 	if err != nil {
 		return nil, err
 	}

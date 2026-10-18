@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"net"
+	"net/http"
 	"testing"
 	"time"
 )
@@ -173,5 +174,33 @@ func TestResolveRemoteDNSHostLeavesBuiltinsAlone(t *testing.T) {
 
 	if got := remote["server"]; got != "8.8.8.8" {
 		t.Errorf("server = %v, want 8.8.8.8", got)
+	}
+}
+
+func TestDoHClientsConfigurationAndTimeouts(t *testing.T) {
+	for i := range bootstrapDoH {
+		client := getDoHClient(i)
+		if client == nil {
+			t.Fatalf("client for provider %d is nil", i)
+		}
+		if client.Timeout <= 0 {
+			t.Errorf("client %d timeout must be positive, got %v", i, client.Timeout)
+		}
+		tr, ok := client.Transport.(*http.Transport)
+		if !ok || tr == nil {
+			t.Fatalf("client %d transport is not *http.Transport", i)
+		}
+		if tr.TLSClientConfig == nil {
+			t.Fatalf("client %d TLSClientConfig is nil", i)
+		}
+		if tr.TLSClientConfig.ServerName != bootstrapDoH[i].sni {
+			t.Errorf("client %d SNI = %q, want %q", i, tr.TLSClientConfig.ServerName, bootstrapDoH[i].sni)
+		}
+		if tr.TLSHandshakeTimeout <= 0 {
+			t.Errorf("client %d TLSHandshakeTimeout must be positive, got %v", i, tr.TLSHandshakeTimeout)
+		}
+		if tr.ResponseHeaderTimeout <= 0 {
+			t.Errorf("client %d ResponseHeaderTimeout must be positive, got %v", i, tr.ResponseHeaderTimeout)
+		}
 	}
 }
