@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"NeoBox/backend/core"
@@ -111,6 +112,10 @@ type AppService struct {
 	cancelWatchdog context.CancelFunc
 	watchdogLink   string
 	watchdogProxy  bool
+
+	// vpnState atomically tracks the lifecycle phase of the VPN connection
+	// (Disconnected, Connecting, Connected, Disconnecting) to prevent re-entrancy and race conditions.
+	vpnState atomic.Int32
 
 	quitOnce sync.Once
 }
@@ -334,6 +339,8 @@ func (s *AppService) IsQuitting() bool {
 func (s *AppService) Quit() {
 	s.quitOnce.Do(func() {
 		s.SetQuitting(true)
+		s.setVPNState(VPNStateDisconnecting)
+		defer s.setVPNState(VPNStateDisconnected)
 		// Stop the watchdog first
 		s.stopWatchdog()
 		// Stop the auto-update scheduler

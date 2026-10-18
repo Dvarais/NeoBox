@@ -232,6 +232,9 @@ func (s *AppService) startWatchdog(link string, useSystemProxy bool) {
 					return
 				default:
 				}
+				if s.GetVPNState() == VPNStateDisconnecting || s.GetVPNState() == VPNStateDisconnected {
+					return
+				}
 
 				// Переподключение к тому же серверу сессию не прерывает: «За
 				// сессию» продолжает считать с того же места. А вот переход на
@@ -242,9 +245,20 @@ func (s *AppService) startWatchdog(link string, useSystemProxy bool) {
 				// показывали бы новому серверу трафик прошлого.
 				res := s.startCore(savedLink, "", savedProxy, switched)
 				if ok, _ := res["success"].(bool); ok {
-					s.emitSafe("watchdog-reconnected")
-					backoff = watchdogInitialBackoff
-					retryAfter = time.Time{}
+					// Ensure we only transition to Connected if disconnect was not triggered concurrently
+					if s.casVPNState(VPNStateConnecting, VPNStateConnected) || s.casVPNState(VPNStateConnected, VPNStateConnected) {
+						s.emitSafe("watchdog-reconnected")
+						backoff = watchdogInitialBackoff
+						retryAfter = time.Time{}
+					} else {
+						// Disconnect was requested while startCore was running: clean up immediately
+						s.stopWatchdog()
+						s.SetSystemProxy(false)
+						s.disableKillSwitch()
+						_ = s.coreManager.Stop()
+						s.stopLogStream()
+						return
+					}
 				} else {
 					errMsg, _ := res["error"].(string)
 					s.emitSafe("watchdog-failed", errMsg)

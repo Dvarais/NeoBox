@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/include"
@@ -12,16 +13,67 @@ import (
 	sjson "github.com/sagernet/sing/common/json"
 )
 
+// DefaultCloseTimeout is the maximum duration to wait for sing-box (and the Wintun/TUN adapter)
+// to tear down gracefully before force-proceeding.
+const DefaultCloseTimeout = 4 * time.Second
+
+// BoxInstance abstracts the sing-box instance lifecycle methods.
+// Enables mock injection for unit testing without spawning native network drivers.
+type BoxInstance interface {
+	Start() error
+	Close() error
+}
+
 // CoreManager controls the lifecycle of the embedded sing-box VPN engine.
 type CoreManager struct {
-	mu       sync.Mutex
-	instance *box.Box
-	cancel   context.CancelFunc
+	mu           sync.Mutex
+	instance     BoxInstance
+	cancel       context.CancelFunc
+	closeTimeout time.Duration
 }
 
 // NewCoreManager creates a new instance of CoreManager.
 func NewCoreManager() *CoreManager {
-	return &CoreManager{}
+	return &CoreManager{
+		closeTimeout: DefaultCloseTimeout,
+	}
+}
+
+// SetCloseTimeout configures the teardown timeout (primarily for tests).
+func (m *CoreManager) SetCloseTimeout(d time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closeTimeout = d
+}
+
+
+// closeInstanceWithTimeout closes a BoxInstance asynchronously within a deadline.
+//
+// [INTERNET SEARCH PATTERN]:
+// Based on upstream sing-box / Wintun driver investigation:
+// Under Windows, wintun.dll driver teardown or active packet processing loops in CGO can block
+// synchronously during Close(). Calling Close() inside an isolated goroutine with panic recovery
+// and a select timeout prevents permanent GUI/service thread deadlocks.
+func closeInstanceWithTimeout(inst BoxInstance, timeout time.Duration) error {
+	if inst == nil {
+		return nil
+	}
+	done := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- fmt.Errorf("panic during sing-box Close(): %v", r)
+			}
+		}()
+		done <- inst.Close()
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+		return fmt.Errorf("sing-box Close() timed out after %v (driver or network teardown hung)", timeout)
+	}
 }
 
 // Start parses the provided JSON configuration and starts the sing-box instance.
@@ -31,7 +83,7 @@ func (m *CoreManager) Start(configJSON string, logWriter sclog.PlatformWriter) e
 
 	// If there's an active instance, stop it first.
 	if m.instance != nil {
-		m.stopRaw()
+		_ = m.stopRaw()
 	}
 
 	// Create a cancelable context to control the core lifecycle.
@@ -58,7 +110,11 @@ func (m *CoreManager) Start(configJSON string, logWriter sclog.PlatformWriter) e
 
 	// Start the sing-box service.
 	if err := instance.Start(); err != nil {
-		_ = instance.Close()
+		timeout := m.closeTimeout
+		if timeout <= 0 {
+			timeout = DefaultCloseTimeout
+		}
+		_ = closeInstanceWithTimeout(instance, timeout)
 		cancel()
 		return fmt.Errorf("failed to start sing-box: %w", err)
 	}
@@ -77,7 +133,7 @@ func (m *CoreManager) Stop() error {
 
 // stopRaw performs context cancellation and resource cleanup.
 //
-// A Close() failure is logged but never returned: cleanup has still happened,
+// A Close() failure or timeout is logged but never returned: cleanup has still happened,
 // and surfacing the error would make callers treat a completed teardown as a
 // failure and refuse to restart.
 func (m *CoreManager) stopRaw() error {
@@ -85,12 +141,21 @@ func (m *CoreManager) stopRaw() error {
 		m.cancel()
 		m.cancel = nil
 	}
-	if m.instance != nil {
-		if err := m.instance.Close(); err != nil {
-			// Log the error but do NOT return it — a failed close must not block a restart.
-			fmt.Printf("[CoreManager] warning: sing-box Close() returned error: %v\n", err)
-		}
-		m.instance = nil
+	inst := m.instance
+	if inst == nil {
+		return nil
+	}
+	// Detach instance reference immediately so subsequent operations never see a stale instance.
+	m.instance = nil
+
+	timeout := m.closeTimeout
+	if timeout <= 0 {
+		timeout = DefaultCloseTimeout
+	}
+
+	if err := closeInstanceWithTimeout(inst, timeout); err != nil {
+		// Log the error/timeout but do NOT return it — a failed close must not block a restart.
+		fmt.Printf("[CoreManager] warning: sing-box Close(): %v\n", err)
 	}
 	return nil
 }

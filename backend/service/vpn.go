@@ -30,7 +30,46 @@ import (
 // traffic totals start from zero. The watchdog reconnects through startCore
 // instead — see there.
 func (s *AppService) StartXray(link string, settingsJSON string, useSystemProxy bool) map[string]interface{} {
-	return s.startCore(link, settingsJSON, useSystemProxy, true)
+	// [INTERNET SEARCH PATTERN]:
+	// Atomic CAS transition Disconnected -> Connecting.
+	// Reject concurrent attempts or re-entrancy from rapid UI clicks.
+	if !s.casVPNState(VPNStateDisconnected, VPNStateConnecting) {
+		current := s.GetVPNState()
+		return map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("cannot start VPN: already %s", current),
+		}
+	}
+
+	res := s.startCore(link, settingsJSON, useSystemProxy, true)
+	if success, _ := res["success"].(bool); success {
+		// Only transition to Connected if we were not cancelled/disconnected while startCore was running.
+		if !s.casVPNState(VPNStateConnecting, VPNStateConnected) {
+			// A disconnect was requested concurrently while startCore was finishing. Clean up all resources immediately.
+			s.stopWatchdog()
+			s.SetSystemProxy(false)
+			s.disableKillSwitch()
+			s.stateMu.Lock()
+			if s.cancelMonitor != nil {
+				s.cancelMonitor()
+				s.cancelMonitor = nil
+			}
+			s.stateMu.Unlock()
+			_ = s.coreManager.Stop()
+			s.stopLogStream()
+			s.setTrayConnected(false, "")
+			s.emitSafe("xray-stopped", nil)
+			releaseIdleMemory()
+			return map[string]interface{}{
+				"success": false,
+				"error":   "connection aborted: disconnect requested during startup",
+			}
+		}
+	} else {
+		// Startup failed: transition back to Disconnected so the user can retry.
+		s.casVPNState(VPNStateConnecting, VPNStateDisconnected)
+	}
+	return res
 }
 
 // startCore is StartXray with the one decision the watchdog needs to make
@@ -203,6 +242,33 @@ func (s *AppService) startCore(link string, _ string, useSystemProxy bool, newSe
 func (s *AppService) StopXray() map[string]interface{} {
 	response := map[string]interface{}{"success": false}
 
+	// [INTERNET SEARCH PATTERN]:
+	// Atomic CAS loop guarantees thread-safe transition to Disconnecting
+	// and idempotency across rapid repeated clicks or concurrent stop triggers.
+	for {
+		current := s.GetVPNState()
+		switch current {
+		case VPNStateDisconnected:
+			// Already disconnected: return idempotent success without redundant teardown.
+			response["success"] = true
+			return response
+		case VPNStateDisconnecting:
+			response["error"] = "vpn is already disconnecting"
+			return response
+		case VPNStateConnecting, VPNStateConnected:
+			if s.casVPNState(current, VPNStateDisconnecting) {
+				goto executeTeardown
+			}
+			// If CAS failed due to an interleaved state change, loop and re-evaluate.
+		default:
+			response["error"] = fmt.Sprintf("invalid vpn state: %s", current)
+			return response
+		}
+	}
+
+executeTeardown:
+	defer s.setVPNState(VPNStateDisconnected)
+
 	// Stop watchdog first so it doesn't try to restart while we're stopping
 	s.stopWatchdog()
 
@@ -244,6 +310,19 @@ func (s *AppService) StopXray() map[string]interface{} {
 // Unlike calling StopXray + StartXray separately, this preserves the proxy backup
 // state so the user's original proxy settings are correctly restored on final disconnect.
 func (s *AppService) RestartXray(link string, settingsJSON string, useSystemProxy bool) map[string]interface{} {
+	for {
+		current := s.GetVPNState()
+		if current == VPNStateDisconnecting || current == VPNStateConnecting {
+			return map[string]interface{}{
+				"success": false,
+				"error":   fmt.Sprintf("cannot restart VPN: currently %s", current),
+			}
+		}
+		if s.casVPNState(current, VPNStateConnecting) {
+			break
+		}
+	}
+
 	// Stop watchdog before restarting; StartXray will re-launch it.
 	s.stopWatchdog()
 
@@ -262,6 +341,9 @@ func (s *AppService) RestartXray(link string, settingsJSON string, useSystemProx
 	if wCtxRestart != nil {
 		wailsruntime.EventsEmit(wCtxRestart, "xray-stopped", nil)
 	}
+
+	// Reset state to Disconnected so StartXray can acquire Connecting cleanly
+	s.setVPNState(VPNStateDisconnected)
 
 	// Start fresh session — proxy backup is still intact from the original StartXray call.
 	return s.StartXray(link, settingsJSON, useSystemProxy)
