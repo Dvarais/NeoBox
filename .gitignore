@@ -4,29 +4,24 @@
 NeoBox-Go.exe
 NeoBox_Setup_v*.exe
 
-# Wails and Frontend Build Output
+# Linux package releases and standalone archives (stored in GitHub Releases, not git tree)
+*.deb
+*.pkg.tar.zst
+*.tar.gz
+*.tar.xz
 build/bin/
+build/windows/installer/tmp/
 
-# frontend/dist holds the built frontend, which main.go embeds with
-# //go:embed all:frontend/dist. Go's embed fails the build outright when the
-# pattern matches nothing, so a clean clone could not even run `go build ./...`
-# or `go test ./...` until npm had produced the directory. The generated files
-# stay ignored; the placeholder is tracked so the pattern always matches.
-#
-# The placeholder also exists at frontend/public/.gitkeep, which is what keeps
-# it alive: vite empties dist/ on every build and then copies public/ into it,
-# so the tracked copy is restored instead of disappearing from the working tree.
-#
-# Note the trailing /* — with a plain `frontend/dist/` git never descends into
-# the directory and the negation below would have no effect.
+# Frontend Build Output
 frontend/dist/*
 !frontend/dist/.gitkeep
 
-# Runtime artifact left by builds from before InitTray started writing the toast
-# icon into the user data directory. Kept ignored so an old copy in a working
-# tree does not show up as an untracked file; the icons that ship with the app
-# are build/windows/icon.ico and icon-off.ico, and both stay tracked.
+# System and temporary runtime leftovers
 /icon.ico
+*.log
+*.tmp
+dev/null
+null
 
 # Dependency Directories
 node_modules/
@@ -38,7 +33,14 @@ test_user_data/
 .claude/
 .DS_Store
 Thumbs.db
+
+# Internal Documentation, Specifications and Development Tools
 Баги и изменения.txt
+BUGS.md
+PRODUCT.md
+DESIGN.md
+.impeccable/
+dev/
 
 # Go Build and Test Artifacts
 *.test
@@ -50,19 +52,13 @@ Thumbs.db
 *.pem
 private_key*
 
-# Design system record and its sidecar. Оба файла адресованы агентам, а не
-# сборке: DESIGN.md описывает визуальную систему, .impeccable/design.json
-# несёт то, что не помещается в его фронтматтер.
-DESIGN.md
-.impeccable/
-
-# Superpowers and GitHub Workflows
+# Superpowers, IDEs, and GitHub Workflows
 docs/superpowers/
 .github/workflows/
+.vscode/
+.idea/
 
-# makepkg output from building build/linux/PKGBUILD in place.
+# makepkg output from building build/linux/PKGBUILD in place
 build/linux/src/
 build/linux/pkg/
 build/linux/*.pkg.tar.zst
-dev/null
-null
