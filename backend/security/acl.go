@@ -4,6 +4,7 @@ package security
 
 import (
 	"fmt"
+	"os"
 	"sync"
 
 	"golang.org/x/sys/windows"
@@ -35,6 +36,10 @@ import (
 // DACL. "Protected" is the /inheritance:r flag; a single non-inheritable ACE is
 // /grant:r <sid>:F.
 func ProtectFile(path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return err
+	}
+
 	sid, err := currentUserSID()
 	if err != nil {
 		return err
@@ -43,8 +48,8 @@ func ProtectFile(path string) error {
 	acl, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{{
 		AccessPermissions: windows.GENERIC_ALL,
 		AccessMode:        windows.GRANT_ACCESS,
-		// Matches the old icacls invocation, which named no (OI)/(CI) flags: the
-		// ACE applies to this object and is not handed down to children.
+		// Matches icacls invocation (/grant:r <sid>:F): the ACE applies to this
+		// object (file or directory) and is not handed down to children.
 		Inheritance: windows.NO_INHERITANCE,
 		Trustee: windows.TRUSTEE{
 			TrusteeForm:  windows.TRUSTEE_IS_SID,
@@ -55,6 +60,14 @@ func ProtectFile(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to build DACL: %w", err)
 	}
+
+	// [WIN32 MEMORY AUDIT]:
+	// golang.org/x/sys/windows.ACLFromEntries internally calls Win32 SetEntriesInAclW,
+	// copies the generated ACL to Go-managed heap memory, and executes LocalFree
+	// on the unmanaged Win32 buffer before returning.
+	// Therefore, the returned `acl` pointer resides on the Go heap and is safely
+	// garbage-collected. Calling windows.LocalFree on it would corrupt the Win32 heap
+	// (STATUS_HEAP_CORRUPTION / 0xC0000374).
 
 	// PROTECTED_DACL_SECURITY_INFORMATION is the load-bearing half. Without it
 	// the new ACE is merged with whatever the parent directory hands down, and

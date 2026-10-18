@@ -104,6 +104,16 @@ func TestProtectFileOnDirectory(t *testing.T) {
 	if n := countACEs(icacls(t, dir)); n != 1 {
 		t.Errorf("expected exactly 1 ACE on the directory, got %d", n)
 	}
+
+	// Verify child file created inside protected directory inherits the user-only protected DACL
+	childFile := filepath.Join(dir, "update.exe")
+	if err := os.WriteFile(childFile, []byte("installer"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	outChild := icacls(t, childFile)
+	if !strings.Contains(outChild, "(F)") {
+		t.Errorf("child file did not inherit full control permissions:\n%s", outChild)
+	}
 }
 
 func TestProtectFileReportsMissingPath(t *testing.T) {

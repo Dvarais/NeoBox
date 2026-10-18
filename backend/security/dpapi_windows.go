@@ -12,6 +12,9 @@ import (
 // dpapiProtect encrypts data using Windows DPAPI (CryptProtectData).
 // Only the same user account on the same machine can decrypt it.
 func dpapiProtect(data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
 	var dataIn windows.DataBlob
 	dataIn.Size = uint32(len(data))
 	dataIn.Data = &data[0]
@@ -35,6 +38,9 @@ func dpapiProtect(data []byte) ([]byte, error) {
 
 // dpapiUnprotect decrypts data using Windows DPAPI (CryptUnprotectData).
 func dpapiUnprotect(data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
 	var dataIn windows.DataBlob
 	dataIn.Size = uint32(len(data))
 	dataIn.Data = &data[0]
