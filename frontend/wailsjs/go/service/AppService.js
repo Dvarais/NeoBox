@@ -38,6 +38,10 @@ export function FetchSubscription(arg1) {
   return window['go']['service']['AppService']['FetchSubscription'](arg1);
 }
 
+export function GetAppCodename() {
+  return window['go']['service']['AppService']['GetAppCodename']();
+}
+
 export function GetAppVersion() {
   return window['go']['service']['AppService']['GetAppVersion']();
 }
@@ -62,6 +66,10 @@ export function GetSubscriptions() {
   return window['go']['service']['AppService']['GetSubscriptions']();
 }
 
+export function GetVPNState() {
+  return window['go']['service']['AppService']['GetVPNState']();
+}
+
 export function ImportClipboard(arg1) {
   return window['go']['service']['AppService']['ImportClipboard'](arg1);
 }
@@ -70,12 +78,16 @@ export function ImportSettings() {
   return window['go']['service']['AppService']['ImportSettings']();
 }
 
-export function InitTray(arg1) {
-  return window['go']['service']['AppService']['InitTray'](arg1);
+export function InitTray(arg1, arg2) {
+  return window['go']['service']['AppService']['InitTray'](arg1, arg2);
 }
 
 export function IsQuitting() {
   return window['go']['service']['AppService']['IsQuitting']();
+}
+
+export function IsVPNConnected() {
+  return window['go']['service']['AppService']['IsVPNConnected']();
 }
 
 export function MutexHandle() {
@@ -180,6 +192,10 @@ export function StartXray(arg1, arg2, arg3) {
 
 export function StopAutoUpdateScheduler() {
   return window['go']['service']['AppService']['StopAutoUpdateScheduler']();
+}
+
+export function StopGlobalHotkeys() {
+  return window['go']['service']['AppService']['StopGlobalHotkeys']();
 }
 
 export function StopXray() {

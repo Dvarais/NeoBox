@@ -16,6 +16,7 @@ provides=('neobox')
 conflicts=('neobox')
 
 build() {
+    export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.25.7}"
     # If building inside repo or PKGBUILD directory
     if [ -f "$startdir/../../main.go" ]; then
         cd "$startdir/../.."
