@@ -8,10 +8,16 @@ import (
 	"os"
 	"path/filepath"
 
+	"golang.org/x/sys/unix"
+
 	"NeoBox/backend/service"
 )
 
-func closeInstanceHandle(h uintptr) {}
+func closeInstanceHandle(h uintptr) {
+	if h != 0 {
+		_ = unix.Close(int(h))
+	}
+}
 
 func relaunchElevatedIfNeeded(userDataDir string, mutexHandle uintptr) (uintptr, bool) {
 	if service.IsElevated() {
@@ -31,6 +37,11 @@ func relaunchElevatedIfNeeded(userDataDir string, mutexHandle uintptr) (uintptr,
 	}
 	if !settings.TunMode && !settings.KillSwitch {
 		return mutexHandle, false
+	}
+
+	if mutexHandle != 0 {
+		closeInstanceHandle(mutexHandle)
+		mutexHandle = 0
 	}
 
 	if err := service.RelaunchElevated(); err != nil {

@@ -27,7 +27,11 @@ import (
 // currentVersion is the application version. Update this before each release.
 // It lives here rather than inline in CheckUpdates so preparing a release does
 // not depend on remembering to edit a string buried in a function body.
-const currentVersion = "1.9.1"
+const currentVersion = "1.9.2"
+
+// currentCodename is the official build/release code for v1.9.2: "NBX-192-SEC",
+// representing architectural security hardening, zero-leak routing, and Win32/Linux security parity.
+const currentCodename = "NBX-192-SEC"
 
 // maxUpdateSize caps an installer download. The real installer is a few tens of
 // megabytes; the limit only exists so a hostile or broken server cannot stream
@@ -39,6 +43,11 @@ const maxUpdateSize = 256 * 1024 * 1024
 // never drift from the one CheckUpdates compares against the GitHub release.
 func (s *AppService) GetAppVersion() string {
 	return currentVersion
+}
+
+// GetAppCodename exposes the release codename in Go backend services and metadata.
+func (s *AppService) GetAppCodename() string {
+	return currentCodename
 }
 
 // CheckUpdates queries GitHub API to check if a new version is available.

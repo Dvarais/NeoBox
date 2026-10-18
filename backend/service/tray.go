@@ -152,9 +152,17 @@ func (s *AppService) InitTray(iconOn, iconOff []byte) {
 			}()
 
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						fmt.Fprintf(os.Stderr, "[tray] event loop recovered from panic: %v\n", r)
+					}
+				}()
 				for {
 					select {
-					case <-mToggle.ClickedCh:
+					case _, ok := <-mToggle.ClickedCh:
+						if !ok {
+							return
+						}
 						// isWindowVisible asks Windows, not the last thing the
 						// frontend said. That is the whole point: every path that
 						// moved the window without telling us used to leave this
@@ -167,22 +175,40 @@ func (s *AppService) InitTray(iconOn, iconOff []byte) {
 							s.onWindowRestored()
 						}
 
-					case <-mKillSwitch.ClickedCh:
+					case _, ok := <-mKillSwitch.ClickedCh:
+						if !ok {
+							return
+						}
 						s.emitSafe("tray-toggle-setting", "killSwitch")
 
-					case <-mTun.ClickedCh:
+					case _, ok := <-mTun.ClickedCh:
+						if !ok {
+							return
+						}
 						s.emitSafe("tray-toggle-setting", "tunMode")
 
-					case <-mSysProxy.ClickedCh:
+					case _, ok := <-mSysProxy.ClickedCh:
+						if !ok {
+							return
+						}
 						s.emitSafe("tray-toggle-setting", "systemProxy")
 
-					case <-mRestart.ClickedCh:
+					case _, ok := <-mRestart.ClickedCh:
+						if !ok {
+							return
+						}
 						s.emitSafe("tray-restart", nil)
 
-					case <-mDisconnect.ClickedCh:
+					case _, ok := <-mDisconnect.ClickedCh:
+						if !ok {
+							return
+						}
 						s.emitSafe("tray-toggle-connection", nil)
 
-					case <-mQuit.ClickedCh:
+					case _, ok := <-mQuit.ClickedCh:
+						if !ok {
+							return
+						}
 						s.Quit()
 						wCtxQuit := s.context()
 						if wCtxQuit != nil {
@@ -633,7 +659,10 @@ func (s *AppService) applyTrayServers(subs []traySubscription) {
 	// Remove() takes a submenu's children down with it, and removing an already
 	// removed item closes its ClickedCh twice.
 	for _, item := range s.trayServerItems {
-		item.Remove()
+		func(it *systray.MenuItem) {
+			defer func() { _ = recover() }()
+			it.Remove()
+		}(item)
 	}
 	s.trayServerItems = nil
 
@@ -685,6 +714,11 @@ func (s *AppService) applyTrayServers(subs []traySubscription) {
 // ends by itself: Remove closes ClickedCh, so a rebuild collects the listeners
 // of the menu it replaced.
 func (s *AppService) watchTrayServer(item *systray.MenuItem, link string) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "[tray] watchTrayServer recovered from panic: %v\n", r)
+		}
+	}()
 	for range item.ClickedCh {
 		s.SelectAndConnectServer(link)
 	}
@@ -740,7 +774,10 @@ func (s *AppService) applyTrayProfiles(profiles []trayProfile) {
 		return // трей ещё не собран
 	}
 	for _, item := range s.trayProfileItems {
-		item.Remove()
+		func(it *systray.MenuItem) {
+			defer func() { _ = recover() }()
+			it.Remove()
+		}(item)
 	}
 	s.trayProfileItems = nil
 
@@ -760,6 +797,11 @@ func (s *AppService) applyTrayProfiles(profiles []trayProfile) {
 // watchTrayProfile применяет профиль фронтендом: профиль — это набор значений
 // интерфейса, и раскладывать их умеет только он.
 func (s *AppService) watchTrayProfile(item *systray.MenuItem, id string) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "[tray] watchTrayProfile recovered from panic: %v\n", r)
+		}
+	}()
 	for range item.ClickedCh {
 		s.emitSafe("tray-profile-selected", id)
 	}

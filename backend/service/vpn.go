@@ -255,7 +255,7 @@ func (s *AppService) StopXray() map[string]interface{} {
 		case VPNStateDisconnecting:
 			response["error"] = "vpn is already disconnecting"
 			return response
-		case VPNStateConnecting, VPNStateConnected:
+		case VPNStateConnecting, VPNStateConnected, VPNStateReconnecting:
 			if s.casVPNState(current, VPNStateDisconnecting) {
 				goto executeTeardown
 			}
@@ -312,18 +312,18 @@ executeTeardown:
 func (s *AppService) RestartXray(link string, settingsJSON string, useSystemProxy bool) map[string]interface{} {
 	for {
 		current := s.GetVPNState()
-		if current == VPNStateDisconnecting || current == VPNStateConnecting {
+		if current == VPNStateDisconnecting || current == VPNStateConnecting || current == VPNStateReconnecting {
 			return map[string]interface{}{
 				"success": false,
 				"error":   fmt.Sprintf("cannot restart VPN: currently %s", current),
 			}
 		}
-		if s.casVPNState(current, VPNStateConnecting) {
+		if s.casVPNState(current, VPNStateReconnecting) {
 			break
 		}
 	}
 
-	// Stop watchdog before restarting; StartXray will re-launch it.
+	// Stop watchdog before restarting; startCore will re-launch it.
 	s.stopWatchdog()
 
 	// Stop the core and traffic monitor only — do NOT touch system proxy or kill switch.
@@ -342,11 +342,34 @@ func (s *AppService) RestartXray(link string, settingsJSON string, useSystemProx
 		wailsruntime.EventsEmit(wCtxRestart, "xray-stopped", nil)
 	}
 
-	// Reset state to Disconnected so StartXray can acquire Connecting cleanly
-	s.setVPNState(VPNStateDisconnected)
-
-	// Start fresh session — proxy backup is still intact from the original StartXray call.
-	return s.StartXray(link, settingsJSON, useSystemProxy)
+	// Start fresh session directly while holding Reconnecting state
+	res := s.startCore(link, settingsJSON, useSystemProxy, true)
+	if ok, _ := res["success"].(bool); ok {
+		if !s.casVPNState(VPNStateReconnecting, VPNStateConnected) {
+			// Disconnect was requested during restart
+			s.SetSystemProxy(false)
+			s.disableKillSwitch()
+			s.stateMu.Lock()
+			if s.cancelMonitor != nil {
+				s.cancelMonitor()
+				s.cancelMonitor = nil
+			}
+			s.stateMu.Unlock()
+			_ = s.coreManager.Stop()
+			s.stopLogStream()
+			s.setTrayConnected(false, "")
+			s.emitSafe("xray-stopped", nil)
+			releaseIdleMemory()
+			return map[string]interface{}{
+				"success": false,
+				"error":   "restart aborted: disconnect requested",
+			}
+		}
+	} else {
+		// Restart failed: transition back to Disconnected
+		s.casVPNState(VPNStateReconnecting, VPNStateDisconnected)
+	}
+	return res
 }
 
 // PingServer measures round-trip latency to a server: the TCP handshake where
@@ -366,16 +389,26 @@ func (s *AppService) PingServer(link string) int {
 		return -1
 	}
 
+	// Resolve domain name via DoH first to prevent plaintext DNS leak over port 53
+	targetHost := server
+	if net.ParseIP(targetHost) == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if ips, err := core.ResolveHost(ctx, server); err == nil && len(ips) > 0 {
+			targetHost = ips[0].String()
+		}
+		cancel()
+	}
+
 	if core.IsUDPOnly(core.ProtocolOf(link)) {
 		// ICMP times the path to the host rather than the service on the port.
 		// It is the closest thing to a round trip available without performing
 		// the protocol's own handshake, and it returns -1 when the server
 		// filters echo requests — the same "unknown" the caller already handles.
-		return icmpEchoLatency(server, 3*time.Second)
+		return icmpEchoLatency(targetHost, 3*time.Second)
 	}
 
 	// Use net.JoinHostPort so IPv6 addresses are correctly wrapped in brackets: [::1]:port
-	address := net.JoinHostPort(server, strconv.Itoa(port))
+	address := net.JoinHostPort(targetHost, strconv.Itoa(port))
 	start := time.Now()
 	conn, err := net.DialTimeout("tcp", address, 3*time.Second)
 	if err != nil {

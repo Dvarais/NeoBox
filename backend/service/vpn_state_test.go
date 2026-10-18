@@ -20,6 +20,7 @@ func TestVPNState_TransitionsAndString(t *testing.T) {
 		{VPNStateConnecting, "connecting"},
 		{VPNStateConnected, "connected"},
 		{VPNStateDisconnecting, "disconnecting"},
+		{VPNStateReconnecting, "reconnecting"},
 		{VPNState(99), "unknown"},
 	}
 

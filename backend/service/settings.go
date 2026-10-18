@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"NeoBox/backend/core"
@@ -332,6 +333,8 @@ func (s *AppService) GetSettings() string {
 	return string(out)
 }
 
+const maxSettingsPayloadSize = 1024 * 1024 // 1 MB
+
 // SaveSettings splits the incoming settings and writes both halves: credentials
 // encrypted into state.json, everything else as plain, human-readable JSON.
 //
@@ -340,10 +343,40 @@ func (s *AppService) GetSettings() string {
 // absent from settingsJSON means the user cleared it. Anything that saves a
 // partial object would erase their favourites.
 func (s *AppService) SaveSettings(settingsJSON string) bool {
+	if len(settingsJSON) > maxSettingsPayloadSize {
+		fmt.Printf("[SaveSettings] payload size %d exceeds limit of %d bytes\n", len(settingsJSON), maxSettingsPayloadSize)
+		return false
+	}
+
 	var settings map[string]interface{}
 	if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil || settings == nil {
 		fmt.Println("[SaveSettings] refusing to write invalid JSON")
 		return false
+	}
+
+	// Validate custom DNS if provided
+	if dnsVal, ok := settings["customDns"].(string); ok && strings.TrimSpace(dnsVal) != "" {
+		if reason := s.ValidateDNS(dnsVal); reason != "" {
+			fmt.Printf("[SaveSettings] invalid customDns %q: %s\n", dnsVal, reason)
+			return false
+		}
+	}
+
+	// Validate mixed proxy port if provided
+	if mp, ok := settings["mixedPort"]; ok {
+		switch v := mp.(type) {
+		case float64:
+			if v < 1 || v > 65535 {
+				fmt.Printf("[SaveSettings] invalid mixedPort: %v\n", v)
+				return false
+			}
+		case string:
+			p, err := strconv.Atoi(v)
+			if err != nil || p < 1 || p > 65535 {
+				fmt.Printf("[SaveSettings] invalid mixedPort string: %v\n", v)
+				return false
+			}
+		}
 	}
 
 	// Apply autostart update if needed based on settings changes. This touches the

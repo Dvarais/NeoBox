@@ -10,6 +10,7 @@ const (
 	VPNStateConnecting
 	VPNStateConnected
 	VPNStateDisconnecting
+	VPNStateReconnecting
 )
 
 // String returns human-readable representation of VPNState.
@@ -23,6 +24,8 @@ func (s VPNState) String() string {
 		return "connected"
 	case VPNStateDisconnecting:
 		return "disconnecting"
+	case VPNStateReconnecting:
+		return "reconnecting"
 	default:
 		return "unknown"
 	}

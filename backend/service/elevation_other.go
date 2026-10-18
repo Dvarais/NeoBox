@@ -8,9 +8,12 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"golang.org/x/sys/unix"
+
 	"NeoBox/backend/platform"
 	"NeoBox/backend/security"
 )
+
 
 func ExitNow(code uint32) {
 	os.Exit(int(code))
@@ -81,7 +84,33 @@ func (s *AppService) MutexHandle() uintptr {
 	return s.mutexHandle
 }
 
+var activeLockFile *os.File
+
+// AcquireSingleInstanceMutex ensures only one instance runs per user session on Linux/POSIX
+// using an exclusive non-blocking lock on a runtime lockfile.
 func AcquireSingleInstanceMutex() (uintptr, bool) {
-	return 1, false
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+	if runtimeDir == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			runtimeDir = filepath.Join(home, ".config", "neobox")
+		} else {
+			runtimeDir = os.TempDir()
+		}
+	}
+	_ = os.MkdirAll(runtimeDir, 0700)
+	lockPath := filepath.Join(runtimeDir, "neobox.lock")
+
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return 0, false
+	}
+
+	err = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+	if err != nil {
+		_ = f.Close()
+		return 0, true // already running
+	}
+	activeLockFile = f
+	return f.Fd(), false
 }
 

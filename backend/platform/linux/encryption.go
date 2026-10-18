@@ -4,7 +4,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -13,26 +12,20 @@ import (
 	"sync"
 )
 
+// SecurityManager manages encryption on Linux using AES-256-GCM with a per-user
+// key stored in userDataDir with restricted (0600) permissions.
 type SecurityManager struct {
 	mu        sync.RWMutex
 	cachedKey []byte
-}
-
-func (s *SecurityManager) getMachineID() []byte {
-	for _, p := range []string{"/etc/machine-id", "/var/lib/dbus/machine-id"} {
-		if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
-			h := sha256.Sum256(data)
-			return h[:]
-		}
-	}
-	return []byte("neobox-linux-fallback-salt")
 }
 
 func (s *SecurityManager) Init(userDataDir string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_ = os.MkdirAll(userDataDir, 0700)
+	if err := os.MkdirAll(userDataDir, 0700); err != nil {
+		return fmt.Errorf("failed to create secure data directory: %w", err)
+	}
 	keyPath := filepath.Join(userDataDir, "key.dat")
 
 	rawKey, err := os.ReadFile(keyPath)

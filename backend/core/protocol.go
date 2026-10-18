@@ -1,9 +1,11 @@
 package core
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 )
+
 
 // maxLinkLength caps a proxy link or subscription URL. Anything longer is
 // rejected before parsing, so a malformed or hostile entry cannot turn into
@@ -134,17 +136,33 @@ func ServerEndpoint(outbound map[string]interface{}) (string, int) {
 // A port that fails to parse reads as 0, which every caller already treats as
 // "no usable endpoint".
 func portOf(value interface{}) int {
+	var port int
 	switch p := value.(type) {
 	case int:
-		return p
+		port = p
+	case int64:
+		port = int(p)
+	case uint:
+		port = int(p)
+	case uint16:
+		port = int(p)
 	case float64:
-		return int(p)
+		port = int(p)
+	case json.Number:
+		if i, err := p.Int64(); err == nil {
+			port = int(i)
+		}
 	case string:
-		port, err := strconv.Atoi(p)
+		var err error
+		port, err = strconv.Atoi(strings.TrimSpace(p))
 		if err != nil {
 			return 0
 		}
-		return port
+	default:
+		return 0
 	}
-	return 0
+	if port < 1 || port > 65535 {
+		return 0
+	}
+	return port
 }

@@ -4,10 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-# Read version from wails.json or fallback to 1.9.1
-VERSION=$(grep -o '"productVersion": *"[^"]*"' "${ROOT_DIR}/wails.json" 2>/dev/null | cut -d'"' -f4 || echo "1.9.1")
+# Read version from wails.json or fallback to 1.9.2
+VERSION=$(grep -o '"productVersion": *"[^"]*"' "${ROOT_DIR}/wails.json" 2>/dev/null | cut -d'"' -f4 || echo "1.9.2")
 if [ -z "${VERSION}" ]; then
-  VERSION="1.9.1"
+  VERSION="1.9.2"
 fi
 
 PRIVATE_KEY="${PRIVATE_KEY:-}"

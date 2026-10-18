@@ -252,6 +252,13 @@ func (s *AppService) SetGlobalHotkeys(enable bool, toggleCombo, showCombo string
 	return ""
 }
 
+// StopGlobalHotkeys stops the hotkey message loop and unregisters all hotkeys thread-safely.
+func (s *AppService) StopGlobalHotkeys() {
+	hotkeys.mu.Lock()
+	defer hotkeys.mu.Unlock()
+	s.stopHotkeyLoop()
+}
+
 // stopHotkeyLoop просит горутину выйти и дожидается, пока она снимет
 // регистрации. Вызывается под hotkeys.mu.
 func (s *AppService) stopHotkeyLoop() {

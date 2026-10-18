@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -66,7 +67,9 @@ func getDoHClient(provider int) *http.Client {
 					TLSHandshakeTimeout:   2 * time.Second,
 					ResponseHeaderTimeout: 2 * time.Second,
 					ExpectContinueTimeout: 1 * time.Second,
-					MaxIdleConns:          10,
+					MaxIdleConns:          20,
+					MaxIdleConnsPerHost:   10,
+					MaxConnsPerHost:       20,
 					IdleConnTimeout:       30 * time.Second,
 					ForceAttemptHTTP2:     true,
 				},
@@ -112,10 +115,15 @@ var (
 	resolveCache   = map[string]resolveCacheEntry{}
 )
 
+func normaliseHostKey(host string) string {
+	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+}
+
 func cachedHost(host string) []net.IP {
+	norm := normaliseHostKey(host)
 	resolveCacheMu.Lock()
 	defer resolveCacheMu.Unlock()
-	entry, ok := resolveCache[host]
+	entry, ok := resolveCache[norm]
 	if !ok || time.Now().After(entry.expires) {
 		return nil
 	}
@@ -125,6 +133,7 @@ func cachedHost(host string) []net.IP {
 }
 
 func cacheHost(host string, ips []net.IP) {
+	norm := normaliseHostKey(host)
 	resolveCacheMu.Lock()
 	defer resolveCacheMu.Unlock()
 	if len(resolveCache) >= resolveCacheMax {
@@ -138,7 +147,7 @@ func cacheHost(host string, ips []net.IP) {
 			clear(resolveCache)
 		}
 	}
-	resolveCache[host] = resolveCacheEntry{
+	resolveCache[norm] = resolveCacheEntry{
 		ips:     append([]net.IP(nil), ips...),
 		expires: time.Now().Add(resolveCacheTTL),
 	}
@@ -150,6 +159,7 @@ func cacheHost(host string, ips []net.IP) {
 // Готовый IP возвращается как есть: у подписок адрес чаще всего именно такой, и
 // сетевой запрос ради него был бы ни к чему.
 func ResolveHost(ctx context.Context, host string) ([]net.IP, error) {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
 	if ip := net.ParseIP(host); ip != nil {
 		return []net.IP{ip}, nil
 	}
@@ -212,8 +222,7 @@ func dohLookup(ctx context.Context, provider int, host string) []net.IP {
 		body, err := dohQuery(attemptCtx, provider, host, qtype)
 		cancel()
 		if err != nil {
-			// A не прошёл — AAAA по тому же пути не пройдёт тем более.
-			return ips
+			continue
 		}
 		ips = append(ips, parseDoHAnswer(body)...)
 	}

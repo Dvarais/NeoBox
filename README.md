@@ -1,277 +1,234 @@
 # NeoBox
 
-A VPN client for Windows built on the sing-box core, written in Go with a Wails frontend.
+> **Release:** v1.9.2 | **Build Code:** `NBX-192-SEC`  
+> Technical VPN and proxy client on sing-box core. Written in Go and Wails v2.
 
-[English](#english) · [Русский](#русский)
+[English](#english) | [Русский](#русский)
 
 ---
 
 ## English
 
-### What it is
+### System Overview
 
-NeoBox is a desktop client for proxy protocols — you paste a subscription link or a
-single server URL, pick a location, and it routes your traffic through it. The core
-doing the actual work is [sing-box](https://github.com/SagerNet/sing-box); NeoBox is
-the interface around it, plus the Windows-specific parts sing-box does not handle on
-its own: the TUN adapter, the system proxy, firewall rules, the tray icon.
+NeoBox is an open-source proxy and VPN client designed for high-throughput routing, zero-leak network security, and fine-grained traffic dispatching. The network core is built directly on [sing-box](https://github.com/SagerNet/sing-box) runtime libraries in Go. The graphical shell uses [Wails v2](https://wails.io/) with a custom frameless glass interface rendered via hardware acceleration.
 
-The window is frameless with a title bar of its own, so it looks like it belongs on
-Windows 10/11 rather than like a browser in a box. The surfaces inside it are drawn
-by the interface — glass panels over a gradient — rather than by the Windows
-compositor.
+### Architectural Modes
 
-### What it does
+NeoBox supports two distinct operational modes:
 
-**Protocols.** VLESS, VMess, Trojan, Shadowsocks, TUIC, Hysteria, Hysteria 2 and
-WireGuard.
-Servers come from a subscription URL, from your clipboard, or from a QR code — either
-scanned with a webcam or loaded from an image file.
+1. **TUN Adapter Mode (Kernel-level)**: Creates a virtual network adapter via the `Wintun` driver on Windows or `/dev/net/tun` on Linux. All system IP traffic is routed through the sing-box userspace network stack (`gVisor` or `system` engine). Requires elevated privileges (`Administrator` on Windows, `CAP_NET_ADMIN` on Linux).
+2. **System Proxy Mode (Socket-level)**: Runs an internal mixed HTTP and SOCKS5 inbound proxy bound to `127.0.0.1:20809`. Configures OS-level proxy settings for compatible applications without modifying virtual network interfaces.
 
-**Two ways to route traffic.** TUN mode captures everything on the machine through a
-virtual adapter (this needs Administrator rights — Windows will ask). System proxy
-mode is lighter: NeoBox listens on `127.0.0.1:20809` and points Windows at it, which
-covers browsers and most apps that respect the system setting.
+### Supported Protocol Matrix
 
-**Split tunneling.** In TUN mode you can list `.exe` names that should skip the VPN,
-or invert it into a whitelist where only the listed apps go through the tunnel. Useful
-for games and remote desktop.
+| Protocol | Core Transport | Cryptography / Masquerading | Multiplexing |
+|---|---|---|---|
+| **VLESS** | TCP, WebSocket, gRPC, HTTP/2 | Reality, Vision, TLS 1.3 | smux, yamux, h2mux |
+| **VMess** | TCP, WebSocket, gRPC, HTTP/2 | AEAD, VMess-AEAD | smux, yamux |
+| **Trojan** | TCP, WebSocket, gRPC | TLS 1.3, ALPN | smux, yamux |
+| **Shadowsocks** | TCP, UDP | 2022-blake3, AEAD (ChaCha20-Poly1305, AES-GCM) | smux |
+| **Hysteria 2** | UDP (QUIC) | Salamander obfuscation, BBR congestion control | Native QUIC streams |
+| **TUIC** | UDP (QUIC v5) | Custom QUIC handshake, 0-RTT authentication | Native QUIC streams |
+| **WireGuard** | UDP | Noise_IK handshake, Curve25519, ChaCha20-Poly1305 | Multichannel |
 
-**Routing rules.** There is a one-click "bypass Russian blocks" toggle that pulls the
-`geoip-ru` and `geosite-ru` rule sets, a list of domains to always send direct, and a
-custom rules table where you can match a domain, a domain suffix, a keyword or an IP
-range and send it direct, through the proxy, or block it outright. Custom rules win
-over the geo rules.
+### Security Specification (`NBX-192-SEC`)
 
-**Leak protection.** Kill Switch blocks internet access through Windows Firewall if the
-tunnel drops. Separately you can turn on DNS leak protection, IPv6 blocking, and
-FakeDNS. There is also a built-in DNS leak test that shows which resolver your queries
-actually reach.
+The `NBX-192-SEC` release hardens system security, process boundaries, and routing isolation:
 
-**Day-to-day things.** Ping all servers and sort by latency, star favourites, search,
-auto-pick the fastest server, a connection history with per-session traffic and
-duration, a tray menu you can connect from, auto-connect on launch, start minimised,
-launch with Windows. If the connection dies, a watchdog reconnects with backoff instead
-of leaving you offline. Subscriptions refresh themselves once a day. The interface is
-in Russian and English.
+* **Zero-Leak DNS Architecture**:
+  * Dedicated DNS-over-HTTPS (DoH, RFC 8484) connection pool reusing persistent HTTP/2 sessions (`MaxIdleConnsPerHost: 10`, `MaxConnsPerHost: 20`).
+  * Asynchronous, independent resolution for IPv4 (A) and IPv6 (AAAA) records.
+  * Deterministic routing for DNS queries: DNS server IP addresses bypass domain rules, while all application domain queries route via encrypted remote resolvers.
+  * IPv6 leak prevention: unroutable IPv6 endpoints drop silently or route to isolated blackhole destinations.
+* **SSRF and DNS Rebinding Prevention**:
+  * Subscription fetching implements a low-level `net.Dialer.Control` socket hook. Every resolved destination IP address is evaluated at the socket creation level, preventing Time-of-Check to Time-of-Use (TOCTOU) DNS rebinding attacks.
+  * Restricted ranges include loopback (`127.0.0.0/8`), private networks (RFC 1918), link-local (`169.254.0.0/16`), Carrier-Grade NAT (`100.64.0.0/10`), IPv6 Unique Local (`fc00::/7`), link-local (`fe80::/10`), Teredo (`2001::/32`), and 6to4 (`2002::/16`).
+* **Process Boundary and Win32 DACL Hardening**:
+  * Single instance mutex utilizes strict Security Descriptor Definition Language (SDDL): `D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;IU)`. Access is restricted to `SYSTEM`, `Builtin Administrators`, and the active `Interactive User`. World Generic All (`WD:GA`) access is removed.
+  * Linux single instance enforcement relies on non-blocking `unix.Flock` with runtime descriptor pinning.
+* **Firewall and Kill Switch**:
+  * Windows: Native Windows Filtering Platform (WFP) rules blocking outbound traffic outside the active VPN tunnel interface.
+  * Linux: Atomic `nftables` transaction scripting piped via standard input (`nft -f -`). Marker files guarantee rule cleanup upon application restart if a sudden system crash occurs.
+* **Data Protection at Rest**:
+  * Windows: AES-256-GCM encryption with master key protected by Windows Data Protection API (DPAPI).
+  * Linux: AES-256-GCM cipher with key derivation anchored to system machine ID and an isolated per-user private entropy salt with strict `0600` permissions.
+* **Fail-Closed Binary Update Verification**:
+  * Release manifests and binary payloads require verification against an embedded Ed25519 cryptographic public key. Untrusted signatures abort automatic installations immediately.
 
-### Installing
+### Installation
 
-You need Windows 10 or 11. Older versions are out of scope.
+#### Windows (10 / 11, x64)
 
-1. Grab `NeoBox_Setup_v1.7.5.4.exe` from the [Releases](https://github.com/Dvarais/NeoBox/releases)
-   page, or `NeoBox.exe` if you would rather run it without installing.
-2. Run it, then launch the app.
-3. Add a subscription and pick a server.
+* **Installer**: Download `NeoBox_Setup_v1.9.2.exe` from [GitHub Releases](https://github.com/Dvarais/NeoBox/releases) and execute.
+* **Portable**: Download `NeoBox.exe`, place it in a writable directory, and run directly.
+* *Note*: TUN mode automatically triggers a standard UAC elevation prompt to load the bundled `wintun.dll` driver.
 
-If you enable TUN mode, the app will ask for Administrator rights. That is unavoidable:
-creating a virtual network adapter to capture system-wide traffic requires them. The
-`wintun.dll` driver ships with the app and loads by itself — you do not install it
-separately.
+#### Linux (x86_64)
 
-### Security
+* **Arch Linux / Manjaro**:
+  ```bash
+  sudo pacman -U neobox-1.9.2-1-x86_64.pkg.tar.zst
+  # or via AUR helper:
+  yay -S neobox-bin
+  ```
+* **Debian / Ubuntu**:
+  ```bash
+  sudo dpkg -i neobox_1.9.2_amd64.deb
+  sudo apt-get install -f
+  ```
 
-Your subscriptions contain full proxy links: UUIDs, passwords, the lot. NeoBox keeps
-them encrypted at rest with AES-256-GCM, under a key sealed by Windows DPAPI — so the
-files are useless if someone copies them off the machine to a different user or PC. The
-same applies to the last selected server and your favourites, which live in `state.json`.
-`settings.json` stays plain, readable JSON on purpose: it holds toggles, DNS choice and
-routing lists, nothing worth hiding, and you should be able to edit it in Notepad.
+### Build from Source
 
-Updates are verified with an Ed25519 signature before anything is executed, and the
-check is fail-closed: no valid signature means no in-app install, and the app just opens
-the release page instead.
+#### Prerequisites
 
-Kill Switch rules are tracked with a marker file, so a crashed session cannot leave your
-machine firewalled off the internet with no way back — the rules are cleared on the next
-start.
+* Go 1.24 or newer (`go version`)
+* Node.js 18+ and npm
+* Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+* Linux dependencies: `webkit2gtk-4.1`, `gtk3`
 
-### Building from source
-
-You will need:
-
-- Go 1.24 or newer (see `go.mod`)
-- Node.js 16 or newer with npm
-- Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
-
-For development, with hot reload:
+#### Development
 
 ```bash
+# Clone the repository
+git clone https://github.com/Dvarais/NeoBox.git
+cd NeoBox
+
+# Run with hot reload (uTLS enabled)
 wails dev -tags with_utls
 ```
 
-The `with_utls` tag matters — without it sing-box cannot do TLS fingerprint
-masquerading, and a lot of servers expect it.
-
-For a release build with everything switched on:
+#### Production Build
 
 ```bash
+# Compile optimized release binary with full protocol support
 wails build -tags "with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor"
 ```
 
-Binaries land in `build/bin/`.
+The output binary will be written to `build/bin/`.
 
-#### Using the Go toolchain directly
+#### Project Structure
 
-`go build ./...` and `go test ./...` work on a fresh clone. `frontend/dist/` ships a
-tracked `.gitkeep` so the `//go:embed all:frontend/dist` pattern always matches
-something — without it Go refuses to build before npm has ever run.
-
-The catch: a binary built that way contains **no user interface**. Build the frontend
-first if you intend to run it:
-
-```bash
-cd frontend && npm ci && npm run build
-```
-
-`wails build` and `wails dev` do this for you.
-
-#### Project layout
-
-| Directory | What's in it |
+| Path | Responsibility |
 |---|---|
-| `backend/core/` | sing-box lifecycle, config generation, proxy link parsing |
-| `backend/service/` | Wails bindings — settings, subscriptions, updates, tray, watchdog |
-| `backend/security/` | Encryption, Ed25519 signatures, firewall rules, autostart |
-| `backend/storage/` | Encrypted file storage with atomic writes |
-| `backend/i18n/` | Translations for everything rendered in Go (tray, notifications) |
-| `frontend/` | Vanilla JS UI bundled with Vite |
-| `build/` | Icons, Windows manifests, NSIS installer template |
-| `cmd/` | Signing tools: `keygen`, `sign` |
+| `backend/core/` | sing-box runtime integration, config generator, DoH resolver, TLS root pool |
+| `backend/service/` | Wails application bindings, watchdog, state machine, elevation, settings |
+| `backend/security/` | DPAPI, Linux encryption vault, firewall drivers, Ed25519 signature checks |
+| `backend/platform/` | OS-specific drivers: WFP (Windows), nftables (Linux), ICMP ping |
+| `backend/storage/` | Thread-safe encrypted storage with atomic write-temp-rename commits |
+| `frontend/` | Frameless UI written in TypeScript and CSS, bundled with Vite |
+| `build/` | OS packaging: NSIS installer, Arch PKGBUILD, Debian control, application icons |
 
 ---
 
 ## Русский
 
-VPN-клиент для Windows на ядре sing-box, написанный на Go с интерфейсом на Wails.
+### Архитектура и назначение
 
-### Что это
+NeoBox: клиент прокси и VPN с открытым исходным кодом, рассчитанный на высокую пропускную способность, защиту от утечек трафика и гибкую маршрутизацию. Сетевое ядро интегрировано напрямую с библиотеками среды [sing-box](https://github.com/SagerNet/sing-box) на языке Go. Графическая оболочка построена на [Wails v2](https://wails.io/) с кастомным безрамочным интерфейсом, использующим аппаратное ускорение веб-движка.
 
-NeoBox — десктопный клиент для прокси-протоколов: вставляете ссылку на подписку или
-адрес отдельного сервера, выбираете локацию, и трафик идёт через неё. Всю работу с
-протоколами делает [sing-box](https://github.com/SagerNet/sing-box); NeoBox — это
-интерфейс вокруг него плюс то, чем sing-box сам по себе не занимается: TUN-адаптер,
-системный прокси, правила брандмауэра, иконка в трее.
+### Режимы маршрутизации
 
-Окно без стандартной рамки, со своим заголовком — выглядит как приложение для
-Windows 10/11, а не как браузер в коробке. Поверхности внутри рисует сам интерфейс:
-стеклянные панели поверх градиента, а не эффект композитора Windows.
+Клиент поддерживает два режима работы:
 
-### Что умеет
+1. **Режим TUN-адаптера (уровень сетевого ядра)**: создает виртуальный сетевой интерфейс через драйвер `Wintun` в Windows или `/dev/net/tun` в Linux. Весь системный IP-трафик направляется в стек sing-box (`gVisor` или системный стек). Для работы требуются права администратора (`Administrator` в Windows, `CAP_NET_ADMIN` в Linux).
+2. **Режим системного прокси (уровень сокетов приложений)**: запускает локальный комбинированный HTTP и SOCKS5 прокси на адресе `127.0.0.1:20809`. Автоматически настраивает системные параметры прокси в ОС для программ, поддерживающих эти настройки, без создания сетевых интерфейсов.
 
-**Протоколы.** VLESS, VMess, Trojan, Shadowsocks, TUIC, Hysteria, Hysteria 2 и
-WireGuard. Серверы
-добавляются из подписки по URL, из буфера обмена или через QR-код — со сканированием
-камерой или из файла с картинкой.
+### Поддерживаемые протоколы
 
-**Два способа пустить трафик.** TUN-режим перехватывает всё на машине через виртуальный
-адаптер (нужны права администратора, Windows их запросит). Системный прокси — вариант
-полегче: NeoBox слушает `127.0.0.1:20809` и прописывает себя в настройки Windows, чего
-хватает для браузеров и большинства приложений, которые эти настройки уважают.
+| Протокол | Транспорт ядра | Шифрование и маскировка | Мультиплексирование |
+|---|---|---|---|
+| **VLESS** | TCP, WebSocket, gRPC, HTTP/2 | Reality, Vision, TLS 1.3 | smux, yamux, h2mux |
+| **VMess** | TCP, WebSocket, gRPC, HTTP/2 | AEAD, VMess-AEAD | smux, yamux |
+| **Trojan** | TCP, WebSocket, gRPC | TLS 1.3, ALPN | smux, yamux |
+| **Shadowsocks** | TCP, UDP | 2022-blake3, AEAD (ChaCha20-Poly1305, AES-GCM) | smux |
+| **Hysteria 2** | UDP (QUIC) | Маскировка Salamander, контроль перегрузок BBR | Нативные потоки QUIC |
+| **TUIC** | UDP (QUIC v5) | Кастомное рукопожатие QUIC, авторизация 0-RTT | Нативные потоки QUIC |
+| **WireGuard** | UDP | Рукопожатие Noise_IK, Curve25519, ChaCha20-Poly1305 | Многоканальный обмен |
 
-**Раздельное туннелирование.** В TUN-режиме можно перечислить имена `.exe`, которые
-пойдут мимо VPN, либо перевернуть список в белый — тогда через туннель пойдут только
-указанные программы. Удобно для игр и удалённого рабочего стола.
+### Спецификация безопасности (`NBX-192-SEC`)
 
-**Правила маршрутизации.** Есть переключатель обхода российских блокировок в один клик
-(подтягивает наборы правил `geoip-ru` и `geosite-ru`), список доменов, которые всегда
-идут напрямую, и таблица своих правил: домен, суффикс домена, ключевое слово или
-диапазон IP — и действие «напрямую», «через VPN» или «заблокировать». Свои правила
-приоритетнее гео-правил.
+Ревизия `NBX-192-SEC` усиливает защиту сетевого периметра, изоляцию процессов и сохранность локальных данных:
 
-**Защита от утечек.** Kill Switch перекрывает интернет через брандмауэр Windows, если
-туннель оборвался. Отдельно включаются защита от утечек DNS, блокировка IPv6 и FakeDNS.
-Ещё есть встроенный тест на утечку DNS — он показывает, до какого резолвера реально
-доходят ваши запросы.
-
-**Повседневные мелочи.** Пинг всех серверов и сортировка по задержке, избранное, поиск,
-автовыбор самого быстрого сервера, история подключений с трафиком и длительностью каждой
-сессии, меню в трее, из которого можно подключиться, автоподключение при запуске, старт
-свёрнутым, запуск вместе с Windows. Если соединение отвалится, watchdog переподключится
-сам, с нарастающей паузой между попытками, а не оставит вас без сети. Подписки
-обновляются раз в сутки. Интерфейс на русском и английском.
+* **Маршрутизация DNS без утечек**:
+  * Выделенный пул DNS-over-HTTPS (DoH, RFC 8484) с повторным использованием сессий HTTP/2 (`MaxIdleConnsPerHost: 10`, `MaxConnsPerHost: 20`).
+  * Независимое параллельное разрешение записей IPv4 (A) и IPv6 (AAAA).
+  * Разделение маршрутов: IP-адреса DoH-резолверов идут в обход доменных правил, а запросы приложений идут исключительно через зашифрованные удаленные серверы.
+  * Блокировка утечек IPv6: запросы к отключенным или немаршрутизируемым IPv6 сбрасываются без обращения к открытому порту 53.
+* **Защита от атак SSRF и DNS Rebinding**:
+  * При загрузке подписок работает сокетный фильтр `net.Dialer.Control`. Адрес назначения проверяется непосредственно перед системным вызовом соединения, что исключает атаки подмены адреса (TOCTOU).
+  * Заблокированы диапазоны loopback (`127.0.0.0/8`), частные подсети (RFC 1918), link-local (`169.254.0.0/16`), CGNAT (`100.64.0.0/10`), IPv6 Unique Local (`fc00::/7`), link-local (`fe80::/10`), Teredo (`2001::/32`) и 6to4 (`2002::/16`).
+* **Изоляция системных процессов и Win32 DACL**:
+  * Именованный мьютекс единственного экземпляра защищен строгим дескриптором безопасности: `D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;IU)`. Доступ открыт только для `SYSTEM`, встроенных администраторов и текущего интерактивного пользователя. Небезопасный доступ для всех пользователей (`WD:GA`) исключен.
+  * В Linux проверка единственного процесса реализована через неблокирующий вызов `unix.Flock` с закреплением дескриптора в памяти.
+* **Сетевой экран и Kill Switch**:
+  * В Windows: нативные правила Windows Filtering Platform (WFP), отсекающие трафик мимо активного интерфейса туннеля.
+  * В Linux: атомарный пайп правил `nftables` через стандартный ввод (`nft -f -`). Файлы-маркеры гарантируют автоматическую очистку правил при перезапуске после сбоя питания.
+* **Криптографическая защита конфигураций**:
+  * В Windows: шифрование алгоритмом AES-256-GCM с защитой мастер-ключа через Windows DPAPI.
+  * В Linux: шифрование AES-256-GCM с привязкой к machine-id и пользовательской солью энтропии с правами доступа `0600`.
+* **Верификация обновлений**:
+  * Каждый релизный файл проверяется цифровой подписью Ed25519 в режиме отказа по умолчанию (fail-closed). Без валидной подписи установка не запускается.
 
 ### Установка
 
-Нужна Windows 10 или 11. Более старые версии вне области поддержки.
+#### Windows (10 и 11, x64)
 
-1. Скачайте `NeoBox_Setup_v1.7.5.4.exe` со страницы
-   [Releases](https://github.com/Dvarais/NeoBox/releases) или `NeoBox.exe`, если
-   предпочитаете портативный вариант без установки.
-2. Запустите установщик, затем само приложение.
-3. Добавьте подписку и выберите сервер.
+* **Установщик**: скачайте файл `NeoBox_Setup_v1.9.2.exe` со страницы [GitHub Releases](https://github.com/Dvarais/NeoBox/releases) и запустите установку.
+* **Портативная версия**: скачайте `NeoBox.exe`, положите в отдельную папку и запускайте напрямую.
+* При включении TUN-режима появится стандартный запрос UAC Windows для загрузки драйвера `wintun.dll`.
 
-При включении TUN-режима приложение попросит права администратора. Без них никак:
-создание виртуального сетевого адаптера для перехвата системного трафика их требует.
-Драйвер `wintun.dll` идёт в комплекте и загружается сам — отдельно ставить не нужно.
+#### Linux (x86_64)
 
-### Безопасность
-
-В подписках лежат полные прокси-ссылки: UUID, пароли, всё сразу. NeoBox хранит их на
-диске зашифрованными (AES-256-GCM) под ключом, запечатанным через Windows DPAPI — то
-есть файлы бесполезны, если их скопировать на другую машину или к другому пользователю.
-То же касается последнего выбранного сервера и избранного, они лежат в `state.json`.
-`settings.json` намеренно остаётся обычным читаемым JSON: там переключатели, выбор DNS
-и списки маршрутизации — ничего, что стоило бы прятать, и это должно нормально
-правиться в блокноте.
-
-Обновления проверяются подписью Ed25519 до того, как что-либо будет запущено, причём
-проверка fail-closed: нет валидной подписи — нет установки внутри приложения, вместо
-неё просто откроется страница релиза.
-
-Правила Kill Switch помечаются файлом-маркером, поэтому упавшая сессия не оставит машину
-отрезанной от интернета без возможности это откатить — правила снимутся при следующем
-запуске.
+* **Arch Linux / Manjaro**:
+  ```bash
+  sudo pacman -U neobox-1.9.2-1-x86_64.pkg.tar.zst
+  # либо через AUR:
+  yay -S neobox-bin
+  ```
+* **Debian / Ubuntu**:
+  ```bash
+  sudo dpkg -i neobox_1.9.2_amd64.deb
+  sudo apt-get install -f
+  ```
 
 ### Сборка из исходников
 
-Понадобится:
+#### Требования к окружению
 
-- Go 1.24 или новее (см. `go.mod`)
-- Node.js 16 или новее и npm
-- Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+* Компилятор Go версии 1.24 или новее
+* Платформа Node.js 18+ и пакетный менеджер npm
+* Утилита Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+* Библиотеки в Linux: `webkit2gtk-4.1`, `gtk3`
 
-Режим разработки с горячей перезагрузкой:
+#### Запуск в режиме разработки
 
 ```bash
+# Клонирование репозитория
+git clone https://github.com/Dvarais/NeoBox.git
+cd NeoBox
+
+# Запуск с горячей перезагрузкой и поддержкой uTLS
 wails dev -tags with_utls
 ```
 
-Тег `with_utls` важен: без него sing-box не умеет маскировать отпечаток TLS, а этого
-ждут многие серверы.
-
-Релизная сборка со всем включённым:
+#### Сборка релизного бинарника
 
 ```bash
+# Полная сборка со всеми сетевыми протоколами
 wails build -tags "with_utls,with_clash_api,with_quic,with_wireguard,with_gvisor"
 ```
 
-Результат складывается в `build/bin/`.
+Скомпилированный файл появится в каталоге `build/bin/`.
 
-#### Работа напрямую через Go
+#### Структура репозитория
 
-`go build ./...` и `go test ./...` работают на свежем клоне. В `frontend/dist/` лежит
-отслеживаемый `.gitkeep`, чтобы шаблону `//go:embed all:frontend/dist` всегда было что
-найти — без него Go прерывает сборку ещё до того, как запускался npm.
-
-Нюанс: собранный так бинарник **не содержит интерфейса**. Если собираетесь его
-запускать, сначала соберите фронтенд:
-
-```bash
-cd frontend && npm ci && npm run build
-```
-
-`wails build` и `wails dev` делают это за вас.
-
-#### Структура проекта
-
-| Каталог | Что внутри |
+| Каталог | Назначение |
 |---|---|
-| `backend/core/` | Жизненный цикл sing-box, генерация конфига, разбор прокси-ссылок |
-| `backend/service/` | Биндинги Wails — настройки, подписки, обновления, трей, watchdog |
-| `backend/security/` | Шифрование, подписи Ed25519, правила брандмауэра, автозапуск |
-| `backend/storage/` | Шифрованное хранилище файлов с атомарной записью |
-| `backend/i18n/` | Переводы для всего, что рисуется на стороне Go (трей, уведомления) |
-| `frontend/` | Интерфейс на чистом JS, собирается через Vite |
-| `build/` | Иконки, манифесты Windows, шаблон установщика NSIS |
-| `cmd/` | Утилиты подписи: `keygen`, `sign` |
+| `backend/core/` | Интеграция среды sing-box, генерация конфигураций, резолвер DoH, сертификаты TLS |
+| `backend/service/` | Сервисный слой Wails, сторожевой таймер, автомат состояний VPN, настройки |
+| `backend/security/` | Подсистемы DPAPI, хранилище ключей Linux, сетевой экран, подписи Ed25519 |
+| `backend/platform/` | Системные драйверы платформ: WFP (Windows), nftables (Linux), ICMP-пинг |
+| `backend/storage/` | Потокобезопасное хранилище с атомарной записью через временные файлы |
+| `frontend/` | Безрамочный интерфейс на TypeScript и CSS, собираемый через Vite |
+| `build/` | Пакеты сборщика: NSIS для Windows, PKGBUILD для Arch, control для Debian |

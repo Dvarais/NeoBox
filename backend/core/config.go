@@ -1404,12 +1404,6 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		case "ip_cidr":
 			ruleEntry["ip_cidr"] = []string{rule.Value}
 		case "process":
-			// Правило по программе применимо только когда ядро видит владельца
-			// сокета, то есть в TUN-режиме — ровно то же ограничение, что у
-			// раздельного туннелирования ниже. Вне TUN правило не «работает
-			// хуже», оно не совпадает никогда, поэтому лучше не выпускать его в
-			// конфиг вовсе: иначе оно молча занимало бы место перед
-			// ip_is_private и bypass-RU, ничего при этом не делая.
 			if !tunMode {
 				continue
 			}
@@ -1425,17 +1419,11 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 	}
 
 	// Process routing (split tunneling) and exclusion rules order:
-	//
-	// In sing-box, routing rules are evaluated sequentially in top-to-bottom order.
 	// 1. Blacklist process mode routes specified processes direct immediately.
-	// 2. Local & private IPs (ip_is_private: true) MUST be routed direct BEFORE
-	//    any whitelist process rule is evaluated. Otherwise, a whitelisted application
-	//    (such as a web browser) will have its connections to 192.168.x.x, 10.x.x.x,
-	//    or local routers routed into the remote VPN tunnel and dropped.
-	// 3. Bypass Russia (rule-sets geoip-ru / geosite-category-ru) routes direct before
-	//    whitelist so whitelisted applications can reach Russian sites directly.
-	// 4. Whitelist process mode routes named processes to the VPN outbound (outboundTag),
-	//    leaving a catch-all at the end for unlisted processes.
+	// 2. Local & private IPs (ip_is_private: true) route direct BEFORE whitelist
+	//    so LAN/gateway remain reachable.
+	// 3. Bypass Russia (rule-sets geoip-ru / geosite-category-ru) routes direct.
+	// 4. Whitelist process mode routes named processes to the VPN outbound (outboundTag).
 	// 5. FakeIP CIDR rule directs synthetic 198.18.0.0/15 addresses into the tunnel.
 	// 6. Whitelist catch-all routes all remaining traffic direct.
 
@@ -1447,9 +1435,6 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		})
 	}
 
-	// [INTERNET SEARCH PATTERN]
-	// Local and private IPs must be placed before process whitelist rules to keep
-	// LAN, default gateway, and local services accessible to whitelisted browsers/apps.
 	routeRules = append(routeRules, map[string]interface{}{
 		"ip_is_private": true,
 		"action":        "route",
@@ -1519,6 +1504,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			}
 		}
 	}
+	dnsRules := []map[string]interface{}{firstDNSRule}
 	if ip := net.ParseIP(cleanHost); ip != nil {
 		cidr := cleanHost + "/32"
 		if ip.To4() == nil {
@@ -1526,9 +1512,11 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		} else {
 			cidr = ip.To4().String() + "/32"
 		}
-		firstDNSRule["ip_cidr"] = []string{cidr}
+		dnsRules = append(dnsRules, map[string]interface{}{
+			"ip_cidr": []string{cidr},
+			"server":  "dns-direct",
+		})
 	}
-	dnsRules := []map[string]interface{}{firstDNSRule}
 	if settings.BypassRu {
 		// RU names are resolved outside the tunnel, because their traffic leaves
 		// outside it: an address chosen by the remote resolver points at the
@@ -1548,8 +1536,8 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			"server":     "dns-fake",
 		})
 	} else if boolDefault(settings.Ipv6LeakProtection, true) {
-		// When IPv6 leak protection is on and fakeip is not used, reject AAAA queries
-		// via dns-remote to prevent out-of-tunnel IPv6 DNS leaks.
+		// When IPv6 leak protection is on and fakeip is not used, route AAAA queries
+		// through dns-remote so they cannot escape the tunnel into local network.
 		dnsRules = append(dnsRules, map[string]interface{}{
 			"query_type": []string{"AAAA"},
 			"action":     "route",
@@ -1749,7 +1737,9 @@ var restrictedCIDRs = []string{
 	"ff00::/8",           // Multicast (RFC 4291)
 	"64:ff9b::/96",       // IPv4/IPv6 translation (RFC 6052)
 	"100::/64",           // Discard prefix (RFC 6666)
+	"2001::/32",          // Teredo tunneling prefix (RFC 4380)
 	"2001:db8::/32",      // Documentation (RFC 3849)
+	"2002::/16",          // 6to4 prefix (RFC 3056)
 }
 
 var restrictedIPNets []*net.IPNet

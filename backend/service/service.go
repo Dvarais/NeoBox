@@ -343,6 +343,16 @@ func (s *AppService) Quit() {
 		defer s.setVPNState(VPNStateDisconnected)
 		// Stop the watchdog first
 		s.stopWatchdog()
+		// Cancel background traffic monitor and log streamer
+		s.stateMu.Lock()
+		if s.cancelMonitor != nil {
+			s.cancelMonitor()
+			s.cancelMonitor = nil
+		}
+		s.stateMu.Unlock()
+		s.stopLogStream()
+		// Stop global hotkey message loop
+		s.StopGlobalHotkeys()
 		// Stop the auto-update scheduler
 		s.StopAutoUpdateScheduler()
 		// Safe shutdown of VPN processes

@@ -148,7 +148,10 @@ func (s *AppService) startWatchdog(link string, useSystemProxy bool) {
 				// upstream at all. Recreating sing-box (TUN adapter, interface
 				// monitor, DNS transports) against a dead network cannot succeed,
 				// and repeating it is what turns a brief outage into a crash loop.
-				serverAnswers := upstream == "" || probeUpstream(ctx, upstream)
+				s.watchdogMu.Lock()
+				currentLink := s.watchdogLink
+				s.watchdogMu.Unlock()
+				serverAnswers := upstream == "" || probeUpstream(ctx, currentLink, upstream)
 
 				// Сменили ли мы узел на этом такте. От этого зависит, считается
 				// ли перезапуск ниже началом новой сессии.
@@ -217,6 +220,10 @@ func (s *AppService) startWatchdog(link string, useSystemProxy bool) {
 				savedLink := s.watchdogLink
 				savedProxy := s.watchdogProxy
 				s.watchdogMu.Unlock()
+
+				// Transition to Reconnecting state
+				s.casVPNState(VPNStateConnected, VPNStateReconnecting)
+
 				// Restart without touching system proxy backup or kill switch
 				_ = s.coreManager.Stop()
 				s.stateMu.Lock()
@@ -229,6 +236,7 @@ func (s *AppService) startWatchdog(link string, useSystemProxy bool) {
 				// Verify we haven't been cancelled (disconnected by user) while stopping the core
 				select {
 				case <-ctx.Done():
+					s.casVPNState(VPNStateReconnecting, VPNStateDisconnected)
 					return
 				default:
 				}
@@ -246,7 +254,7 @@ func (s *AppService) startWatchdog(link string, useSystemProxy bool) {
 				res := s.startCore(savedLink, "", savedProxy, switched)
 				if ok, _ := res["success"].(bool); ok {
 					// Ensure we only transition to Connected if disconnect was not triggered concurrently
-					if s.casVPNState(VPNStateConnecting, VPNStateConnected) || s.casVPNState(VPNStateConnected, VPNStateConnected) {
+					if s.casVPNState(VPNStateReconnecting, VPNStateConnected) || s.casVPNState(VPNStateConnecting, VPNStateConnected) || s.casVPNState(VPNStateConnected, VPNStateConnected) {
 						s.emitSafe("watchdog-reconnected")
 						backoff = watchdogInitialBackoff
 						retryAfter = time.Time{}
@@ -262,8 +270,13 @@ func (s *AppService) startWatchdog(link string, useSystemProxy bool) {
 				} else {
 					errMsg, _ := res["error"].(string)
 					s.emitSafe("watchdog-failed", errMsg)
-					retryAfter = time.Now().Add(backoff)
-					backoff = nextWatchdogBackoff(backoff)
+					s.stopWatchdog()
+					s.SetSystemProxy(false)
+					s.disableKillSwitch()
+					s.setTrayConnected(false, "")
+					s.stopLogStream()
+					s.casVPNState(VPNStateReconnecting, VPNStateDisconnected)
+					return
 				}
 			}
 		}
@@ -370,6 +383,19 @@ func pickLiveServer(ctx context.Context, candidates []string) string {
 		wg.Add(1)
 		go func(link, addr string) {
 			defer wg.Done()
+			if core.IsUDPOnly(core.ProtocolOf(link)) {
+				host, _, _ := net.SplitHostPort(addr)
+				if host == "" {
+					host = addr
+				}
+				if icmpEchoLatency(host, watchdogCandidateTimeout) >= 0 {
+					select {
+					case found <- link:
+					default:
+					}
+				}
+				return
+			}
 			var dialer net.Dialer
 			conn, err := dialer.DialContext(probeCtx, "tcp", addr)
 			if err != nil {
@@ -378,7 +404,10 @@ func pickLiveServer(ctx context.Context, candidates []string) string {
 			_ = conn.Close()
 			// Буфер рассчитан на всех, поэтому отправка не заблокируется даже
 			// если победитель уже определён и читать никто не будет.
-			found <- link
+			select {
+			case found <- link:
+			default:
+			}
 		}(link, addr)
 	}
 
@@ -413,9 +442,19 @@ func upstreamProbeAddr(link string) string {
 	return net.JoinHostPort(host, strconv.Itoa(port))
 }
 
-// probeUpstream reports whether the VPN server accepts a direct TCP connection,
+// probeUpstream reports whether the VPN server accepts a direct connection,
 // which is the signal that the machine has real connectivity again.
-func probeUpstream(ctx context.Context, addr string) bool {
+// For TCP protocols, it dials TCP; for UDP-only protocols (WireGuard, TUIC, Hysteria),
+// it performs an ICMP echo check.
+func probeUpstream(ctx context.Context, link, addr string) bool {
+	if link != "" && core.IsUDPOnly(core.ProtocolOf(link)) {
+		host, _, _ := net.SplitHostPort(addr)
+		if host == "" {
+			host = addr
+		}
+		return icmpEchoLatency(host, watchdogUpstreamTimeout) >= 0
+	}
+
 	dialCtx, cancel := context.WithTimeout(ctx, watchdogUpstreamTimeout)
 	defer cancel()
 

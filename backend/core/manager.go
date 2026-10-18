@@ -110,12 +110,12 @@ func (m *CoreManager) Start(configJSON string, logWriter sclog.PlatformWriter) e
 
 	// Start the sing-box service.
 	if err := instance.Start(); err != nil {
+		cancel()
 		timeout := m.closeTimeout
 		if timeout <= 0 {
 			timeout = DefaultCloseTimeout
 		}
 		_ = closeInstanceWithTimeout(instance, timeout)
-		cancel()
 		return fmt.Errorf("failed to start sing-box: %w", err)
 	}
 

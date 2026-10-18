@@ -80,7 +80,7 @@ if (typeof window !== 'undefined') {
     (window as any).go = {
       service: {
         AppService: {
-          GetAppVersion: async () => '1.9.1',
+          GetAppVersion: async () => '1.9.2',
           GetSettings: async () => {
             const raw = localStorage.getItem(mockStorageKey);
             return raw ? JSON.parse(raw) : {

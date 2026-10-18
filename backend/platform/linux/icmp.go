@@ -1,8 +1,10 @@
 package linux
 
 import (
+	"context"
 	"net"
 	"os/exec"
+	"strconv"
 	"time"
 )
 
@@ -17,18 +19,16 @@ func (p *Prober) Ping(host string, timeout time.Duration) int {
 		return int(time.Since(start).Milliseconds())
 	}
 
-	// 2. Try unprivileged ping socket (udp4 datagram ICMP)
-	pStart := time.Now()
-	pConn, err := net.DialTimeout("udp4", net.JoinHostPort(host, "0"), timeout)
-	if err == nil {
-		_ = pConn.Close()
-		return int(time.Since(pStart).Milliseconds())
-	}
-
-	// 3. Fallback to system ping
-	if _, err := exec.LookPath("ping"); err == nil {
+	// 2. Real ICMP echo via system ping with context deadline
+	if pingPath, err := exec.LookPath("ping"); err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		timeoutSec := strconv.Itoa(int(timeout.Seconds()))
+		if timeoutSec == "0" {
+			timeoutSec = "1"
+		}
 		cStart := time.Now()
-		cmd := exec.Command("ping", "-c", "1", "-W", "1", host)
+		cmd := exec.CommandContext(ctx, pingPath, "-c", "1", "-W", timeoutSec, host)
 		if err := cmd.Run(); err == nil {
 			return int(time.Since(cStart).Milliseconds())
 		}

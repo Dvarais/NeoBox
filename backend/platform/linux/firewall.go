@@ -148,12 +148,10 @@ func (f *FirewallManager) EnableKillSwitch(serverHost string) error {
 
 func (f *FirewallManager) enableNftables(serverIPs []string) error {
 	rules := BuildNftablesRules(serverIPs)
-	for _, rule := range rules {
-		args := strings.Fields(rule)
-		if out, err := runFirewallCmd("nft", args...); err != nil {
-			_ = f.DisableKillSwitch()
-			return fmt.Errorf("nft %s failed: %w (output: %s)", rule, err, string(out))
-		}
+	script := strings.Join(rules, "\n") + "\n"
+	if out, err := runFirewallCmdInput([]byte(script), "nft", "-f", "-"); err != nil {
+		_ = f.DisableKillSwitch()
+		return fmt.Errorf("nft -f - failed: %w (output: %s)", err, string(out))
 	}
 	return nil
 }
@@ -178,6 +176,22 @@ func (f *FirewallManager) enableIptables(serverIPs []string) error {
 	}
 
 	return nil
+}
+
+func (f *FirewallManager) RulesPresent() bool {
+	if _, err := exec.LookPath("nft"); err == nil {
+		out, err := runFirewallCmd("nft", "list", "table", "inet", "neobox_killswitch")
+		if err == nil && len(out) > 0 {
+			return true
+		}
+	}
+	if _, err := exec.LookPath("iptables"); err == nil {
+		_, err := runFirewallCmd("iptables", "-w", "2", "-C", "OUTPUT", "-j", "NEOBOX_KILLSWITCH")
+		if err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *FirewallManager) DisableKillSwitch() error {

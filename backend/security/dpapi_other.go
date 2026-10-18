@@ -3,8 +3,10 @@
 package security
 
 import (
+	"crypto/rand"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -40,6 +42,20 @@ func getMachineSecret() string {
 	parts = append(parts, fmt.Sprintf("uid:%d", os.Getuid()))
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		parts = append(parts, home)
+		// 4. Per-user private entropy salt with strict 0600 permissions,
+		// preventing other local users from reconstructing the secret.
+		saltDir := filepath.Join(home, ".config", "neobox")
+		saltPath := filepath.Join(saltDir, ".vault_entropy")
+		if salt, err := os.ReadFile(saltPath); err == nil && len(salt) >= 16 {
+			parts = append(parts, string(salt))
+		} else {
+			_ = os.MkdirAll(saltDir, 0700)
+			rnd := make([]byte, 32)
+			if _, err := rand.Read(rnd); err == nil {
+				_ = os.WriteFile(saltPath, rnd, 0600)
+				parts = append(parts, string(rnd))
+			}
+		}
 	}
 
 	// Domain separation constant

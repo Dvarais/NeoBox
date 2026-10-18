@@ -156,11 +156,12 @@ func (s *AppService) MutexHandle() uintptr {
 	return s.mutexHandle
 }
 
-// createMutexSecurityAttributes returns a SECURITY_ATTRIBUTES structure allowing
-// full control to Everyone and Authenticated Users. This allows cross-integrity
-// (unelevated <-> elevated) mutex visibility.
+// createMutexSecurityAttributes returns a SECURITY_ATTRIBUTES structure granting
+// access to Local System, Administrators, and Interactive Users (current desktop session).
+// This eliminates the insecure Everyone (WD) grant while preserving cross-integrity
+// (unelevated <-> elevated) mutex visibility for the user's session.
 func createMutexSecurityAttributes() *windows.SecurityAttributes {
-	sd, err := windows.SecurityDescriptorFromString("D:(A;;GA;;;WD)(A;;GA;;;AU)")
+	sd, err := windows.SecurityDescriptorFromString("D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;IU)")
 	if err != nil {
 		return nil
 	}
@@ -189,26 +190,23 @@ func isMutexExisting(name string) bool {
 }
 
 // AcquireSingleInstanceMutex creates a Windows named mutex to ensure only one
-// instance of NeoBox runs at a time. It checks both Global\ and Local\ namespaces
-// to prevent duplicate instances across integrity levels (unelevated vs elevated).
+// instance of NeoBox runs at a time. It uses Global\ (or Local\ fallback) with
+// atomic Win32 CreateMutex semantics.
 func AcquireSingleInstanceMutex() (uintptr, bool) {
 	const globalName = "Global\\NeoBox-SingleInstance-Mutex"
 	const localName = "Local\\NeoBox-SingleInstance-Mutex"
 
-	// 1. Check if an instance is already running under either namespace
-	if isMutexExisting(globalName) || isMutexExisting(localName) {
+	// 1. Try Global\ first (atomic creation or detection if already running)
+	h, already := createSingleInstanceMutex(globalName)
+	if already {
 		return 0, true
 	}
-
-	// 2. Try creating in Global\ first (succeeds if elevated or permitted)
-	if handle, already := createSingleInstanceMutex(globalName); already {
-		return 0, true
-	} else if handle != 0 {
-		return uintptr(handle), false
+	if h != 0 {
+		return uintptr(h), false
 	}
 
-	// 3. Fallback to Local\ if Global\ failed (e.g. unelevated without SeCreateGlobalPrivilege)
-	h, already := createSingleInstanceMutex(localName)
+	// 2. Fallback to Local\ if Global\ creation was denied (unelevated session)
+	h, already = createSingleInstanceMutex(localName)
 	return uintptr(h), already
 }
 
