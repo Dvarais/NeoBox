@@ -209,3 +209,38 @@ func TestKillSwitchLANListCoversLinkLocalAndULA(t *testing.T) {
 		}
 	}
 }
+
+func TestKillSwitchPolicyRegex(t *testing.T) {
+	samples := []struct {
+		input string
+	}{
+		{"Firewall Policy                       BlockInbound,AllowOutbound"},
+		{"Политика брандмауэра                  BlockInbound,AllowOutbound"},
+		{"Firewall Policy                       BlockInbound,BlockOutbound"},
+		{"firewall policy blockinbound , allowoutbound"},
+		{"AllowInbound,AllowOutbound"},
+	}
+
+	for _, tc := range samples {
+		match := policyRegex.FindString(tc.input)
+		if match == "" {
+			t.Errorf("failed to extract policy from %q", tc.input)
+		}
+	}
+}
+
+func TestKillSwitchRuleNamesIncludeAppAndTUN(t *testing.T) {
+	required := []string{"NeoBox-KillSwitch-App", "NeoBox-KillSwitch-TUN"}
+	for _, req := range required {
+		found := false
+		for _, name := range killSwitchRuleNames {
+			if name == req {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected killSwitchRuleNames to include %s", req)
+		}
+	}
+}

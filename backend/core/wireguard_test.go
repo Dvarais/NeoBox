@@ -251,3 +251,122 @@ func TestXHTTPIsRejected(t *testing.T) {
 		t.Errorf("h2 transport was rejected: %v", err)
 	}
 }
+
+// WireGuard stores its server address in peers[0]["address"]. GenerateConfig must
+// exempt it from the tunnel via a direct route, otherwise the WireGuard UDP packets
+// would be routed into the tunnel itself, causing a routing loop.
+// Furthermore, this direct route MUST precede the "ip_version: 6 reject" rule so
+// that IPv6 WireGuard peers are not immediately dropped.
+func TestDirectRouteForWireGuardEndpoint(t *testing.T) {
+	t.Run("IPv4 peer in TUN mode", func(t *testing.T) {
+		cfg, err := GenerateConfig(wireguardOutbound(), Settings{TunMode: true}, true, "cache.db", "secret")
+		if err != nil {
+			t.Fatalf("GenerateConfig failed: %v", err)
+		}
+
+		route, ok := cfg["route"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("config has no route section: %#v", cfg)
+		}
+		rules, ok := route["rules"].([]map[string]interface{})
+		if !ok {
+			t.Fatalf("route has no rules: %#v", route)
+		}
+
+		directIdx := -1
+		ipv6RejectIdx := -1
+		for i, r := range rules {
+			if hasKeyValue(r, "ip_cidr", []string{testServerIP + "/32"}) &&
+				hasKeyValue(r, "outbound", "direct") {
+				directIdx = i
+			}
+			if hasKeyValue(r, "ip_version", 6) && hasKeyValue(r, "action", "reject") {
+				ipv6RejectIdx = i
+			}
+		}
+		if directIdx < 0 {
+			t.Fatalf("no direct route found for WireGuard peer %s/32 — would cause routing loop", testServerIP)
+		}
+		if ipv6RejectIdx >= 0 && directIdx > ipv6RejectIdx {
+			t.Fatalf("server direct route (index %d) comes AFTER ipv6 reject (index %d)", directIdx, ipv6RejectIdx)
+		}
+	})
+
+	t.Run("IPv6 peer in TUN mode precedes IPv6 reject", func(t *testing.T) {
+		const ipv6Peer = "2001:db8::1"
+		ob := wireguardOutbound()
+		peers := ob["peers"].([]interface{})
+		peer := peers[0].(map[string]interface{})
+		peer["address"] = ipv6Peer
+
+		cfg, err := GenerateConfig(ob, Settings{TunMode: true}, true, "cache.db", "secret")
+		if err != nil {
+			t.Fatalf("GenerateConfig failed: %v", err)
+		}
+
+		rules := cfg["route"].(map[string]interface{})["rules"].([]map[string]interface{})
+		directIdx := -1
+		ipv6RejectIdx := -1
+		for i, r := range rules {
+			if hasKeyValue(r, "ip_cidr", []string{ipv6Peer + "/128"}) &&
+				hasKeyValue(r, "outbound", "direct") {
+				directIdx = i
+			}
+			if hasKeyValue(r, "ip_version", 6) && hasKeyValue(r, "action", "reject") {
+				ipv6RejectIdx = i
+			}
+		}
+		if directIdx < 0 {
+			t.Fatalf("no direct route found for IPv6 WireGuard peer %s/128", ipv6Peer)
+		}
+		if ipv6RejectIdx < 0 {
+			t.Fatal("expected IPv6 reject rule with default settings")
+		}
+		if directIdx > ipv6RejectIdx {
+			t.Fatalf("CRITICAL: IPv6 peer direct route (index %d) is placed AFTER ipv6 reject rule (index %d) — packets would be dropped!", directIdx, ipv6RejectIdx)
+		}
+	})
+
+	t.Run("FQDN peer adds domain route and DNS direct rule", func(t *testing.T) {
+		const domainPeer = "wg.example.com"
+		ob := wireguardOutbound()
+		peers := ob["peers"].([]interface{})
+		peer := peers[0].(map[string]interface{})
+		peer["address"] = domainPeer
+
+		cfg, err := GenerateConfig(ob, Settings{TunMode: true}, true, "cache.db", "secret")
+		if err != nil {
+			t.Fatalf("GenerateConfig failed: %v", err)
+		}
+
+		rules := cfg["route"].(map[string]interface{})["rules"].([]map[string]interface{})
+		foundDomain := false
+		for _, r := range rules {
+			if hasKeyValue(r, "domain", []string{domainPeer}) &&
+				hasKeyValue(r, "outbound", "direct") {
+				foundDomain = true
+				break
+			}
+		}
+		if !foundDomain {
+			t.Fatalf("no domain direct route found for FQDN WireGuard peer %s", domainPeer)
+		}
+
+		dnsRulesList := cfg["dns"].(map[string]interface{})["rules"].([]map[string]interface{})
+		if len(dnsRulesList) == 0 {
+			t.Fatal("no dns rules generated")
+		}
+		domains, _ := dnsRulesList[0]["domain"].([]string)
+		hasDomain := false
+		for _, d := range domains {
+			if d == domainPeer {
+				hasDomain = true
+				break
+			}
+		}
+		if !hasDomain {
+			t.Errorf("FQDN peer %s was not added to first DNS rule domains: %v", domainPeer, domains)
+		}
+	})
+}
+

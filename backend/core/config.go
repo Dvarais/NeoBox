@@ -1243,25 +1243,35 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 	// instead of a top-level field, and that peer is a nested map the shallow
 	// copy above still shares with the caller — so it is copied before being
 	// rewritten, or resolving would reach back into the caller's outbound.
-	serverDomain, _ := workOutbound["server"].(string)
+	serverDomain, _ := ServerEndpoint(workOutbound)
+	serverDomain = strings.Trim(serverDomain, "[]")
 	workOutbound["domain_resolver"] = "dns-direct"
 	wgPeer := copyFirstWireGuardPeer(workOutbound)
-	if wgPeer != nil {
-		serverDomain, _ = wgPeer["address"].(string)
-	}
-	if net.ParseIP(serverDomain) == nil {
+	if net.ParseIP(serverDomain) == nil && serverDomain != "" {
 		// Через ResolveHost, а не через системный резолвер: обычный DNS на пути к
 		// серверу перехватывается провайдером, и подменённый адрес выглядел бы
 		// потом как «сервер не отвечает». За ResolveHost теперь два DoH-резолвера
 		// разом и системный как откат, если молчат оба.
 		ips, err := ResolveHost(resolveCtx, serverDomain)
-		if err == nil {
+		if err == nil && len(ips) > 0 {
+			resolved := false
 			for _, ip := range ips {
 				if ip4 := ip.To4(); ip4 != nil {
 					if wgPeer != nil {
 						wgPeer["address"] = ip4.String()
 					} else {
 						workOutbound["server"] = ip4.String()
+					}
+					resolved = true
+					break
+				}
+			}
+			if !resolved {
+				for _, ip := range ips {
+					if wgPeer != nil {
+						wgPeer["address"] = ip.String()
+					} else {
+						workOutbound["server"] = ip.String()
 					}
 					break
 				}
@@ -1317,27 +1327,49 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		{"network": "udp", "port": []int{5351}, "action": "reject", "method": "default"},
 	}
 
-	// Block IPv6 to prevent leaks.
+	// Exclude proxy server IP and/or domain from proxy tunnel so the transport
+	// connection never gets routed back into the tunnel itself.
+	// This MUST precede the IPv6 reject rule, otherwise an IPv6 proxy server would
+	// be matched and dropped by "ip_version: 6 reject"!
+	// Uses ServerEndpoint to properly extract the endpoint for all protocols,
+	// including WireGuard which stores its address in peers[0]["address"].
+	serverHost, _ := ServerEndpoint(workOutbound)
+	cleanHost := strings.Trim(serverHost, "[]")
+	if ip := net.ParseIP(cleanHost); ip != nil {
+		cidr := cleanHost + "/32"
+		if ip.To4() == nil {
+			cidr = cleanHost + "/128"
+		} else {
+			cidr = ip.To4().String() + "/32"
+		}
+		routeRules = append(routeRules, map[string]interface{}{
+			"ip_cidr":  []string{cidr},
+			"action":   "route",
+			"outbound": "direct",
+		})
+	}
+	// Ensure the original domain name (or cleanHost if still a domain) is also
+	// directly routed, ensuring DNS/reconnect traffic never loops into the tunnel.
+	origDomain := strings.Trim(serverDomain, "[]")
+	if origDomain != "" && net.ParseIP(origDomain) == nil {
+		routeRules = append(routeRules, map[string]interface{}{
+			"domain":   []string{origDomain},
+			"action":   "route",
+			"outbound": "direct",
+		})
+	} else if cleanHost != "" && net.ParseIP(cleanHost) == nil && cleanHost != origDomain {
+		routeRules = append(routeRules, map[string]interface{}{
+			"domain":   []string{cleanHost},
+			"action":   "route",
+			"outbound": "direct",
+		})
+	}
+
+	// Block IPv6 to prevent leaks (only applied to non-exempt traffic).
 	// Default: true (protected). Only skip if user explicitly set ipv6Leak=false.
 	if boolDefault(settings.Ipv6LeakProtection, true) {
 		routeRules = append(routeRules, map[string]interface{}{
 			"ip_version": 6, "action": "reject",
-		})
-	}
-
-	// Exclude proxy server IP or domain from proxy tunnel
-	serverIPStr, _ := workOutbound["server"].(string)
-	if net.ParseIP(serverIPStr) != nil {
-		routeRules = append(routeRules, map[string]interface{}{
-			"ip_cidr":  []string{serverIPStr + "/32"},
-			"action":   "route",
-			"outbound": "direct",
-		})
-	} else {
-		routeRules = append(routeRules, map[string]interface{}{
-			"domain":   []string{serverIPStr},
-			"action":   "route",
-			"outbound": "direct",
 		})
 	}
 
@@ -1453,20 +1485,39 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 	}
 
 	// 4. Final Config Structure
-	// FIX: Use ip_cidr when serverIPStr is an IP address, domain otherwise.
-	// Placing an IP address in the "domain" field is logically incorrect for sing-box.
 	firstDNSRule := map[string]interface{}{
 		"domain_suffix": []string{".local", ".localhost"},
 		"domain":        []string{"localhost", "wails.localhost"},
 		"server":        "dns-direct",
 	}
-	if net.ParseIP(serverIPStr) != nil {
-		// Server was resolved to an IP — exclude it via ip_cidr, not domain.
-		firstDNSRule["ip_cidr"] = []string{serverIPStr + "/32"}
-	} else if serverIPStr != "" {
-		// Server is still a domain name — add it to the domain list.
-		domains := firstDNSRule["domain"].([]string)
-		firstDNSRule["domain"] = append(domains, serverIPStr)
+	// Server endpoint domain (WireGuard peer address or proxy hostname) excluded from DNS tunnel
+	// so the initial connection handshake or reconnect name lookup is never sent into the tunnel.
+	serverDomainName := origDomain
+	if serverDomainName == "" && cleanHost != "" && net.ParseIP(cleanHost) == nil {
+		serverDomainName = cleanHost
+	}
+	if serverDomainName != "" && net.ParseIP(serverDomainName) == nil {
+		if domains, ok := firstDNSRule["domain"].([]string); ok {
+			found := false
+			for _, d := range domains {
+				if d == serverDomainName {
+					found = true
+					break
+				}
+			}
+			if !found {
+				firstDNSRule["domain"] = append(domains, serverDomainName)
+			}
+		}
+	}
+	if ip := net.ParseIP(cleanHost); ip != nil {
+		cidr := cleanHost + "/32"
+		if ip.To4() == nil {
+			cidr = cleanHost + "/128"
+		} else {
+			cidr = ip.To4().String() + "/32"
+		}
+		firstDNSRule["ip_cidr"] = []string{cidr}
 	}
 	dnsRules := []map[string]interface{}{firstDNSRule}
 	if settings.BypassRu {
