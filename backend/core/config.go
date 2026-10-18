@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -1423,32 +1424,37 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		routeRules = append(routeRules, ruleEntry)
 	}
 
-	// Process routing (split tunneling).
+	// Process routing (split tunneling) and exclusion rules order:
 	//
-	// Whitelist mode needs a catch-all that sends everything NOT named in the
-	// list straight out, but that rule matches every packet by definition, so
-	// wherever it sits it is the last rule that can ever match. It used to be
-	// appended right here, which left the private-address, bypass-RU and FakeIP
-	// rules below unreachable — whitelist plus FakeDNS routed the 198.18/15
-	// answers direct and the connections simply failed. So it is remembered here
-	// and appended once every other rule is in place.
-	whitelistCatchAll := false
-	if tunMode && len(processList) > 0 {
-		if processMode == "blacklist" {
-			routeRules = append(routeRules, map[string]interface{}{
-				"process_name": processList,
-				"action":       "route",
-				"outbound":     "direct",
-			})
-		} else {
-			routeRules = append(routeRules, map[string]interface{}{
-				"process_name": processList,
-				"action":       "route",
-				"outbound":     outboundTag,
-			})
-			whitelistCatchAll = true
-		}
+	// In sing-box, routing rules are evaluated sequentially in top-to-bottom order.
+	// 1. Blacklist process mode routes specified processes direct immediately.
+	// 2. Local & private IPs (ip_is_private: true) MUST be routed direct BEFORE
+	//    any whitelist process rule is evaluated. Otherwise, a whitelisted application
+	//    (such as a web browser) will have its connections to 192.168.x.x, 10.x.x.x,
+	//    or local routers routed into the remote VPN tunnel and dropped.
+	// 3. Bypass Russia (rule-sets geoip-ru / geosite-category-ru) routes direct before
+	//    whitelist so whitelisted applications can reach Russian sites directly.
+	// 4. Whitelist process mode routes named processes to the VPN outbound (outboundTag),
+	//    leaving a catch-all at the end for unlisted processes.
+	// 5. FakeIP CIDR rule directs synthetic 198.18.0.0/15 addresses into the tunnel.
+	// 6. Whitelist catch-all routes all remaining traffic direct.
+
+	if tunMode && len(processList) > 0 && processMode == "blacklist" {
+		routeRules = append(routeRules, map[string]interface{}{
+			"process_name": processList,
+			"action":       "route",
+			"outbound":     "direct",
+		})
 	}
+
+	// [INTERNET SEARCH PATTERN]
+	// Local and private IPs must be placed before process whitelist rules to keep
+	// LAN, default gateway, and local services accessible to whitelisted browsers/apps.
+	routeRules = append(routeRules, map[string]interface{}{
+		"ip_is_private": true,
+		"action":        "route",
+		"outbound":      "direct",
+	})
 
 	// Bypass Russia (rule-sets)
 	if settings.BypassRu {
@@ -1459,12 +1465,15 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		})
 	}
 
-	// Local and private IPs
-	routeRules = append(routeRules, map[string]interface{}{
-		"ip_is_private": true,
-		"action":        "route",
-		"outbound":      "direct",
-	})
+	whitelistCatchAll := false
+	if tunMode && len(processList) > 0 && processMode != "blacklist" {
+		routeRules = append(routeRules, map[string]interface{}{
+			"process_name": processList,
+			"action":       "route",
+			"outbound":     outboundTag,
+		})
+		whitelistCatchAll = true
+	}
 
 	// FakeIP Cidr rule (must be placed AFTER domain and process exclusions!)
 	if settings.FakeDns && tunMode {
@@ -1713,8 +1722,92 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 	return config, nil
 }
 
+// [INTERNET SEARCH PATTERN]
+// Safe SSRF prevention: Comprehensive IP validation against private, loopback,
+// link-local, carrier-grade NAT, cloud metadata, and reserved networks.
+// Based on standard Go security practices (RFC 1918, RFC 3927, RFC 4193, RFC 6598, RFC 4291).
+var restrictedCIDRs = []string{
+	"0.0.0.0/8",          // Current network (RFC 1122)
+	"10.0.0.0/8",         // Private network (RFC 1918)
+	"100.64.0.0/10",      // Shared Address Space / CGNAT (RFC 6598)
+	"127.0.0.0/8",        // Loopback (RFC 1122)
+	"169.254.0.0/16",     // Link-local / Cloud Metadata: AWS, GCP, Azure, DO (RFC 3927)
+	"172.16.0.0/12",      // Private network (RFC 1918)
+	"192.0.0.0/24",       // IETF Protocol Assignments (RFC 6890)
+	"192.0.2.0/24",       // Documentation / TEST-NET-1 (RFC 5737)
+	"192.168.0.0/16",     // Private network (RFC 1918)
+	"198.18.0.0/15",      // Network Interconnect Benchmark Testing / FakeIP (RFC 2544)
+	"198.51.100.0/24",    // Documentation / TEST-NET-2 (RFC 5737)
+	"203.0.113.0/24",     // Documentation / TEST-NET-3 (RFC 5737)
+	"224.0.0.0/4",        // Multicast (RFC 5771)
+	"240.0.0.0/4",        // Reserved for future use (RFC 1112)
+	"255.255.255.255/32", // Limited Broadcast (RFC 919)
+	"::/128",             // Unspecified IPv6
+	"::1/128",            // Loopback IPv6 (RFC 4291)
+	"fc00::/7",           // Unique Local Addresses / ULA (RFC 4193)
+	"fe80::/10",          // Link-Local Unicast (RFC 4291)
+	"ff00::/8",           // Multicast (RFC 4291)
+	"64:ff9b::/96",       // IPv4/IPv6 translation (RFC 6052)
+	"100::/64",           // Discard prefix (RFC 6666)
+	"2001:db8::/32",      // Documentation (RFC 3849)
+}
+
+var restrictedIPNets []*net.IPNet
+
+func init() {
+	for _, cidr := range restrictedCIDRs {
+		_, ipNet, err := net.ParseCIDR(cidr)
+		if err == nil && ipNet != nil {
+			restrictedIPNets = append(restrictedIPNets, ipNet)
+		}
+	}
+}
+
+// IsPublicIP reports whether the given IP address is a publicly routable internet address.
+// Returns false for loopback, private, link-local, carrier-grade NAT, cloud metadata,
+// multicast, broadcast, and reserved network addresses.
+func IsPublicIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	// [INTERNET SEARCH PATTERN]
+	// Unmap IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1 -> 127.0.0.1)
+	// to prevent bypasses of IPv4 subnet restrictions.
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	for _, subnet := range restrictedIPNets {
+		if subnet.Contains(ip) {
+			return false
+		}
+	}
+	return true
+}
+
+// isRestrictedHost checks if a hostname or literal IP target should be rejected
+// up front to prevent SSRF against internal resources or local infrastructure.
+func isRestrictedHost(rawHost string) bool {
+	host := strings.TrimSpace(strings.ToLower(rawHost))
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
+	if host == "" {
+		return true
+	}
+	if host == "localhost" ||
+		strings.HasSuffix(host, ".localhost") ||
+		strings.HasSuffix(host, ".local") ||
+		strings.HasSuffix(host, ".internal") ||
+		strings.HasSuffix(host, ".onion") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return !IsPublicIP(ip)
+	}
+	return false
+}
+
 // refuseInsecureRedirect keeps a subscription fetch on HTTPS for the whole of
-// its redirect chain.
+// its redirect chain and validates target hosts against SSRF attacks.
 //
 // Rejecting an "http://" URL up front only covers the address the user typed.
 // Go's client follows up to ten redirects on its own, so a host answering an
@@ -1729,6 +1822,10 @@ func refuseInsecureRedirect(req *http.Request, via []*http.Request) error {
 	if !strings.EqualFold(req.URL.Scheme, "https") {
 		return fmt.Errorf("refusing redirect to %s: subscriptions must stay on HTTPS", req.URL.Scheme)
 	}
+	hostname := req.URL.Hostname()
+	if isRestrictedHost(hostname) {
+		return fmt.Errorf("refusing redirect to restricted host %q: SSRF protection", hostname)
+	}
 	return nil
 }
 
@@ -1740,8 +1837,8 @@ var errSubBlocked = errors.New("returned HTML or empty data")
 
 // fetchSubscriptionBody performs a single GET and returns the body only when it
 // looks like subscription data.
-func fetchSubscriptionBody(client *http.Client, subURL, userAgent string) ([]byte, error) {
-	req, err := http.NewRequest("GET", subURL, nil)
+func fetchSubscriptionBody(ctx context.Context, client *http.Client, subURL, userAgent string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", subURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1765,14 +1862,25 @@ func fetchSubscriptionBody(client *http.Client, subURL, userAgent string) ([]byt
 	return body, nil
 }
 
-// FetchSubscription loads subscription contents (both JSON-based xray-ext and standard lists).
-//
-// Security: HTTP (non-TLS) subscription URLs are rejected to prevent MITM attacks
-// where an attacker on the same network could substitute malicious proxy servers.
-// Use HTTPS URLs for all subscriptions.
-//
-// URLs longer than maxLinkLength are rejected before the request is made.
+// FetchSubscription loads subscription contents using background context.
+// Provided for backward compatibility.
 func FetchSubscription(subURL string) ([]string, error) {
+	return FetchSubscriptionContext(context.Background(), subURL)
+}
+
+// FetchSubscriptionContext loads subscription contents (both JSON-based xray-ext and standard lists)
+// with context cancellation support and hardened SSRF protection.
+//
+// Security:
+// - HTTP (non-TLS) subscription URLs are rejected to prevent MITM attacks.
+// - Private, loopback, link-local, and cloud metadata destinations (e.g. 169.254.169.254) are rejected (SSRF prevention).
+// - DNS rebinding attacks are prevented via net.Dialer.Control IP validation before TCP connection.
+// - URLs longer than maxLinkLength are rejected before the request is made.
+func FetchSubscriptionContext(ctx context.Context, subURL string) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	trimmedURL := strings.TrimSpace(subURL)
 
 	if len(trimmedURL) > maxLinkLength {
@@ -1783,13 +1891,51 @@ func FetchSubscription(subURL string) ([]string, error) {
 	trimmedURL = strings.ReplaceAll(trimmedURL, "\t", "%09")
 	lowerURL := strings.ToLower(trimmedURL)
 
+	// Direct proxy links (vless://, vmess://, etc.) bypass HTTP fetching.
+	if IsProxyLink(trimmedURL) {
+		return []string{trimmedURL}, nil
+	}
+
 	// Security: block plain HTTP subscription URLs — only HTTPS is allowed.
-	// Direct proxy links (vless://, vmess://, etc.) bypass this check.
 	if strings.HasPrefix(lowerURL, "http://") {
 		return nil, errors.New(i18n.T(i18n.ErrSubURLNotSecure))
 	}
-	if IsProxyLink(trimmedURL) {
-		return []string{trimmedURL}, nil
+
+	parsedURL, err := url.Parse(trimmedURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid subscription URL: %w", err)
+	}
+
+	if !strings.EqualFold(parsedURL.Scheme, "https") {
+		return nil, errors.New(i18n.T(i18n.ErrSubURLNotSecure))
+	}
+
+	// [INTERNET SEARCH PATTERN]
+	// Validate target hostname and IP up front against SSRF and cloud metadata addresses
+	if isRestrictedHost(parsedURL.Hostname()) {
+		return nil, fmt.Errorf("subscription URL points to a private or restricted host %q: SSRF protection", parsedURL.Hostname())
+	}
+
+	// [INTERNET SEARCH PATTERN]
+	// DNS rebinding and SSRF protection via net.Dialer.Control hook.
+	// Executes after DNS resolution and socket creation, but before TCP handshake.
+	// Validates that the resolved socket address is not a private or restricted IP.
+	safeDialer := &net.Dialer{
+		Timeout: 10 * time.Second,
+		Control: func(network, address string, c syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return fmt.Errorf("ssrf guard: invalid socket address %q: %w", address, err)
+			}
+			ip := net.ParseIP(host)
+			if ip == nil {
+				return fmt.Errorf("ssrf guard: unable to parse resolved IP %q", host)
+			}
+			if !IsPublicIP(ip) {
+				return fmt.Errorf("ssrf guard: connection to private or restricted IP %s blocked", ip.String())
+			}
+			return nil
+		},
 	}
 
 	// Transports, in the order they are tried: the local proxy first (highly
@@ -1814,6 +1960,7 @@ func FetchSubscription(subURL string) ([]string, error) {
 		Timeout:       15 * time.Second,
 		CheckRedirect: refuseInsecureRedirect,
 		Transport: &http.Transport{
+			DialContext:         safeDialer.DialContext,
 			TLSClientConfig:     SecureTLSConfig(""),
 			TLSHandshakeTimeout: 10 * time.Second,
 		},
@@ -1832,10 +1979,16 @@ func FetchSubscription(subURL string) ([]string, error) {
 fetch:
 	for _, t := range transports {
 		for _, ua := range userAgents {
-			body, err := fetchSubscriptionBody(t.client, trimmedURL, ua)
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			body, err := fetchSubscriptionBody(ctx, t.client, trimmedURL, ua)
 			if err == nil {
 				bodyBytes = body
 				break fetch
+			}
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
 			}
 			fetchErrs = append(fetchErrs, fmt.Sprintf("%s: %v", t.name, err))
 			if !errors.Is(err, errSubBlocked) {
@@ -1846,6 +1999,9 @@ fetch:
 	}
 
 	if bodyBytes == nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		// The two failures need different advice, and one page beats any number
 		// of transport errors: a host that answers with a page is reachable and
 		// the subscription itself is the problem, while an unreachable host says

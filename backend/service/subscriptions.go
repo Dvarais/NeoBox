@@ -228,7 +228,11 @@ func purgeBootstrapSub(subsJSON string) string {
 // came back as a login page or in a format NeoBox cannot read. Silently
 // returning an empty list left the interface with nothing to say.
 func (s *AppService) FetchSubscription(url string) ([]string, error) {
-	return core.FetchSubscription(url)
+	ctx := s.context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return core.FetchSubscriptionContext(ctx, url)
 }
 
 // ImportClipboard filters proxy links from raw clipboard string.
@@ -364,7 +368,7 @@ func (s *AppService) refreshSubscriptions(ctx context.Context, want func(Subscri
 			continue
 		}
 
-		links, err := core.FetchSubscription(sub.URL)
+		links, err := core.FetchSubscriptionContext(ctx, sub.URL)
 		switch {
 		case err != nil:
 			results[sub.ID] = subFetch{Err: err.Error()}
