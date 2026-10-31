@@ -1241,7 +1241,23 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 // clashSecret is injected into the Clash API config so only NeoBox itself can
 // communicate with the local API endpoint on port 9097. Pass an empty string to
 // disable authentication (not recommended in production).
+// OutboundSelectorTag is the well-known tag for the main proxy selector outbound.
+const OutboundSelectorTag = "proxy-out"
+
+// GenerateConfig generates a sing-box configuration for a single proxy outbound.
+// Preserved for backward compatibility.
 func GenerateConfig(outbound map[string]interface{}, settings Settings, useSystemProxy bool, cacheDBPath string, clashSecret string) (map[string]interface{}, error) {
+	return GenerateConfigWithCandidates(nil, outbound, settings, useSystemProxy, cacheDBPath, clashSecret)
+}
+
+// GenerateConfigWithCandidates generates a sing-box configuration containing multiple candidates
+// in a "selector" outbound group, allowing zero-downtime hot-switching between servers via the Clash API.
+//
+// When candidates contains 2 or more outbounds and activeOutbound is not WireGuard, a "selector"
+// outbound (OutboundSelectorTag) is created as route.final with all candidate tags.
+// When candidates has 1 or fewer outbounds, or activeOutbound is WireGuard, a direct single-outbound
+// layout is produced for complete backward compatibility.
+func GenerateConfigWithCandidates(candidates []map[string]interface{}, outbound map[string]interface{}, settings Settings, useSystemProxy bool, cacheDBPath string, clashSecret string) (map[string]interface{}, error) {
 	tunMode := settings.TunMode
 
 	// Validate the required fields before doing any work.
@@ -1256,6 +1272,13 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		workOutbound[k] = v
 	}
 
+	activeType, _ := workOutbound["type"].(string)
+	useSelector := len(candidates) > 1 && activeType != "wireguard"
+	targetDetourTag := outboundTag
+	if useSelector {
+		targetDetourTag = OutboundSelectorTag
+	}
+
 	// Один срок на оба разрешения имени ниже — резолвера и самого сервера.
 	//
 	// По отдельному сроку на каждое они складывались бы: на мёртвой сети
@@ -1264,7 +1287,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 	defer resolveCancel()
 
 	// 1. DNS Section (Nuclear Strategy: No local DNS, only IP-based DoH for remote, local for direct)
-	remote, err := remoteDNSServer(settings.Dns, outboundTag)
+	remote, err := remoteDNSServer(settings.Dns, targetDetourTag)
 	if err != nil {
 		return nil, err
 	}
@@ -1285,6 +1308,9 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		})
 	}
 
+	allServerDomains := make(map[string]bool)
+	allDirectIPs := make(map[string]bool)
+
 	// Pre-resolve proxy domain to IP to avoid DNS inside the tunnel.
 	// Uses a 2-second timeout so slow DNS won't freeze VPN startup.
 	//
@@ -1292,9 +1318,13 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 	// instead of a top-level field, and that peer is a nested map the shallow
 	// copy above still shares with the caller — so it is copied before being
 	// rewritten, or resolving would reach back into the caller's outbound.
-	serverDomain, _ := ServerEndpoint(workOutbound)
-	serverDomain = strings.Trim(serverDomain, "[]")
+	origDomain, _ := ServerEndpoint(workOutbound)
+	origDomain = strings.Trim(origDomain, "[]")
+	serverDomain := origDomain
 	workOutbound["domain_resolver"] = "dns-direct"
+	if origDomain != "" && net.ParseIP(origDomain) == nil {
+		allServerDomains[origDomain] = true
+	}
 
 	// Apply TLS record fragmentation (Anti-DPI) setting
 	if tlsMap, ok := workOutbound["tls"].(map[string]interface{}); ok {
@@ -1341,6 +1371,88 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 					break
 				}
 			}
+		}
+	}
+	serverHost, _ := ServerEndpoint(workOutbound)
+	cleanHost := strings.Trim(serverHost, "[]")
+	if net.ParseIP(cleanHost) != nil {
+		allDirectIPs[cleanHost] = true
+	}
+
+	var preparedCandidates []map[string]interface{}
+	var candidateTags []string
+	usedTags := make(map[string]bool)
+	preparedCandidates = append(preparedCandidates, workOutbound)
+	candidateTags = append(candidateTags, outboundTag)
+	usedTags[outboundTag] = true
+
+	if useSelector {
+		for i, cand := range candidates {
+			if cand == nil {
+				continue
+			}
+			cType, _ := cand["type"].(string)
+			if cType == "wireguard" {
+				continue
+			}
+			cTag, _ := cand["tag"].(string)
+			if cTag == "" {
+				cTag = fmt.Sprintf("proxy-%d", i+1)
+			}
+			if cTag == outboundTag && i == 0 {
+				continue
+			}
+			uniqueTag := cTag
+			counter := 2
+			for usedTags[uniqueTag] {
+				uniqueTag = fmt.Sprintf("%s-%d", cTag, counter)
+				counter++
+			}
+			usedTags[uniqueTag] = true
+
+			wCand := make(map[string]interface{}, len(cand))
+			for k, v := range cand {
+				wCand[k] = v
+			}
+			wCand["tag"] = uniqueTag
+			wCand["domain_resolver"] = "dns-direct"
+
+			if tlsMap, ok := wCand["tls"].(map[string]interface{}); ok {
+				workTLS := make(map[string]interface{}, len(tlsMap)+1)
+				for k, v := range tlsMap {
+					workTLS[k] = v
+				}
+				if settings.TlsFragment != nil {
+					if *settings.TlsFragment {
+						workTLS["record_fragment"] = true
+					} else {
+						delete(workTLS, "record_fragment")
+					}
+				}
+				wCand["tls"] = workTLS
+			}
+
+			cDomain, _ := ServerEndpoint(wCand)
+			cDomain = strings.Trim(cDomain, "[]")
+			if cDomain != "" && net.ParseIP(cDomain) == nil {
+				allServerDomains[cDomain] = true
+				if ips, err := ResolveHost(resolveCtx, cDomain); err == nil && len(ips) > 0 {
+					for _, ip := range ips {
+						if ip4 := ip.To4(); ip4 != nil {
+							wCand["server"] = ip4.String()
+							break
+						}
+					}
+				}
+			}
+			cH, _ := ServerEndpoint(wCand)
+			cCleanH := strings.Trim(cH, "[]")
+			if net.ParseIP(cCleanH) != nil {
+				allDirectIPs[cCleanH] = true
+			}
+
+			preparedCandidates = append(preparedCandidates, wCand)
+			candidateTags = append(candidateTags, uniqueTag)
 		}
 	}
 
@@ -1398,12 +1510,19 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 	// be matched and dropped by "ip_version: 6 reject"!
 	// Uses ServerEndpoint to properly extract the endpoint for all protocols,
 	// including WireGuard which stores its address in peers[0]["address"].
-	serverHost, _ := ServerEndpoint(workOutbound)
-	cleanHost := strings.Trim(serverHost, "[]")
-	if ip := net.ParseIP(cleanHost); ip != nil {
-		cidr := cleanHost + "/32"
+	directIPList := make([]string, 0, len(allDirectIPs))
+	for ipStr := range allDirectIPs {
+		directIPList = append(directIPList, ipStr)
+	}
+	sort.Strings(directIPList)
+	for _, ipStr := range directIPList {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
+		}
+		cidr := ipStr + "/32"
 		if ip.To4() == nil {
-			cidr = cleanHost + "/128"
+			cidr = ipStr + "/128"
 		} else {
 			cidr = ip.To4().String() + "/32"
 		}
@@ -1413,18 +1532,14 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			"outbound": "direct",
 		})
 	}
-	// Ensure the original domain name (or cleanHost if still a domain) is also
-	// directly routed, ensuring DNS/reconnect traffic never loops into the tunnel.
-	origDomain := strings.Trim(serverDomain, "[]")
-	if origDomain != "" && net.ParseIP(origDomain) == nil {
+	serverDomainList := make([]string, 0, len(allServerDomains))
+	for d := range allServerDomains {
+		serverDomainList = append(serverDomainList, d)
+	}
+	sort.Strings(serverDomainList)
+	for _, d := range serverDomainList {
 		routeRules = append(routeRules, map[string]interface{}{
-			"domain":   []string{origDomain},
-			"action":   "route",
-			"outbound": "direct",
-		})
-	} else if cleanHost != "" && net.ParseIP(cleanHost) == nil && cleanHost != origDomain {
-		routeRules = append(routeRules, map[string]interface{}{
-			"domain":   []string{cleanHost},
+			"domain":   []string{d},
 			"action":   "route",
 			"outbound": "direct",
 		})
@@ -1450,7 +1565,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		case "block":
 			outbound = "block"
 		case "proxy":
-			outbound = outboundTag
+			outbound = targetDetourTag
 		default:
 			continue
 		}
@@ -1487,7 +1602,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 	// 2. Local & private IPs (ip_is_private: true) route direct BEFORE whitelist
 	//    so LAN/gateway remain reachable.
 	// 3. Bypass Russia (rule-sets geoip-ru / geosite-category-ru) routes direct.
-	// 4. Whitelist process mode routes named processes to the VPN outbound (outboundTag).
+	// 4. Whitelist process mode routes named processes to the VPN outbound (targetDetourTag).
 	// 5. FakeIP CIDR rule directs synthetic 198.18.0.0/15 addresses into the tunnel.
 	// 6. Whitelist catch-all routes all remaining traffic direct.
 
@@ -1519,7 +1634,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		routeRules = append(routeRules, map[string]interface{}{
 			"process_name": processList,
 			"action":       "route",
-			"outbound":     outboundTag,
+			"outbound":     targetDetourTag,
 		})
 		whitelistCatchAll = true
 	}
@@ -1529,7 +1644,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		routeRules = append(routeRules, map[string]interface{}{
 			"ip_cidr":  []string{"198.18.0.0/15"},
 			"action":   "route",
-			"outbound": outboundTag,
+			"outbound": targetDetourTag,
 		})
 	}
 
@@ -1548,31 +1663,30 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		"domain":        []string{"localhost", "wails.localhost"},
 		"server":        "dns-direct",
 	}
-	// Server endpoint domain (WireGuard peer address or proxy hostname) excluded from DNS tunnel
-	// so the initial connection handshake or reconnect name lookup is never sent into the tunnel.
-	serverDomainName := origDomain
-	if serverDomainName == "" && cleanHost != "" && net.ParseIP(cleanHost) == nil {
-		serverDomainName = cleanHost
-	}
-	if serverDomainName != "" && net.ParseIP(serverDomainName) == nil {
-		if domains, ok := firstDNSRule["domain"].([]string); ok {
+	if domains, ok := firstDNSRule["domain"].([]string); ok {
+		for _, d := range serverDomainList {
 			found := false
-			for _, d := range domains {
-				if d == serverDomainName {
+			for _, existing := range domains {
+				if existing == d {
 					found = true
 					break
 				}
 			}
 			if !found {
-				firstDNSRule["domain"] = append(domains, serverDomainName)
+				domains = append(domains, d)
 			}
 		}
+		firstDNSRule["domain"] = domains
 	}
 	dnsRules := []map[string]interface{}{firstDNSRule}
-	if ip := net.ParseIP(cleanHost); ip != nil {
-		cidr := cleanHost + "/32"
+	for _, ipStr := range directIPList {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
+		}
+		cidr := ipStr + "/32"
 		if ip.To4() == nil {
-			cidr = cleanHost + "/128"
+			cidr = ipStr + "/128"
 		} else {
 			cidr = ip.To4().String() + "/32"
 		}
@@ -1616,6 +1730,27 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		logLevel = "info"
 	}
 
+	var outboundsList []interface{}
+	if useSelector {
+		selectorOutbound := map[string]interface{}{
+			"type":                        "selector",
+			"tag":                         OutboundSelectorTag,
+			"outbounds":                   candidateTags,
+			"default":                     outboundTag,
+			"interrupt_exist_connections": false,
+		}
+		outboundsList = append(outboundsList, selectorOutbound)
+		for _, cand := range preparedCandidates {
+			outboundsList = append(outboundsList, cand)
+		}
+	} else {
+		outboundsList = append(outboundsList, workOutbound)
+	}
+	outboundsList = append(outboundsList,
+		map[string]interface{}{"type": "direct", "tag": "direct"},
+		map[string]interface{}{"type": "block", "tag": "block"},
+	)
+
 	config := map[string]interface{}{
 		"log": map[string]interface{}{
 			"level":     logLevel,
@@ -1650,11 +1785,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 				"set_system_proxy": useSystemProxy,
 			},
 		},
-		"outbounds": []interface{}{
-			workOutbound,
-			map[string]interface{}{"type": "direct", "tag": "direct"},
-			map[string]interface{}{"type": "block", "tag": "block"},
-		},
+		"outbounds": outboundsList,
 		"route": map[string]interface{}{
 			"rules":                 routeRules,
 			"auto_detect_interface": true,
@@ -1666,7 +1797,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 				}
 				return "dns-direct"
 			}(),
-			"final": outboundTag,
+			"final": targetDetourTag,
 		},
 		"experimental": map[string]interface{}{
 			"cache_file": map[string]interface{}{
@@ -1698,19 +1829,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 
 	if settings.BypassRu {
 		routeSection := config["route"].(map[string]interface{})
-		// Кто именно качает списки. По умолчанию — сам туннель (см. ниже), но
-		// WireGuard так не умеет, и дело не в протоколе, а в порядке старта
-		// ядра: sing-box поднимает outbound'ы раньше маршрутизатора
-		// (box.go, StartStateStart), а endpoint'ы — позже него, и туннель
-		// WireGuard становится пригодным только на PostStart. Маршрутизатор к
-		// этому моменту уже качает rule-set, то есть звонил бы в туннель,
-		// которого ещё нет.
-		//
-		// Цена ошибки здесь максимальная: когда кэша нет, неудачная первая
-		// загрузка — это не «правило не совпадёт», а отказ старта целиком
-		// (route/rule/rule_set_remote.go: "initial rule-set: ..."). Поэтому
-		// для WireGuard загрузка идёт напрямую.
-		downloadDetour := outboundTag
+		downloadDetour := targetDetourTag
 		if outboundType, _ := workOutbound["type"].(string); outboundType == "wireguard" {
 			downloadDetour = "direct"
 		}

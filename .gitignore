@@ -20,6 +20,7 @@ frontend/dist/*
 /icon.ico
 *.log
 *.tmp
+*.db
 dev/null
 null
 

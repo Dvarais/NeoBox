@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -113,6 +114,9 @@ func (s *AppService) startCore(link string, _ string, useSystemProxy bool, newSe
 		return response
 	}
 
+	// 2b. Build candidate list and link-to-tag mapping for Clash API selector
+	candidates, linkToTag := s.buildCandidates(link, outbound)
+
 	// 3. Generate configuration
 	// Generate a fresh per-session Clash API secret to prevent other local
 	// processes from controlling the VPN core via the unauthenticated API.
@@ -127,7 +131,7 @@ func (s *AppService) startCore(link string, _ string, useSystemProxy bool, newSe
 	s.stateMu.Unlock()
 
 	cachePath := filepath.Join(s.userDataDir, "cache.db")
-	config, err := core.GenerateConfig(outbound, settings, useSystemProxy, cachePath, secret)
+	config, err := core.GenerateConfigWithCandidates(candidates, outbound, settings, useSystemProxy, cachePath, secret)
 	if err != nil {
 		response["error"] = i18n.T(i18n.ErrGenerateConfig, err)
 		return response
@@ -206,8 +210,10 @@ func (s *AppService) startCore(link string, _ string, useSystemProxy bool, newSe
 		s.SetSystemProxy(false)
 	}
 
-	// Start background traffic monitoring
+	// Start background traffic monitoring and record active selector mappings
 	s.stateMu.Lock()
+	s.serverLinkToTag = linkToTag
+	s.activeServerLink = link
 	if s.cancelMonitor != nil {
 		s.cancelMonitor()
 	}
@@ -278,6 +284,8 @@ executeTeardown:
 	s.disableKillSwitch() // Disable firewall rules when disconnecting
 
 	s.stateMu.Lock()
+	s.serverLinkToTag = nil
+	s.activeServerLink = ""
 	if s.cancelMonitor != nil {
 		s.cancelMonitor()
 		s.cancelMonitor = nil
@@ -330,6 +338,8 @@ func (s *AppService) RestartXray(link string, settingsJSON string, useSystemProx
 
 	// Stop the core and traffic monitor only — do NOT touch system proxy or kill switch.
 	s.stateMu.Lock()
+	s.serverLinkToTag = nil
+	s.activeServerLink = ""
 	if s.cancelMonitor != nil {
 		s.cancelMonitor()
 		s.cancelMonitor = nil
@@ -554,4 +564,223 @@ func (s *AppService) FlushDNS() (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// buildCandidates collects valid non-wireguard proxy candidates from subscriptions,
+// assigns unique outbound tags, and builds the link-to-tag mapping for the Clash API selector.
+func (s *AppService) buildCandidates(activeLink string, activeOutbound map[string]interface{}) ([]map[string]interface{}, map[string]string) {
+	linkToTag := make(map[string]string)
+	activeType, _ := activeOutbound["type"].(string)
+	activeTag, _ := activeOutbound["tag"].(string)
+	if activeTag == "" {
+		activeTag = parseServerNameFromLink(activeLink)
+		if activeTag == "" {
+			activeTag = "proxy"
+		}
+		activeOutbound["tag"] = activeTag
+	}
+	linkToTag[activeLink] = activeTag
+
+	// WireGuard is defined as an endpoint in sing-box, not an outbound.
+	// Endpoints cannot be placed inside a selector outbound group.
+	if activeType == "wireguard" {
+		return []map[string]interface{}{activeOutbound}, linkToTag
+	}
+
+	s.fileMu.Lock()
+	data := s.readSubscriptionsLocked()
+	s.fileMu.Unlock()
+
+	var subs []Subscription
+	if data != nil {
+		if err := json.Unmarshal(data, &subs); err != nil {
+			fmt.Printf("[vpn] warning: buildCandidates failed to unmarshal subscriptions: %v\n", err)
+		}
+	}
+
+	usedTags := map[string]bool{activeTag: true}
+	seenLinks := map[string]bool{activeLink: true}
+	candidates := []map[string]interface{}{activeOutbound}
+
+	for _, sub := range subs {
+		for _, rawLink := range sub.Links {
+			lnk := strings.TrimSpace(rawLink)
+			if lnk == "" || seenLinks[lnk] {
+				continue
+			}
+			seenLinks[lnk] = true
+
+			candOut, err := core.ParseProxyLink(lnk)
+			if err != nil {
+				continue
+			}
+			cType, _ := candOut["type"].(string)
+			if cType == "wireguard" {
+				continue
+			}
+
+			cTag, _ := candOut["tag"].(string)
+			if cTag == "" {
+				cTag = parseServerNameFromLink(lnk)
+			}
+			if cTag == "" {
+				cTag = "proxy"
+			}
+			uniqueTag := cTag
+			counter := 2
+			for usedTags[uniqueTag] {
+				uniqueTag = fmt.Sprintf("%s-%d", cTag, counter)
+				counter++
+			}
+			usedTags[uniqueTag] = true
+			candOut["tag"] = uniqueTag
+			linkToTag[lnk] = uniqueTag
+			candidates = append(candidates, candOut)
+		}
+	}
+
+	return candidates, linkToTag
+}
+
+// switchSelectorTag issues a PUT /proxies/proxy-out request to sing-box Clash API
+// to switch active outbound to targetTag with zero-downtime.
+func (s *AppService) switchSelectorTag(ctx context.Context, addr, secret, targetTag string) error {
+	payload, err := json.Marshal(map[string]string{"name": targetTag})
+	if err != nil {
+		return err
+	}
+	_, err = fetchClashWithBody(ctx, http.MethodPut, addr, "/proxies/"+core.OutboundSelectorTag, secret, bytes.NewReader(payload))
+	return err
+}
+
+// SwitchServer performs zero-downtime hot-switching to the specified proxy server link
+// via sing-box's Clash API selector without restarting TUN interface, dropping sockets,
+// or experiencing 3-second downtime.
+//
+// If the VPN is not connected, the target node is WireGuard, or the node was not
+// in the selector candidates, it reports fallbackRequired: true so the caller can
+// cleanly fall back to RestartXray.
+func (s *AppService) SwitchServer(link string) map[string]interface{} {
+	trimmedLink := strings.TrimSpace(link)
+	if trimmedLink == "" {
+		return map[string]interface{}{
+			"success":          false,
+			"hotSwitched":      false,
+			"fallbackRequired": false,
+			"error":            "empty proxy link",
+		}
+	}
+
+	if s.GetVPNState() != VPNStateConnected {
+		return map[string]interface{}{
+			"success":          false,
+			"hotSwitched":      false,
+			"fallbackRequired": true,
+			"error":            "vpn is not connected",
+		}
+	}
+
+	s.stateMu.Lock()
+	activeLink := s.activeServerLink
+	secret := s.clashSecret
+	targetTag, found := s.serverLinkToTag[trimmedLink]
+	s.stateMu.Unlock()
+
+	// Already active on this exact server
+	if activeLink == trimmedLink {
+		return map[string]interface{}{
+			"success":       true,
+			"hotSwitched":   true,
+			"alreadyActive": true,
+		}
+	}
+
+	// If node is not found in selector mapping (e.g. WireGuard, or node added after startCore)
+	if !found || targetTag == "" {
+		return map[string]interface{}{
+			"success":          false,
+			"hotSwitched":      false,
+			"fallbackRequired": true,
+			"error":            "node is not in selector group",
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), clashRequestTimeout)
+	defer cancel()
+
+	clashAddr := core.ClashAPIAddr
+	s.stateMu.Lock()
+	if s.clashAddr != "" {
+		clashAddr = s.clashAddr
+	}
+	s.stateMu.Unlock()
+
+	if err := s.switchSelectorTag(ctx, clashAddr, secret, targetTag); err != nil {
+		return map[string]interface{}{
+			"success":          false,
+			"hotSwitched":      false,
+			"fallbackRequired": true,
+			"error":            fmt.Sprintf("clash api selector switch failed: %v", err),
+		}
+	}
+
+	// Update Windows Firewall Kill Switch if active (after core outbound switch succeeds)
+	var settings core.Settings
+	if err := json.Unmarshal([]byte(s.GetSettings()), &settings); err == nil && settings.KillSwitch {
+		targetOutbound, err := core.ParseProxyLink(trimmedLink)
+		if err != nil {
+			return map[string]interface{}{
+				"success":          false,
+				"hotSwitched":      false,
+				"fallbackRequired": true,
+				"error":            fmt.Sprintf("failed to parse target link for killswitch: %v", err),
+			}
+		}
+		newServerHost, _ := core.ServerEndpoint(targetOutbound)
+		if err := s.enableKillSwitch(newServerHost); err != nil {
+			return map[string]interface{}{
+				"success":          false,
+				"hotSwitched":      false,
+				"fallbackRequired": true,
+				"error":            fmt.Sprintf("failed to update killswitch firewall rule: %v", err),
+			}
+		}
+	}
+
+	// Hot-switch succeeded: update internal state
+	s.stateMu.Lock()
+	s.activeServerLink = trimmedLink
+	s.stateMu.Unlock()
+
+	// Keep watchdog synchronized so it probes the newly active node
+	s.watchdogMu.Lock()
+	s.watchdogLink = trimmedLink
+	s.watchdogMu.Unlock()
+
+	// Persist lastSelectedServer to state.json
+	s.fileMu.Lock()
+	secrets := s.readSecretSettingsLocked()
+	secrets["lastSelectedServer"] = trimmedLink
+	if err := s.writeSecretSettingsLocked(secrets); err != nil {
+		fmt.Printf("[vpn] warning: failed to persist lastSelectedServer: %v\n", err)
+	}
+	s.fileMu.Unlock()
+
+	// Update tray icon & tooltip with new server name
+	srvName := parseServerNameFromLink(trimmedLink)
+	s.setTrayConnected(true, srvName)
+
+	// Flush local OS DNS cache
+	_ = platform.Current().DNS().FlushCache()
+
+	// Notify frontend
+	s.emitSafe("server-switched", map[string]interface{}{
+		"link": trimmedLink,
+		"name": srvName,
+	})
+
+	return map[string]interface{}{
+		"success":     true,
+		"hotSwitched": true,
+	}
 }

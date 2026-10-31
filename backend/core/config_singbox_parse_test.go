@@ -96,3 +96,62 @@ func TestGeneratedConfigParsesInSingbox_TlsFragment(t *testing.T) {
 		t.Errorf("trojanOpt.TLS.RecordFragment = %v, want true", trojanOpt.TLS != nil && trojanOpt.TLS.RecordFragment)
 	}
 }
+
+
+func TestGenerateConfig_SelectorWithCandidates(t *testing.T) {
+	node1 := map[string]interface{}{
+		"type":        "vless",
+		"tag":         "de-node-1",
+		"server":      "198.51.100.1",
+		"server_port": 443,
+	}
+	node2 := map[string]interface{}{
+		"type":        "trojan",
+		"tag":         "nl-node-2",
+		"server":      "198.51.100.2",
+		"server_port": 8443,
+	}
+	candidates := []map[string]interface{}{node1, node2}
+
+	cfg, err := GenerateConfigWithCandidates(candidates, node1, Settings{TunMode: false, BypassRu: true}, false, "cache.db", "secret")
+	if err != nil {
+		t.Fatalf("GenerateConfigWithCandidates failed: %v", err)
+	}
+
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	ctx := include.Context(context.Background())
+	opts, err := sjson.UnmarshalExtendedContext[option.Options](ctx, raw)
+	if err != nil {
+		t.Fatalf("sing-box rejected config with selector: %v\n%s", err, string(raw))
+	}
+
+	// Verify selector is present and configured
+	var foundSelector bool
+	for _, ob := range opts.Outbounds {
+		if ob.Type == "selector" && ob.Tag == OutboundSelectorTag {
+			foundSelector = true
+			selOpt, ok := ob.Options.(*option.SelectorOutboundOptions)
+			if !ok {
+				t.Fatalf("selector options type = %T, want *option.SelectorOutboundOptions", ob.Options)
+			}
+			if selOpt.Default != "de-node-1" {
+				t.Errorf("selector default = %q, want de-node-1", selOpt.Default)
+			}
+			if len(selOpt.Outbounds) != 2 {
+				t.Errorf("selector outbounds count = %d, want 2", len(selOpt.Outbounds))
+			}
+		}
+	}
+	if !foundSelector {
+		t.Fatalf("selector outbound %q not found in parsed outbounds", OutboundSelectorTag)
+	}
+
+	// Verify route.final points to selector
+	if opts.Route == nil || opts.Route.Final != OutboundSelectorTag {
+		t.Errorf("route.final = %v, want %q", opts.Route.Final, OutboundSelectorTag)
+	}
+}

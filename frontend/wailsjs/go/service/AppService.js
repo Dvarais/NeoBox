@@ -202,6 +202,10 @@ export function StopXray() {
   return window['go']['service']['AppService']['StopXray']();
 }
 
+export function SwitchServer(arg1) {
+  return window['go']['service']['AppService']['SwitchServer'](arg1);
+}
+
 export function UpdateSubscriptionNow(arg1) {
   return window['go']['service']['AppService']['UpdateSubscriptionNow'](arg1);
 }

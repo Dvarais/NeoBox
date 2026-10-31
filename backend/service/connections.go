@@ -185,19 +185,18 @@ func (s *AppService) CloseConnection(id string) bool {
 	return err == nil
 }
 
-// fetchClash performs one authenticated request against the core's Clash API
-// and returns the body.
-//
-// The per-session secret is sent as a Bearer token and never leaves Go: the
-// frontend has no way to reach 127.0.0.1:9097 itself — the page's CSP does not
-// allow it — and no reason to hold the credential that guards the core.
-func fetchClash(ctx context.Context, method, addr, path, secret string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, method, "http://"+addr+path, nil)
+// fetchClashWithBody performs one authenticated request against the core's Clash API
+// with an optional body and returns the response body.
+func fetchClashWithBody(ctx context.Context, method, addr, path, secret string, body io.Reader) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, "http://"+addr+path, body)
 	if err != nil {
 		return nil, err
 	}
 	if secret != "" {
 		req.Header.Set("Authorization", "Bearer "+secret)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 
 	resp, err := clashClient.Do(req)
@@ -207,9 +206,20 @@ func fetchClash(ctx context.Context, method, addr, path, secret string) ([]byte,
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, fmt.Errorf("clash api %s %s: %s", method, path, resp.Status)
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("clash api %s %s: %s (response: %s)", method, path, resp.Status, string(b))
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// fetchClash performs one authenticated request against the core's Clash API
+// and returns the body.
+//
+// The per-session secret is sent as a Bearer token and never leaves Go: the
+// frontend has no way to reach 127.0.0.1:9097 itself — the page's CSP does not
+// allow it — and no reason to hold the credential that guards the core.
+func fetchClash(ctx context.Context, method, addr, path, secret string) ([]byte, error) {
+	return fetchClashWithBody(ctx, method, addr, path, secret, nil)
 }
 
 // decodeConnections turns a /connections payload into rows for the view. It

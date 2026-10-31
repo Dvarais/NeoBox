@@ -151,6 +151,7 @@ func (s *AppService) startWatchdog(link string, useSystemProxy bool) {
 				s.watchdogMu.Lock()
 				currentLink := s.watchdogLink
 				s.watchdogMu.Unlock()
+				upstream = upstreamProbeAddr(currentLink)
 				serverAnswers := upstream == "" || probeUpstream(ctx, currentLink, upstream)
 
 				// Сменили ли мы узел на этом такте. От этого зависит, считается

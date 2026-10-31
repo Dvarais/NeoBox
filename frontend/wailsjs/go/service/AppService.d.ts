@@ -103,6 +103,8 @@ export function StopGlobalHotkeys():Promise<void>;
 
 export function StopXray():Promise<Record<string, any>>;
 
+export function SwitchServer(arg1:string):Promise<Record<string, any>>;
+
 export function UpdateSubscriptionNow(arg1:string):Promise<void>;
 
 export function ValidateDNS(arg1:string):Promise<string>;

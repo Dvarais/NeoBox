@@ -82,6 +82,7 @@ type AppService struct {
 	cancelMonitor     context.CancelFunc
 	cancelAutoUpdate  context.CancelFunc
 	clashSecret       string // per-session random secret for Clash API auth
+	clashAddr         string // override address for tests; empty defaults to core.ClashAPIAddr
 	backupProxyServer string
 	backupProxyEnable uint32
 	hasProxyBackup    bool
@@ -94,6 +95,11 @@ type AppService struct {
 	// logStream batches sing-box log lines on their way to the frontend; nil
 	// while no core session is running. See logstream.go.
 	logStream *logStreamer
+
+	// serverLinkToTag maps proxy link URLs to their unique outbound tags in the sing-box selector.
+	serverLinkToTag map[string]string
+	// activeServerLink stores the currently active server URL for zero-downtime hot-switching.
+	activeServerLink string
 
 	// trafficMu guards the session traffic totals. They are accumulated in Go
 	// rather than the frontend so they stay correct across periods where the

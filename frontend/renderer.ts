@@ -683,16 +683,44 @@ window.api.onTrayServerSelected((link: string) => {
   activeServerLink = link;
   const info = parseBasicInfo(link);
   activeServerName.textContent = info.name;
+  activeServerDetails.textContent = `${info.type} • ${info.address}`;
   updateCards();
   collectAndSaveSettings();
+});
+
+window.api.onServerSwitched((data) => {
+  if (data && data.link) {
+    activeServerLink = data.link;
+    const info = parseBasicInfo(data.link);
+    activeServerName.textContent = info.name || data.name;
+    activeServerDetails.textContent = `${info.type} • ${info.address}`;
+    updateCards();
+  }
 });
 
 window.api.onTrayStartReconnect((data) => {
   activeServerLink = data.link;
   const info = parseBasicInfo(data.link);
   activeServerName.textContent = info.name;
+  activeServerDetails.textContent = `${info.type} • ${info.address}`;
   updateCards();
   collectAndSaveSettings();
+
+  if (appState === 'on') {
+    (async () => {
+      try {
+        const res = await window.api.switchServer(data.link);
+        if (res && res.hotSwitched) {
+          return;
+        }
+      } catch (e) {
+        console.warn('Hot switch failed from tray, falling back to restart:', e);
+      }
+      restartCore();
+    })();
+    return;
+  }
+
   updateAppInterface('connecting');
   (async () => {
     try {
@@ -1052,7 +1080,7 @@ async function selectAndConnectServer(link: string) {
   updateCards();
   collectAndSaveSettings();
 
-  // Если VPN выключен — подключаемся, если включен/подключается — перезапускаем
+  // Если VPN выключен — подключаемся, если включен — пробуем мгновенно переключить через Clash API, при отказе перезапускаем
   if (appState === 'off') {
     updateAppInterface('connecting');
     try {
@@ -1065,6 +1093,21 @@ async function selectAndConnectServer(link: string) {
       showAlert(translations[currentLanguage].errorDialogTitle, errorText(e), true, translations[currentLanguage]);
       updateAppInterface('off');
     }
+  } else if (appState === 'on') {
+    try {
+      const res = await window.api.switchServer(activeServerLink);
+      if (res && res.hotSwitched) {
+        // Мгновенное переключение успешно завершено без сброса TUN и без простоя
+        const homeTab = document.querySelector<HTMLElement>('.nav-item[data-target="view-home"]');
+        if (homeTab) {
+          homeTab.click();
+        }
+        return;
+      }
+    } catch (e) {
+      console.warn('Hot switch failed, falling back to restart:', e);
+    }
+    restartBtn.click();
   } else {
     restartBtn.click();
   }

@@ -187,6 +187,15 @@ export interface PingResult {
   latency: number;
 }
 
+/** Результат мгновенного переключения сервера через Clash API selector. */
+export interface SwitchServerResult {
+  success: boolean;
+  hotSwitched: boolean;
+  alreadyActive?: boolean;
+  fallbackRequired?: boolean;
+  error?: string;
+}
+
 /** Данные события tray-start-reconnect. */
 export interface TrayReconnectRequest {
   link: string;
@@ -292,6 +301,7 @@ export interface NeoBoxApi {
   // Соединение
   startXray(link: string, useSystemProxy: boolean): Promise<XrayResult>;
   restartXray(link: string, useSystemProxy: boolean): Promise<XrayResult>;
+  switchServer(link: string): Promise<SwitchServerResult>;
   stopXray(): Promise<XrayResult>;
   checkTunStatus(): Promise<boolean>;
   getKillSwitchState(): Promise<KillSwitchState>;
@@ -389,6 +399,7 @@ export interface NeoBoxApi {
   onPingResult(cb: (result: PingResult) => void): void;
   onSubscriptionResult(cb: (links: string[]) => void): void;
   onSubscriptionsUpdated(cb: () => void): Unsubscribe;
+  onServerSwitched(cb: (data: { link: string; name: string }) => void): Unsubscribe;
 
   // События трея
   onTrayToggleConnection(cb: () => void): Unsubscribe;

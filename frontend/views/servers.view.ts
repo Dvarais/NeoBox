@@ -100,6 +100,20 @@ export function updateCards(): void {
       );
       const appState = getAppStateFn();
       if (isNewServer && (appState === 'on' || appState === 'connecting')) {
+        if (appState === 'on' && window.api?.switchServer) {
+          void (async () => {
+            try {
+              const res = await window.api.switchServer(link);
+              if (res && res.hotSwitched) {
+                return;
+              }
+            } catch (e) {
+              console.warn('Hot switch failed on server select, falling back to restart:', e);
+            }
+            restartCoreFn();
+          })();
+          return;
+        }
         restartCoreFn();
       }
     },
@@ -188,6 +202,16 @@ export async function runAutoBestServer(): Promise<void> {
       );
 
       if (wasActive) {
+        if (appState === 'on' && window.api?.switchServer) {
+          try {
+            const res = await window.api.switchServer(bestLink);
+            if (res && res.hotSwitched) {
+              return;
+            }
+          } catch (e) {
+            console.warn('Hot switch failed on best server, falling back to restart:', e);
+          }
+        }
         restartCoreFn();
       } else {
         await startCoreFn(bestLink);

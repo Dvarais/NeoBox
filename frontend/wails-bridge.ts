@@ -31,6 +31,7 @@ import {
   SetGlobalHotkeys,
   StartXray,
   StopXray,
+  SwitchServer,
   UpdateSubscriptionNow,
   DNSResolverOwners,
   ValidateDNS,
@@ -47,6 +48,7 @@ import type {
   PingResult,
   StoredSettings,
   Subscription,
+  SwitchServerResult,
   UpdateInfo,
   XrayResult,
 } from './modules/api';
@@ -123,6 +125,7 @@ if (typeof window !== 'undefined') {
           RestartXray: async () => ({ success: true }),
           StartXray: async () => ({ success: true }),
           StopXray: async () => ({ success: true }),
+          SwitchServer: async () => ({ success: true, hotSwitched: true }),
           SessionTraffic: async () => ({ upload: 0, download: 0 }),
           SaveLogs: async () => 'C:/Users/User/Desktop/neobox.log',
           UpdateSubscriptionNow: async () => {},
@@ -152,6 +155,7 @@ const api: NeoBoxApi = {
     const settings = await api.getSettings();
     return (await RestartXray(link, JSON.stringify(settings), useSystemProxy)) as XrayResult;
   },
+  switchServer: (link) => SwitchServer(link) as Promise<SwitchServerResult>,
   stopXray: () => StopXray() as Promise<XrayResult>,
   pingServer: async (link) => {
     const latency = await PingServer(link);
@@ -257,6 +261,7 @@ const api: NeoBoxApi = {
   },
   onTrayToggleConnection: (callback) => EventsOn('tray-toggle-connection', callback),
   onSubscriptionsUpdated: (callback) => EventsOn('subscriptions-updated', callback),
+  onServerSwitched: (callback) => EventsOn('server-switched', callback),
   onTrayServerSelected: (callback) => EventsOn('tray-server-selected', callback),
   onTrayStartReconnect: (callback) => EventsOn('tray-start-reconnect', callback),
   onTrayRestart: (callback) => EventsOn('tray-restart', callback),
