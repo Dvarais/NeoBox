@@ -974,3 +974,53 @@ func TestProcessCustomRuleRejectsUnusableValue(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateConfig_OptimisticDNSAndStoreDNS(t *testing.T) {
+	cfg := generate(t, Settings{})
+	dnsSec, ok := cfg["dns"].(map[string]interface{})
+	if !ok {
+		t.Fatal("dns section missing")
+	}
+	if opt, ok := dnsSec["optimistic"].(bool); !ok || !opt {
+		t.Errorf("dns.optimistic = %v, want true", dnsSec["optimistic"])
+	}
+
+	exp, ok := cfg["experimental"].(map[string]interface{})
+	if !ok {
+		t.Fatal("experimental section missing")
+	}
+	cacheFile, ok := exp["cache_file"].(map[string]interface{})
+	if !ok {
+		t.Fatal("cache_file section missing")
+	}
+	if storeDNS, ok := cacheFile["store_dns"].(bool); !ok || !storeDNS {
+		t.Errorf("cache_file.store_dns = %v, want true", cacheFile["store_dns"])
+	}
+}
+
+func TestGenerateConfig_TunFullConeNAT(t *testing.T) {
+	cfg := generate(t, Settings{TunMode: true})
+	inbounds, ok := cfg["inbounds"].([]map[string]interface{})
+	if !ok {
+		t.Fatal("inbounds section missing")
+	}
+	var tunInbound map[string]interface{}
+	for _, in := range inbounds {
+		if in["tag"] == "tun-in" {
+			tunInbound = in
+			break
+		}
+	}
+	if tunInbound == nil {
+		t.Fatal("tun-in inbound not found")
+	}
+	if got := tunInbound["udp_mapping"]; got != "endpoint_independent" {
+		t.Errorf("tun-in udp_mapping = %v, want endpoint_independent", got)
+	}
+	if got := tunInbound["udp_filtering"]; got != "endpoint_independent" {
+		t.Errorf("tun-in udp_filtering = %v, want endpoint_independent", got)
+	}
+	if got := tunInbound["udp_timeout"]; got != "5m" {
+		t.Errorf("tun-in udp_timeout = %v, want 5m", got)
+	}
+}

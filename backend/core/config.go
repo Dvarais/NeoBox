@@ -1575,6 +1575,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			"final":           "dns-remote",
 			"strategy":        "ipv4_only",
 			"reverse_mapping": true,
+			"optimistic":      true,
 		},
 		"inbounds": []map[string]interface{}{
 			{
@@ -1608,6 +1609,7 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 				"enabled":      true,
 				"path":         cacheDBPath,
 				"store_fakeip": true,
+				"store_dns":    true,
 			},
 			"clash_api": map[string]interface{}{
 				"external_controller": ClashAPIAddr,
@@ -1686,6 +1688,9 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 			"address":        []string{"172.18.0.1/30", "fdfe:dcba:9876::1/126"},
 			"auto_route":     true,
 			"strict_route":   true,
+			"udp_mapping":    "endpoint_independent",
+			"udp_filtering":  "endpoint_independent",
+			"udp_timeout":    "5m",
 			// "mixed" runs TCP through the system stack and keeps gVisor for
 			// UDP. It is what sing-tun itself picks when no stack is named and
 			// gVisor is compiled in (see sing-tun/stack.go), so it is the best
