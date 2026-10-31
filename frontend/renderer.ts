@@ -161,6 +161,41 @@ if (activeServerCard) {
   });
 }
 
+const activeServerSpeedBtn = optionalEl<HTMLButtonElement>('activeServerSpeedBtn');
+if (activeServerSpeedBtn) {
+  activeServerSpeedBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!activeServerLink) return;
+    const t = translations[currentLanguage];
+    activeServerSpeedBtn.classList.remove('has-result');
+    activeServerSpeedBtn.classList.add('testing');
+    activeServerSpeedBtn.textContent = `⏳ ${t.speedtestTesting}`;
+    try {
+      const res = await window.api.testServerSpeed(activeServerLink);
+      activeServerSpeedBtn.classList.remove('testing');
+      if (res && res.success && res.mbps !== undefined) {
+        activeServerSpeedBtn.classList.add('has-result');
+        activeServerSpeedBtn.textContent = `⚡ ${res.mbps} Mbps`;
+      } else {
+        activeServerSpeedBtn.textContent = translations[currentLanguage].speedtestFailed;
+        setTimeout(() => {
+          if (!activeServerSpeedBtn.classList.contains('testing') && !activeServerSpeedBtn.classList.contains('has-result')) {
+            activeServerSpeedBtn.textContent = translations[currentLanguage].speedtestBtn;
+          }
+        }, 3000);
+      }
+    } catch (err) {
+      activeServerSpeedBtn.classList.remove('testing');
+      activeServerSpeedBtn.textContent = translations[currentLanguage].speedtestFailed;
+      setTimeout(() => {
+        if (!activeServerSpeedBtn.classList.contains('testing') && !activeServerSpeedBtn.classList.contains('has-result')) {
+          activeServerSpeedBtn.textContent = translations[currentLanguage].speedtestBtn;
+        }
+      }, 3000);
+    }
+  });
+}
+
 let sessionConnectedAt: number | null = null; // timestamp начала сессии
 let sessionTimerInterval: ReturnType<typeof setInterval> | null = null;
 let sessionTimerStart = 0; // отсчитываем от метки, а не от числа тиков
@@ -644,11 +679,21 @@ function handleConnectFailure(error: string | undefined, userInitiated: boolean)
 
 // Log parsing, streaming and search extracted to views/logs.view.ts
 
+function resetSpeedTestBtn(): void {
+  const speedBtn = optionalEl<HTMLButtonElement>('activeServerSpeedBtn');
+  if (speedBtn) {
+    speedBtn.classList.remove('has-result', 'testing');
+    speedBtn.textContent = translations[currentLanguage].speedtestBtn;
+  }
+}
+
 function updateActiveServerInfo(link: string | null, activeNode?: string): void {
   const t = translations[currentLanguage];
+  const speedBtn = optionalEl<HTMLButtonElement>('activeServerSpeedBtn');
   if (!link) {
     activeServerName.textContent = t.selectLocation;
     activeServerDetails.textContent = '';
+    if (speedBtn) speedBtn.style.display = 'none';
     return;
   }
   const info = parseBasicInfo(link);
@@ -662,6 +707,13 @@ function updateActiveServerInfo(link: string | null, activeNode?: string): void 
   } else {
     activeServerName.textContent = info.name || info.address || t.proxyFallbackName;
     activeServerDetails.textContent = `${info.type.toUpperCase()} • ${info.address}`;
+  }
+  if (speedBtn) {
+    speedBtn.style.display = 'inline-flex';
+    if (!speedBtn.classList.contains('testing') && !speedBtn.classList.contains('has-result')) {
+      speedBtn.textContent = t.speedtestBtn;
+      speedBtn.title = t.speedtestBtn;
+    }
   }
 }
 
@@ -742,6 +794,7 @@ window.api.onTrayRestart(() => restartBtn.click());
 
 window.api.onTrayServerSelected((link: string) => {
   activeServerLink = link;
+  resetSpeedTestBtn();
   updateActiveServerInfo(link);
   updateCards();
   collectAndSaveSettings();
@@ -755,6 +808,7 @@ window.api.onTrayServerSelected((link: string) => {
 window.api.onServerSwitched((data) => {
   if (data && data.link) {
     activeServerLink = data.link;
+    resetSpeedTestBtn();
     updateActiveServerInfo(data.link);
     updateCards();
     if (data.link === 'neobox://auto' && appState === 'on') {
@@ -767,6 +821,7 @@ window.api.onServerSwitched((data) => {
 
 window.api.onTrayStartReconnect((data) => {
   activeServerLink = data.link;
+  resetSpeedTestBtn();
   updateActiveServerInfo(data.link);
   updateCards();
   collectAndSaveSettings();
@@ -1143,6 +1198,7 @@ async function selectAndConnectServer(link: string) {
   const info = parseBasicInfo(link);
   if (!info) return;
 
+  resetSpeedTestBtn();
   activeServerLink = link;
   updateActiveServerInfo(link);
   if (link === 'neobox://auto' && appState === 'on') {
@@ -1258,6 +1314,7 @@ async function init() {
     onSaveSettings: () => collectAndSaveSettings(),
     getActiveServerLink: () => activeServerLink ?? '',
     onSelectServer: (link) => {
+      resetSpeedTestBtn();
       activeServerLink = link;
       updateActiveServerInfo(link);
       updateCards();
@@ -1294,6 +1351,7 @@ async function init() {
     getCurrentLanguage: () => currentLanguage,
     getActiveServerLink: () => activeServerLink,
     setActiveServer: (link, _name, _type, _address) => {
+      resetSpeedTestBtn();
       activeServerLink = link;
       updateActiveServerInfo(link);
       if (link === 'neobox://auto' && appState === 'on') {
@@ -1511,6 +1569,7 @@ if (window.api.onWatchdogSwitched) {
     void finishSessionHistory(traffic);
 
     activeServerLink = link;
+    resetSpeedTestBtn();
     const info = parseBasicInfo(link);
     const name = info.name || info.address || t.proxyFallbackName;
     updateActiveServerInfo(link);

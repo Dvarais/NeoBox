@@ -33,6 +33,7 @@ import {
   StartXray,
   StopXray,
   SwitchServer,
+  TestServerSpeed,
   UpdateSubscriptionNow,
   DNSResolverOwners,
   ValidateDNS,
@@ -48,6 +49,7 @@ import type {
   KillSwitchState,
   NeoBoxApi,
   PingResult,
+  ServerSpeedResult,
   StoredSettings,
   Subscription,
   SwitchServerResult,
@@ -167,6 +169,7 @@ const api: NeoBoxApi = {
       pingCallback({ link, latency });
     }
   },
+  testServerSpeed: (link?: string) => TestServerSpeed(link || '') as Promise<ServerSpeedResult>,
 
   // Живые соединения. Обёртки тонкие намеренно: Go уже отдаёт готовые к
   // отрисовке строки — обрезанные, отсортированные и с посчитанным правилом, —

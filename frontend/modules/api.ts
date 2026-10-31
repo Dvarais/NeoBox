@@ -204,6 +204,13 @@ export interface AutoSelectedNodeResult {
   error?: string;
 }
 
+/** Результат тестирования скорости сервера (Speedtest). */
+export interface ServerSpeedResult {
+  success: boolean;
+  mbps?: number;
+  error?: string;
+}
+
 /** Данные события tray-start-reconnect. */
 export interface TrayReconnectRequest {
   link: string;
@@ -315,6 +322,7 @@ export interface NeoBoxApi {
   checkTunStatus(): Promise<boolean>;
   getKillSwitchState(): Promise<KillSwitchState>;
   pingServer(link: string): Promise<void>;
+  testServerSpeed(link?: string): Promise<ServerSpeedResult>;
 
   // Живые соединения.
   //

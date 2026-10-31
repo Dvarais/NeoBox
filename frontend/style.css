@@ -873,6 +873,41 @@ label.check-row,
   text-overflow: ellipsis;
 }
 
+.active-server-speed-btn {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.active-server-speed-btn:hover {
+  background: var(--glass-04);
+  color: var(--accent-color);
+  border-color: var(--accent-color);
+}
+
+.active-server-speed-btn.testing {
+  opacity: 0.7;
+  cursor: wait;
+  pointer-events: none;
+}
+
+.active-server-speed-btn.has-result {
+  color: var(--success, #10b981);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
 .active-server-ping {
   font-family: var(--font-mono);
   font-size: var(--fs-micro);

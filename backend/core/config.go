@@ -53,6 +53,11 @@ func getRandomUserAgent() string {
 	return realisticUserAgents[idx.Int64()]
 }
 
+// GetRandomUserAgent returns a random browser User-Agent string from the pool.
+func GetRandomUserAgent() string {
+	return getRandomUserAgent()
+}
+
 // dohProviders maps the resolver addresses the DNS dropdown offers to the
 // DoH endpoint each one serves.
 //

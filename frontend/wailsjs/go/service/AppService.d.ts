@@ -107,6 +107,8 @@ export function SwitchServer(arg1:string):Promise<Record<string, any>>;
 
 export function GetAutoSelectedNode():Promise<Record<string, any>>;
 
+export function TestServerSpeed(arg1:string):Promise<Record<string, any>>;
+
 export function UpdateSubscriptionNow(arg1:string):Promise<void>;
 
 export function ValidateDNS(arg1:string):Promise<string>;

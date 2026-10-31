@@ -210,6 +210,10 @@ export function SwitchServer(arg1) {
   return window['go']['service']['AppService']['SwitchServer'](arg1);
 }
 
+export function TestServerSpeed(arg1) {
+  return window['go']['service']['AppService']['TestServerSpeed'](arg1);
+}
+
 export function UpdateSubscriptionNow(arg1) {
   return window['go']['service']['AppService']['UpdateSubscriptionNow'](arg1);
 }

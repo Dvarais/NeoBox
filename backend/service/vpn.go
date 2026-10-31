@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -404,18 +407,176 @@ func (s *AppService) RestartXray(link string, settingsJSON string, useSystemProx
 }
 
 // PingServer measures genuine round-trip latency to a proxy node by testing
-// end-to-end HTTP 204 connectivity through the proxy protocol via an ephemeral sing-box instance.
-// This validates real tunnel connectivity (credentials, TLS handshake, routing) and prevents
-// false-positive "green" pings on dead proxies or false-negative pings on UDP proxies whose hosts block ICMP echo.
+// end-to-end HTTP 204 connectivity through the proxy protocol.
+// When the VPN is connected, it uses the fast-path Clash API /proxies/{tag}/delay
+// on the running core with zero CPU/RAM overhead; otherwise it falls back to
+// the standalone ephemeral core with worker pool concurrency limiting.
 func (s *AppService) PingServer(link string) int {
+	trimmed := strings.TrimSpace(link)
+	if trimmed == "" {
+		return -1
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 
-	delay, err := core.MeasureProxyDelay(ctx, link, "")
+	// Fast path: if VPN is connected and node tag is registered in the Clash API selector
+	if s.GetVPNState() == VPNStateConnected {
+		s.stateMu.Lock()
+		clashAddr := core.ClashAPIAddr
+		if s.clashAddr != "" {
+			clashAddr = s.clashAddr
+		}
+		secret := s.clashSecret
+		targetTag, found := s.serverLinkToTag[trimmed]
+		s.stateMu.Unlock()
+
+		if found && targetTag != "" {
+			path := fmt.Sprintf("/proxies/%s/delay?url=%s&timeout=3500", url.PathEscape(targetTag), url.QueryEscape(core.DefaultDelayTestURL))
+			respBytes, err := fetchClash(ctx, http.MethodGet, clashAddr, path, secret)
+			if err == nil {
+				var result struct {
+					Delay int `json:"delay"`
+				}
+				if json.Unmarshal(respBytes, &result) == nil && result.Delay > 0 {
+					return result.Delay
+				}
+			}
+			// When registered in the running core's selector and Clash API returned error or timeout,
+			// the node is genuinely unreachable. Avoid spinning up an ephemeral instance with the remaining context.
+			return -1
+		}
+	}
+
+	// Fallback path: standalone ephemeral sing-box instance with semaphore rate-limiting
+	delay, err := core.MeasureProxyDelay(ctx, trimmed, "")
 	if err == nil && delay >= 0 {
 		return delay
 	}
 	return -1
+}
+
+// MeasureActiveConnectionSpeed downloads the speedtest payload through the currently active VPN tunnel
+// via local HTTP proxy (127.0.0.1:10808) with zero extra process overhead.
+func (s *AppService) MeasureActiveConnectionSpeed(ctx context.Context, testURL string, byteCount int64) (float64, error) {
+	if testURL == "" {
+		testURL = core.DefaultSpeedTestURL
+	}
+	proxyURL, err := url.Parse("http://" + core.ProxyListenAddr)
+	if err != nil {
+		return 0, err
+	}
+
+	transport := &http.Transport{
+		Proxy:             http.ProxyURL(proxyURL),
+		DisableKeepAlives: true,
+	}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   20 * time.Second,
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, testURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("User-Agent", core.GetRandomUserAgent())
+
+	start := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return 0, fmt.Errorf("speedtest endpoint returned HTTP %d", resp.StatusCode)
+	}
+
+	var totalRead int64
+	buf := make([]byte, 32*1024)
+	for {
+		n, rErr := resp.Body.Read(buf)
+		if n > 0 {
+			totalRead += int64(n)
+			if byteCount > 0 && totalRead >= byteCount {
+				break
+			}
+		}
+		if rErr != nil {
+			if rErr == io.EOF {
+				break
+			}
+			return 0, rErr
+		}
+	}
+
+	elapsed := time.Since(start)
+	if totalRead == 0 || elapsed <= 0 {
+		return 0, fmt.Errorf("no bytes transferred during speedtest")
+	}
+
+	mbps := (float64(totalRead) * 8.0) / (elapsed.Seconds() * 1_000_000.0)
+	return mbps, nil
+}
+
+// TestServerSpeed tests the effective downstream throughput in Mbps of a proxy server.
+// If the VPN is active and testing the current server, it downloads through the live tunnel.
+// Otherwise, it spins up an ephemeral core instance to measure throughput before connecting.
+func (s *AppService) TestServerSpeed(link string) map[string]interface{} {
+	trimmedLink := strings.TrimSpace(link)
+	if trimmedLink == "" {
+		s.stateMu.Lock()
+		trimmedLink = s.activeServerLink
+		s.stateMu.Unlock()
+	}
+	if trimmedLink == "" {
+		return map[string]interface{}{
+			"success": false,
+			"error":   "no server specified",
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+
+	s.stateMu.Lock()
+	activeLink := s.activeServerLink
+	s.stateMu.Unlock()
+	vpnConnected := s.GetVPNState() == VPNStateConnected
+
+	if trimmedLink == core.AutoServerLink && !vpnConnected {
+		return map[string]interface{}{
+			"success": false,
+			"error":   "speed test in auto mode requires an active connection",
+		}
+	}
+
+	var mbps float64
+	var err error
+
+	// If VPN is connected and testing the currently active server (or in Auto mode)
+	if vpnConnected && (trimmedLink == activeLink || trimmedLink == core.AutoServerLink) {
+		mbps, err = s.MeasureActiveConnectionSpeed(ctx, "", 5_000_000)
+	} else {
+		// Testing a disconnected or non-active server
+		mbps, err = core.MeasureProxySpeed(ctx, trimmedLink, "", 5_000_000)
+	}
+
+	if err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		}
+	}
+
+	// Round to 1 decimal place
+	roundedMbps := math.Round(mbps*10) / 10
+
+	return map[string]interface{}{
+		"success": true,
+		"mbps":    roundedMbps,
+	}
 }
 
 // CheckTunStatus checks if the "tun-neobox" network interface is active and up.
