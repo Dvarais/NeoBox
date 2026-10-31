@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -375,52 +374,19 @@ func (s *AppService) RestartXray(link string, settingsJSON string, useSystemProx
 	return res
 }
 
-// PingServer measures round-trip latency to a server: the TCP handshake where
-// the protocol runs over TCP, and an ICMP echo where it does not.
-//
-// The split exists because a TCP dial to a UDP-only server — WireGuard, TUIC,
-// Hysteria — can only ever time out, so every such node used to report -1 and
-// sank to the bottom of the "fastest server" ordering however good it was.
+// PingServer measures genuine round-trip latency to a proxy node by testing
+// end-to-end HTTP 204 connectivity through the proxy protocol via an ephemeral sing-box instance.
+// This validates real tunnel connectivity (credentials, TLS handshake, routing) and prevents
+// false-positive "green" pings on dead proxies or false-negative pings on UDP proxies whose hosts block ICMP echo.
 func (s *AppService) PingServer(link string) int {
-	outbound, err := core.ParseProxyLink(link)
-	if err != nil {
-		return -1
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
 
-	server, port := core.ServerEndpoint(outbound)
-	if server == "" || port == 0 {
-		return -1
+	delay, err := core.MeasureProxyDelay(ctx, link, "")
+	if err == nil && delay >= 0 {
+		return delay
 	}
-
-	// Resolve domain name via DoH first to prevent plaintext DNS leak over port 53
-	targetHost := server
-	if net.ParseIP(targetHost) == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		if ips, err := core.ResolveHost(ctx, server); err == nil && len(ips) > 0 {
-			targetHost = ips[0].String()
-		}
-		cancel()
-	}
-
-	if core.IsUDPOnly(core.ProtocolOf(link)) {
-		// ICMP times the path to the host rather than the service on the port.
-		// It is the closest thing to a round trip available without performing
-		// the protocol's own handshake, and it returns -1 when the server
-		// filters echo requests — the same "unknown" the caller already handles.
-		return icmpEchoLatency(targetHost, 3*time.Second)
-	}
-
-	// Use net.JoinHostPort so IPv6 addresses are correctly wrapped in brackets: [::1]:port
-	address := net.JoinHostPort(targetHost, strconv.Itoa(port))
-	start := time.Now()
-	conn, err := net.DialTimeout("tcp", address, 3*time.Second)
-	if err != nil {
-		return -1
-	}
-	defer conn.Close()
-
-	elapsed := time.Since(start)
-	return int(elapsed.Milliseconds())
+	return -1
 }
 
 // CheckTunStatus checks if the "tun-neobox" network interface is active and up.

@@ -31,22 +31,27 @@ func TestICMPEchoUnreachable(t *testing.T) {
 	}
 }
 
-// A WireGuard node keeps its server inside the first peer and speaks only UDP,
-// so both halves of PingServer's new behaviour have to line up for it to
-// report anything at all — it used to return -1 unconditionally.
-func TestPingServerTimesUDPOnlyNode(t *testing.T) {
+// PingServer uses an honest HTTP 204 end-to-end check through the proxy protocol.
+// A dead node — whether TCP or UDP — must return -1 instead of a false-positive ping.
+func TestPingServer_DeadNodesReturnMinusOne(t *testing.T) {
 	s := &AppService{}
-	link := "wireguard://cHJpdmF0ZS1rZXktZm9yLXRoZS1uZW9ib3gtdGVzdHM=@127.0.0.1:51820" +
-		"?address=172.16.0.2&publickey=cHVibGljLWtleS1mb3ItdGhlLW5lb2JveC10ZXN0cw%3D%3D#local"
 
-	if rtt := s.PingServer(link); rtt < 0 {
-		t.Errorf("PingServer(wireguard) = %d, want a round-trip time", rtt)
+	// Dead UDP-only WireGuard peer without a listening server: must return -1
+	wireguardLink := "wireguard://cHJpdmF0ZS1rZXktZm9yLXRoZS1uZW9ib3gtdGVzdHM=@127.0.0.1:51820" +
+		"?address=172.16.0.2&publickey=cHVibGljLWtleS1mb3ItdGhlLW5lb2JveC10ZXN0cw%3D%3D#local"
+	if rtt := s.PingServer(wireguardLink); rtt != -1 {
+		t.Errorf("PingServer(unreachable wireguard) = %d, want -1", rtt)
 	}
 
-	// A TCP protocol still measures the handshake, not the host: nothing
-	// listens on this port, so the dial fails.
-	if rtt := s.PingServer("vless://11111111-2222-3333-4444-555555555555@127.0.0.1:1#dead"); rtt != -1 {
+	// Dead TCP protocol with closed port: must return -1
+	vlessLink := "vless://11111111-2222-3333-4444-555555555555@127.0.0.1:1#dead"
+	if rtt := s.PingServer(vlessLink); rtt != -1 {
 		t.Errorf("PingServer(closed tcp port) = %d, want -1", rtt)
+	}
+
+	// Invalid link: must return -1
+	if rtt := s.PingServer("not-a-link"); rtt != -1 {
+		t.Errorf("PingServer(invalid) = %d, want -1", rtt)
 	}
 }
 
