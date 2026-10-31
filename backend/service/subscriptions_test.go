@@ -288,3 +288,43 @@ func TestMergeFetchedSubscriptionsKeepsLinksOnFailure(t *testing.T) {
 		t.Errorf("отметка времени сдвинулась при неудаче: %d", got[0].UpdatedAt)
 	}
 }
+
+func TestMergeFetchedSubscriptions_UpdatesUserInfo(t *testing.T) {
+	s := newSubService(t)
+	payload, _ := json.Marshal([]Subscription{
+		{ID: "sub-1", URL: "https://example.com/sub", Links: []string{"vless://old"}},
+	})
+	if !s.SaveSubscriptions(string(payload)) {
+		t.Fatal("SaveSubscriptions failed")
+	}
+
+	userInfo := &core.SubscriptionUserInfo{
+		Upload:   1000,
+		Download: 5000,
+		Total:    50000,
+		Expire:   1735689600,
+	}
+
+	if !s.mergeFetchedSubscriptions(map[string]subFetch{
+		"sub-1": {
+			Links:    []string{"vless://fresh"},
+			UserInfo: userInfo,
+		},
+	}) {
+		t.Fatal("mergeFetchedSubscriptions failed")
+	}
+
+	var got []Subscription
+	if err := json.Unmarshal([]byte(s.GetSubscriptions()), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 sub, got %d", len(got))
+	}
+	if got[0].UserInfo == nil {
+		t.Fatal("expected UserInfo to be non-nil")
+	}
+	if got[0].UserInfo.Total != 50000 || got[0].UserInfo.Expire != 1735689600 {
+		t.Errorf("unexpected UserInfo: %+v", got[0].UserInfo)
+	}
+}

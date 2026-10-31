@@ -8,6 +8,7 @@ import {
   DownloadAndInstallUpdate,
   ExportSettings,
   FetchSubscription,
+  FetchSubscriptionWithInfo,
   GetAppVersion,
   GetAutoSelectedNode,
   GetConnections,
@@ -52,6 +53,7 @@ import type {
   ServerSpeedResult,
   StoredSettings,
   Subscription,
+  SubscriptionFetchResult,
   SwitchServerResult,
   UpdateInfo,
   XrayResult,
@@ -230,6 +232,7 @@ const api: NeoBoxApi = {
     return { up: raw.up || 0, down: raw.down || 0 };
   },
   fetchSubscription: (url) => FetchSubscription(url),
+  fetchSubscriptionWithInfo: (url) => FetchSubscriptionWithInfo(url) as Promise<SubscriptionFetchResult>,
   updateSubscriptionNow: (id) => UpdateSubscriptionNow(id),
   importFromClipboard: async () => {
     try {

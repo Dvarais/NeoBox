@@ -128,11 +128,16 @@ export async function addSubscriptionByUrl(name: string, url: string): Promise<v
   // Background fetch
   (async () => {
     try {
-      const links = await window.api.fetchSubscription(url);
+      const res = await window.api.fetchSubscriptionWithInfo(url);
       const sub = allSubscriptions.find((s) => s.id === newSubId);
       if (sub) {
-        sub.links = links || [];
+        sub.links = res.links || [];
+        if (res.userInfo) {
+          sub.userInfo = res.userInfo;
+        }
         sub.loading = false;
+        sub.updatedAt = Date.now();
+        sub.lastError = undefined;
         await window.api.saveSubscriptions(allSubscriptions);
         await loadSubscriptions(); // Refresh tabs to remove hourglass spinner
         if (currentActiveSubId === newSubId || currentActiveSubId === 'all') {
@@ -362,9 +367,14 @@ export function initSubscriptionsView(options: SubscriptionsViewOptions): void {
           );
           for (const sub of remoteSubs) {
             try {
-              const links = await window.api.fetchSubscription(sub.url);
-              if (links && links.length > 0) {
-                sub.links = links;
+              const res = await window.api.fetchSubscriptionWithInfo(sub.url);
+              if (res && res.links && res.links.length > 0) {
+                sub.links = res.links;
+                if (res.userInfo) {
+                  sub.userInfo = res.userInfo;
+                }
+                sub.lastError = undefined;
+                sub.updatedAt = Date.now();
               }
             } catch (e) {
               console.error('Failed to update subscription:', sub.name, e);
@@ -386,9 +396,14 @@ export function initSubscriptionsView(options: SubscriptionsViewOptions): void {
             /^https?:\/\//i.test(sub.url)
           ) {
             try {
-              const links = await window.api.fetchSubscription(sub.url);
-              if (links && links.length > 0) {
-                sub.links = links;
+              const res = await window.api.fetchSubscriptionWithInfo(sub.url);
+              if (res && res.links && res.links.length > 0) {
+                sub.links = res.links;
+                if (res.userInfo) {
+                  sub.userInfo = res.userInfo;
+                }
+                sub.lastError = undefined;
+                sub.updatedAt = Date.now();
                 await window.api.saveSubscriptions(allSubscriptions);
                 await loadSubscriptions();
               }

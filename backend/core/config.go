@@ -2064,31 +2064,110 @@ func refuseInsecureRedirect(req *http.Request, via []*http.Request) error {
 // a different User-Agent.
 var errSubBlocked = errors.New("returned HTML or empty data")
 
-// fetchSubscriptionBody performs a single GET and returns the body only when it
-// looks like subscription data.
-func fetchSubscriptionBody(ctx context.Context, client *http.Client, subURL, userAgent string) ([]byte, error) {
+// SubscriptionUserInfo holds quota and expiration metadata extracted from the
+// "Subscription-Userinfo" HTTP response header supplied by proxy panel providers.
+type SubscriptionUserInfo struct {
+	Upload   int64 `json:"upload"`   // bytes uploaded
+	Download int64 `json:"download"` // bytes downloaded
+	Total    int64 `json:"total"`    // total quota in bytes (0 = unlimited / unspecified)
+	Expire   int64 `json:"expire"`   // unix timestamp in seconds when subscription expires (0 = no expiration)
+}
+
+// SubscriptionPayload contains parsed server links alongside subscription quota metadata.
+type SubscriptionPayload struct {
+	Links    []string              `json:"links"`
+	UserInfo *SubscriptionUserInfo `json:"userInfo,omitempty"`
+}
+
+// ParseSubscriptionUserInfo parses a "Subscription-Userinfo" header string
+// (e.g. "upload=1073741824; download=10737418240; total=107374182400; expire=1735689600").
+// It handles case-insensitivity, arbitrary spacing, and missing fields cleanly.
+// It returns nil if the header string contains no recognizable userinfo fields.
+func ParseSubscriptionUserInfo(header string) *SubscriptionUserInfo {
+	trimmed := strings.TrimSpace(header)
+	if trimmed == "" {
+		return nil
+	}
+
+	info := &SubscriptionUserInfo{}
+	foundAny := false
+
+	parts := strings.Split(trimmed, ";")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(kv[0]))
+		valStr := strings.TrimSpace(kv[1])
+		val, err := strconv.ParseInt(valStr, 10, 64)
+		if err != nil || val < 0 {
+			continue
+		}
+
+		switch key {
+		case "upload":
+			info.Upload = val
+			foundAny = true
+		case "download":
+			info.Download = val
+			foundAny = true
+		case "total":
+			info.Total = val
+			foundAny = true
+		case "expire":
+			info.Expire = val
+			foundAny = true
+		}
+	}
+
+	if !foundAny {
+		return nil
+	}
+	return info
+}
+
+// fetchSubscriptionBodyWithInfo performs a single GET and returns the body and parsed
+// Subscription-Userinfo only when the response looks like subscription data.
+func fetchSubscriptionBodyWithInfo(ctx context.Context, client *http.Client, subURL, userAgent string) ([]byte, *SubscriptionUserInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", subURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 
+	var userInfo *SubscriptionUserInfo
+	if rawInfo := resp.Header.Get("Subscription-Userinfo"); rawInfo != "" {
+		userInfo = ParseSubscriptionUserInfo(rawInfo)
+	}
+
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 20*1024*1024))
 	if err != nil {
-		return nil, fmt.Errorf("response read error: %w", err)
+		return nil, nil, fmt.Errorf("response read error: %w", err)
 	}
 
 	trimmed := strings.ToLower(strings.TrimSpace(string(body)))
 	if trimmed == "" || strings.Contains(trimmed, "<html") || strings.Contains(trimmed, "<script") {
-		return nil, errSubBlocked
+		return nil, nil, errSubBlocked
 	}
-	return body, nil
+	return body, userInfo, nil
+}
+
+// fetchSubscriptionBody performs a single GET and returns the body only when it
+// looks like subscription data.
+func fetchSubscriptionBody(ctx context.Context, client *http.Client, subURL, userAgent string) ([]byte, error) {
+	body, _, err := fetchSubscriptionBodyWithInfo(ctx, client, subURL, userAgent)
+	return body, err
 }
 
 // FetchSubscription loads subscription contents using background context.
@@ -2099,13 +2178,23 @@ func FetchSubscription(subURL string) ([]string, error) {
 
 // FetchSubscriptionContext loads subscription contents (both JSON-based xray-ext and standard lists)
 // with context cancellation support and hardened SSRF protection.
+func FetchSubscriptionContext(ctx context.Context, subURL string) ([]string, error) {
+	payload, err := FetchSubscriptionPayloadContext(ctx, subURL)
+	if err != nil {
+		return nil, err
+	}
+	return payload.Links, nil
+}
+
+// FetchSubscriptionPayloadContext loads subscription contents and extracts Subscription-Userinfo
+// with context cancellation support and hardened SSRF protection.
 //
 // Security:
 // - HTTP (non-TLS) subscription URLs are rejected to prevent MITM attacks.
 // - Private, loopback, link-local, and cloud metadata destinations (e.g. 169.254.169.254) are rejected (SSRF prevention).
 // - DNS rebinding attacks are prevented via net.Dialer.Control IP validation before TCP connection.
 // - URLs longer than maxLinkLength are rejected before the request is made.
-func FetchSubscriptionContext(ctx context.Context, subURL string) ([]string, error) {
+func FetchSubscriptionPayloadContext(ctx context.Context, subURL string) (*SubscriptionPayload, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -2122,7 +2211,7 @@ func FetchSubscriptionContext(ctx context.Context, subURL string) ([]string, err
 
 	// Direct proxy links (vless://, vmess://, etc.) bypass HTTP fetching.
 	if IsProxyLink(trimmedURL) {
-		return []string{trimmedURL}, nil
+		return &SubscriptionPayload{Links: []string{trimmedURL}}, nil
 	}
 
 	// Security: block plain HTTP subscription URLs — only HTTPS is allowed.
@@ -2202,6 +2291,7 @@ func FetchSubscriptionContext(ctx context.Context, subURL string) ([]string, err
 	userAgents := []string{getRandomUserAgent(), subscriptionClientUA}
 
 	var bodyBytes []byte
+	var userInfo *SubscriptionUserInfo
 	var fetchErrs []string
 	anyBlocked := false
 
@@ -2211,9 +2301,10 @@ fetch:
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			body, err := fetchSubscriptionBody(ctx, t.client, trimmedURL, ua)
+			body, uInfo, err := fetchSubscriptionBodyWithInfo(ctx, t.client, trimmedURL, ua)
 			if err == nil {
 				bodyBytes = body
+				userInfo = uInfo
 				break fetch
 			}
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -2427,7 +2518,7 @@ fetch:
 				}
 			}
 			if len(links) > 0 {
-				return links, nil
+				return &SubscriptionPayload{Links: links, UserInfo: userInfo}, nil
 			}
 		}
 	}
@@ -2437,14 +2528,14 @@ fetch:
 	// recognise as its own.
 	if strings.HasPrefix(rawData, "{") || strings.HasPrefix(rawData, "[") {
 		if links := parseSingboxOutbounds(bodyBytes); len(links) > 0 {
-			return links, nil
+			return &SubscriptionPayload{Links: links, UserInfo: userInfo}, nil
 		}
 	}
 
 	// Clash YAML, as served by most panels and sub-converters.
 	if looksLikeClashYAML(rawData) {
 		if links := parseClashYAML(bodyBytes); len(links) > 0 {
-			return links, nil
+			return &SubscriptionPayload{Links: links, UserInfo: userInfo}, nil
 		}
 	}
 
@@ -2489,5 +2580,5 @@ fetch:
 		// recognises — or the panel handed back an empty list.
 		return nil, errors.New(i18n.T(i18n.ErrSubNoNodes))
 	}
-	return parsedLinks, nil
+	return &SubscriptionPayload{Links: parsedLinks, UserInfo: userInfo}, nil
 }

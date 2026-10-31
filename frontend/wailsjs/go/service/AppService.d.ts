@@ -21,6 +21,8 @@ export function ExportSettings():Promise<string>;
 
 export function FetchSubscription(arg1:string):Promise<Array<string>>;
 
+export function FetchSubscriptionWithInfo(arg1:string):Promise<Record<string, any>>;
+
 export function GetAppCodename():Promise<string>;
 
 export function GetAppVersion():Promise<string>;

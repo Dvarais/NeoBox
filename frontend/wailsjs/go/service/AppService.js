@@ -38,6 +38,10 @@ export function FetchSubscription(arg1) {
   return window['go']['service']['AppService']['FetchSubscription'](arg1);
 }
 
+export function FetchSubscriptionWithInfo(arg1) {
+  return window['go']['service']['AppService']['FetchSubscriptionWithInfo'](arg1);
+}
+
 export function GetAppCodename() {
   return window['go']['service']['AppService']['GetAppCodename']();
 }

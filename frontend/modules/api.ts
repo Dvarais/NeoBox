@@ -9,6 +9,18 @@
 import type { Language } from './translations';
 import type { ThemeSpec } from './theme';
 
+export interface SubscriptionUserInfo {
+  upload: number;   // bytes
+  download: number; // bytes
+  total: number;    // bytes (0 = unlimited / not specified)
+  expire: number;   // unix timestamp in seconds (0 = none)
+}
+
+export interface SubscriptionFetchResult {
+  links: string[];
+  userInfo?: SubscriptionUserInfo;
+}
+
 /**
  * Подписка в том виде, в каком её хранит бэкенд.
  * Зеркалит структуру Subscription в backend/service/subscriptions.go.
@@ -30,6 +42,8 @@ export interface Subscription {
   lastError?: string;
   /** Свой период обновления в часах. Отсутствие означает «как у всех», 24 часа. */
   intervalHours?: number;
+  /** Метаданные квоты трафика и срока действия из Subscription-Userinfo. */
+  userInfo?: SubscriptionUserInfo;
 }
 
 /** Пользовательское правило маршрутизации. Зеркалит core.CustomRule. */
@@ -376,6 +390,7 @@ export interface NeoBoxApi {
    */
   sessionTraffic(): Promise<SessionTraffic>;
   fetchSubscription(url: string): Promise<string[]>;
+  fetchSubscriptionWithInfo(url: string): Promise<SubscriptionFetchResult>;
   /**
    * Загружает одну подписку, не дожидаясь её срока, и записывает исход —
    * включая неудачу. По завершении бэкенд шлёт 'subscriptions-updated'.

@@ -45,6 +45,9 @@ type Subscription struct {
 	// период на всех — это либо лишние запросы к одним, либо устаревшие узлы у
 	// других.
 	IntervalHours int `json:"intervalHours,omitempty"`
+
+	// UserInfo holds quota and expiration metadata from the Subscription-Userinfo header.
+	UserInfo *core.SubscriptionUserInfo `json:"userInfo,omitempty"`
 }
 
 // Периоды автообновления.
@@ -235,6 +238,28 @@ func (s *AppService) FetchSubscription(url string) ([]string, error) {
 	return core.FetchSubscriptionContext(ctx, url)
 }
 
+// SubscriptionFetchResult wraps parsed subscription links and optional provider userinfo.
+type SubscriptionFetchResult struct {
+	Links    []string                   `json:"links"`
+	UserInfo *core.SubscriptionUserInfo `json:"userInfo,omitempty"`
+}
+
+// FetchSubscriptionWithInfo loads subscription contents along with quota and expiration metadata.
+func (s *AppService) FetchSubscriptionWithInfo(url string) (*SubscriptionFetchResult, error) {
+	ctx := s.context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	payload, err := core.FetchSubscriptionPayloadContext(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	return &SubscriptionFetchResult{
+		Links:    payload.Links,
+		UserInfo: payload.UserInfo,
+	}, nil
+}
+
 // ImportClipboard filters proxy links from raw clipboard string.
 func (s *AppService) ImportClipboard(text string) []string {
 	var links []string
@@ -368,16 +393,19 @@ func (s *AppService) refreshSubscriptions(ctx context.Context, want func(Subscri
 			continue
 		}
 
-		links, err := core.FetchSubscriptionContext(ctx, sub.URL)
+		payload, err := core.FetchSubscriptionPayloadContext(ctx, sub.URL)
 		switch {
 		case err != nil:
 			results[sub.ID] = subFetch{Err: err.Error()}
-		case len(links) == 0:
+		case len(payload.Links) == 0:
 			// Пустой ответ без ошибки: формально загрузка удалась, но серверов
 			// в ней нет. Для пользователя это неудача, и назвать её надо так же.
 			results[sub.ID] = subFetch{Err: i18n.T(i18n.ErrSubNoNodes)}
 		default:
-			results[sub.ID] = subFetch{Links: links}
+			results[sub.ID] = subFetch{
+				Links:    payload.Links,
+				UserInfo: payload.UserInfo,
+			}
 		}
 	}
 
@@ -390,8 +418,9 @@ func (s *AppService) refreshSubscriptions(ctx context.Context, want func(Subscri
 // subFetch — исход одной загрузки. Links непуст только при успехе; Err несёт
 // уже переведённую причину неудачи.
 type subFetch struct {
-	Links []string
-	Err   string
+	Links    []string
+	UserInfo *core.SubscriptionUserInfo
+	Err      string
 }
 
 // mergeFetchedSubscriptions накладывает результаты на список, лежащий на диске
@@ -428,6 +457,9 @@ func (s *AppService) mergeFetchedSubscriptions(results map[string]subFetch) bool
 			subs[i].LastError = result.Err
 		} else {
 			subs[i].Links = result.Links
+			if result.UserInfo != nil {
+				subs[i].UserInfo = result.UserInfo
+			}
 			subs[i].LastError = ""
 			subs[i].UpdatedAt = time.Now().UnixMilli()
 		}
