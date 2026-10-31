@@ -1,18 +1,13 @@
-import { el, optionalEl, query, setText, setTitle, setPlaceholder, setAria, escapeHtml } from './modules/dom';
+import { el, optionalEl, query, setText, setTitle, setAria } from './modules/dom';
 import { translations, translate } from './modules/translations';
 import type { Language, Translations } from './modules/translations';
 import type {
   AppSettings,
-  ConnectionRow,
-  ConnectionsSnapshot,
   CustomRule,
-  HistoryEntry,
-  Profile,
-  ProfileSettings,
   SessionTraffic,
   UpdateInfo,
 } from './modules/api';
-import { fetchIP, isDialogOpen, showConfirm, showAlert, showPrompt, trapFocus, errorText } from './modules/ui-utils';
+import { fetchIP, isDialogOpen, showConfirm, showAlert, trapFocus, errorText } from './modules/ui-utils';
 import {
     allSubscriptions,
     currentActiveSubId,
@@ -33,8 +28,6 @@ import {
     pingDisplay
 } from './modules/server-manager';
 import type { SortMode } from './modules/server-manager';
-import { groupConnections } from './modules/grouping';
-import type { ConnectionGroup, GroupSort } from './modules/grouping';
 import { iconSvg } from './modules/icons';
 import {
   DEFAULT_THEME,
@@ -58,6 +51,23 @@ import {
   getProcessListWhitelist,
   setProcessListWhitelist,
 } from './views/routing.view';
+import {
+  initDnsLeakView,
+  applyDnsLeakLanguage,
+} from './views/dns-leak.view';
+import {
+  initHistoryView,
+  applyHistoryLanguage,
+  initHistory,
+  renderHistoryTab,
+  addSessionHistory,
+} from './views/history.view';
+import {
+  initProfilesView,
+  applyProfilesLanguage,
+  getProfiles,
+  setProfiles,
+} from './views/profiles.view';
 import {
   initSettingsView,
   applySettingsLanguage,
@@ -696,25 +706,11 @@ function applyLanguage() {
   renderRulesPending();
 
   // System integration, network, hotkeys, security, and appearance labels handled by applySettingsLanguage(t)
-  el('profilesTitle').textContent = t.profilesTitle;
-  el('profilesDesc').textContent = t.profilesDesc;
-  el('profilesEmpty').textContent = t.profilesEmpty;
-  el('saveProfileBtnText').textContent = t.saveProfileBtn;
-  el('profileIncludeServerLabel').textContent = t.profileIncludeServerLabel;
-  renderProfiles();
+  applyProfilesLanguage(t);
   updateInterceptionGuidance();
   void refreshKillSwitchStatus();
 
-  // History tab. The cards themselves are rebuilt by renderHistoryTab() below,
-  // which picks up the language on its own.
-  setText('historyTitle', t.historyTitle);
-  setText('clearHistoryBtnText', t.historyClearBtn);
-  setText('historyStatSessionsLabel', t.historyStatSessionsLabel);
-  setText('historyStatTimeLabel', t.historyStatTimeLabel);
-  setText('historyStatDownLabel', t.historyStatDownLabel);
-  setText('historyStatUpLabel', t.historyStatUpLabel);
-  setText('historyEmptyText', t.historyEmptyText);
-  renderHistoryTab();
+  applyHistoryLanguage(t);
 
   // Shared prompt/confirm modal — its buttons are reused by every dialog.
   setText('modalCancel', t.modalCancel);
@@ -722,13 +718,7 @@ function applyLanguage() {
 
   // DNS leak test. Only the static chrome is set here; the verdict line is
   // written by runDnsLeakTest() when a test actually runs.
-  setText('dnsLeakBtnText', t.dnsLeakBtn);
-  setText('dnsLeakModalTitle', t.dnsLeakModalTitle);
-  setText('dnsLeakModalSubtitle', t.dnsLeakModalSubtitle);
-  setText('dnsLeakLoadingText', t.dnsLeakLoadingText);
-  setText('dnsLeakIpLabel', t.dnsLeakIpLabel);
-  setText('dnsLeakDnsLabel', t.dnsLeakDnsLabel);
-  setText('dnsLeakRetryBtnText', t.dnsLeakRetryBtn);
+  applyDnsLeakLanguage(t);
 
   // Update Modal translations
   const updateModalTitleEl = optionalEl('updateModalTitle');
@@ -1241,27 +1231,6 @@ function startSessionTracking() {
   sessionConnectedAt = Date.now();
 }
 
-// Форматирование байт в читаемый вид
-function formatBytes(bytes: number) {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return (bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 2) + ' ' + sizes[i];
-}
-
-// Формат длительности сессии в человекоческий вид
-function formatDuration(seconds: number) {
-  const t = translations[currentLanguage];
-  if (seconds < 60) return `${seconds}${t.durationSec}`;
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  if (m < 60) return `${m}${t.durationMin} ${s}${t.durationSec}`;
-  const h = Math.floor(m / 60);
-  const rm = m % 60;
-  return `${h}${t.durationHour} ${rm}${t.durationMin}`;
-}
-
 // Запись сессии в историю.
 //
 // Всё, что описывает закрываемую сессию, снимается синхронно, до первого
@@ -1301,531 +1270,12 @@ async function finishSessionHistory(switchTraffic?: SessionTraffic): Promise<voi
     bytesUp: traffic.up
   };
 
-  const history = loadHistory();
-  history.unshift(entry);
-  if (history.length > 100) history.pop(); // храним не более 100 записей
-  saveHistory(history);
-
-  renderHistoryTab();
+  addSessionHistory(entry);
 }
 
-// Ключ, под которым история лежала в localStorage до переезда к бэкенду.
-// Остаётся здесь ради одноразового переноса — см. initHistory.
-const LEGACY_HISTORY_KEY = 'neobox-connection-history';
+// History store and view extracted to views/history.view.ts
 
-/**
- * История в памяти.
- *
- * Читается она отовсюду синхронно — вкладка рисуется прямо в обработчике
- * клика, — а бэкенд отвечает промисом. Кэш примиряет одно с другим: он
- * заполняется один раз при старте и дальше служит источником истины для
- * экрана, а запись на диск идёт вдогонку и никого не ждёт. Порядок операций
- * при этом сохраняется: Wails выполняет вызовы по очереди, а сюда история
- * приходит только из finishSessionHistory и кнопки «Очистить».
- */
-let historyCache: HistoryEntry[] = [];
-
-function loadHistory(): HistoryEntry[] {
-  return historyCache;
-}
-
-function saveHistory(history: HistoryEntry[]) {
-  historyCache = history;
-  void window.api.saveHistory(history);
-}
-
-/**
- * Поднимает историю с бэкенда и переносит туда то, что осталось в localStorage
- * от версий до 1.7.6.
- *
- * Перенос делается один раз и только в пустую историю: если у бэкенда уже
- * что-то есть, значит переезд состоялся раньше, а остаток в localStorage —
- * копия того же самого, и затирать ею свежие записи нельзя.
- *
- * Ключ снимается только после успешной записи. Провалившийся перенос обязан
- * оставить старые данные на месте, иначе единственная неудачная попытка стоила
- * бы пользователю всей истории — ровно того, ради чего переезд и затевался.
- */
-async function initHistory(): Promise<void> {
-  historyCache = await window.api.getHistory();
-
-  const legacyRaw = localStorage.getItem(LEGACY_HISTORY_KEY);
-  if (legacyRaw !== null) {
-    let legacy: unknown = null;
-    try {
-      legacy = JSON.parse(legacyRaw);
-    } catch {
-      legacy = null; // нечитаемый остаток переносить некуда
-    }
-
-    if (historyCache.length === 0 && Array.isArray(legacy) && legacy.length > 0) {
-      if (await window.api.saveHistory(legacy as HistoryEntry[])) {
-        historyCache = legacy as HistoryEntry[];
-        localStorage.removeItem(LEGACY_HISTORY_KEY);
-      }
-    } else {
-      localStorage.removeItem(LEGACY_HISTORY_KEY);
-    }
-  }
-
-  renderHistoryTab();
-}
-
-// Поиск ссылки сервера в подписках по метаданным (для обратной совместимости)
-function findServerLink(name: string, address: string, protocol: string) {
-  if (!allSubscriptions) return null;
-  for (const sub of allSubscriptions) {
-    if (sub.links) {
-      for (const link of sub.links) {
-        const info = parseBasicInfo(link);
-        if (info && info.address === address && info.type.toLowerCase() === protocol.toLowerCase()) {
-          return link;
-        }
-      }
-    }
-  }
-  return null;
-}
-
-// Установка активного сервера и запуск подключения
-async function selectAndConnectServer(link: string) {
-  if (!link) return;
-  const info = parseBasicInfo(link);
-  if (!info) return;
-
-  const isNewServer = activeServerLink !== link;
-  activeServerLink = link;
-  activeServerName.textContent = info.name;
-  activeServerDetails.textContent = `${info.type} • ${info.address}`;
-
-  updateCards();
-  collectAndSaveSettings();
-
-  // Если VPN выключен — подключаемся, если включен/подключается — перезапускаем
-  if (appState === 'off') {
-    updateAppInterface('connecting');
-    try {
-      const res = await window.api.startXray(activeServerLink, el<HTMLInputElement>('systemProxyCheckbox').checked);
-      if (res && !res.success) {
-        showAlert(translations[currentLanguage].errorDialogTitle, res.error || 'Unknown error', true, translations[currentLanguage]);
-        updateAppInterface('off');
-      }
-    } catch (e) {
-      showAlert(translations[currentLanguage].errorDialogTitle, errorText(e), true, translations[currentLanguage]);
-      updateAppInterface('off');
-    }
-  } else {
-    restartBtn.click();
-  }
-
-  // Переключаем вкладку на Главную
-  const homeTab = document.querySelector<HTMLElement>('.nav-item[data-target="view-home"]');
-  if (homeTab) {
-    homeTab.click();
-  }
-}
-
-// Статичная разметка иконок. Это константы без интерполяции, поэтому их можно
-// безопасно присваивать через innerHTML, в отличие от данных из подписок.
-const PLAY_ICON_SVG = `
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <polygon points="6 3 20 12 6 21 6 3" fill="currentColor"/>
-  </svg>`;
-
-const YOUTUBE_ICON_SVG = `
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M21.58 7.18a3.001 3.001 0 0 0-2.12-2.12C17.59 4.5 12 4.5 12 4.5s-5.59 0-7.46.56A3.001 3.001 0 0 0 2.42 7.18 31.248 31.248 0 0 0 1.8 12c0 1.6.2 3.22.62 4.82a3.001 3.001 0 0 0 2.12 2.12c1.87.56 7.46.56 7.46.56s5.59 0 7.46-.56a3.001 3.001 0 0 0 2.12-2.12c.42-1.6.62-3.22.62-4.82a31.248 31.248 0 0 0-.62-4.82z" fill="#FF0000"/>
-    <polygon points="10 9 10 15 15 12" fill="#FFFFFF"/>
-  </svg>`;
-
-// Рендер вкладки История
-function renderHistoryTab() {
-  const t = translations[currentLanguage];
-  const history = loadHistory();
-  const list = optionalEl('historyList');
-  const empty = el('historyEmpty');
-  const statsRow = el('historyStatsRow');
-
-  if (!list) return;
-
-  if (history.length === 0) {
-    list.innerHTML = '';
-    empty.style.display = 'flex';
-    statsRow.style.display = 'none';
-    return;
-  }
-
-  empty.style.display = 'none';
-  statsRow.style.display = 'grid';
-
-  // Сводная статистика
-  const totalDuration = history.reduce((sum, e) => sum + e.durationSec, 0);
-  const totalDown = history.reduce((sum, e) => sum + (e.bytesDown || 0), 0);
-  const totalUp = history.reduce((sum, e) => sum + (e.bytesUp || 0), 0);
-  el('historyStatSessions').textContent = String(history.length);
-  el('historyStatTime').textContent = formatDuration(totalDuration);
-  el('historyStatDown').textContent = formatBytes(totalDown);
-  el('historyStatUp').textContent = formatBytes(totalUp);
-
-  // Карточки.
-  //
-  // БЕЗОПАСНОСТЬ: имя сервера, протокол и адрес приходят из ссылки подписки
-  // (fragment после #), то есть полностью подконтрольны тому, кто эту подписку
-  // раздаёт. Карточки собираются через DOM API с textContent, а не шаблонной
-  // строкой в innerHTML: раньше имя вставлялось сырым и в тело, и в атрибут
-  // title, где кавычка в имени позволяла дописать произвольные атрибуты.
-  // Плитка записи несёт один и тот же значок узла для всех протоколов.
-  //
-  // Раньше протокол кодировался цветным кружком: 🟢 VLESS, 🟡 VMess, 🔷 Trojan,
-  // 💜 Shadowsocks, 🟤 TUIC. Различие держалось ровно на цвете и ни на чём
-  // больше, то есть для человека, не различающего эти оттенки, четырнадцать
-  // протоколов выглядели одинаково — критерий WCAG 1.4.1, а продукт объявил
-  // целью AA. Заодно кружки были эмодзи и не подчинялись теме.
-  //
-  // Дублировать цвет формой было бы честнее, но и незачем: протокол уже
-  // написан словом в строке ниже — «VLESS», «HYSTERIA2». Плитке остаётся её
-  // настоящая работа — быть кнопкой переподключения (при наведении она
-  // показывает ▶), а не вторым, худшим способом сообщить то же самое.
-  list.innerHTML = '';
-  const fragment = document.createDocumentFragment();
-
-  history.forEach((entry: HistoryEntry) => {
-    const date = new Date(entry.connectedAt);
-    const dateStr = date.toLocaleDateString(t.dateLocale, { day: '2-digit', month: '2-digit' });
-    const timeStr = date.toLocaleTimeString(t.dateLocale, { hour: '2-digit', minute: '2-digit' });
-    const dur = formatDuration(entry.durationSec);
-    const down = formatBytes(entry.bytesDown || 0);
-    const up = formatBytes(entry.bytesUp || 0);
-    const proto = (entry.protocol || '?').toUpperCase();
-    const serverName = entry.server || '';
-
-    // Пасхалка: YouTube иконка для серверов с youtube/yt/goog/dpi или случайно ~10% записей
-    const isStableEgg = entry.server?.toLowerCase().includes('youtube') ||
-                        entry.server?.toLowerCase().includes('yt') ||
-                        entry.server?.toLowerCase().includes('goog') ||
-                        entry.server?.toLowerCase().includes('dpi') ||
-                        (entry.id && entry.id.charCodeAt(0) % 10 === 0);
-
-    const card = document.createElement('div');
-    card.className = 'history-card';
-
-    // Кнопка повторного подключения
-    const icon = document.createElement('button');
-    icon.type = 'button';
-    icon.className = isStableEgg ? 'history-card-icon youtube-easter-egg' : 'history-card-icon';
-    icon.dataset.id = entry.id;
-    icon.title = t.historyConnectTitle;
-    icon.setAttribute('aria-label', `${t.historyConnectTitle}: ${serverName}`);
-
-    const mark = document.createElement('span');
-    mark.className = 'history-icon-mark';
-    mark.innerHTML = iconSvg('globe', 18);
-
-    const playGeneric = document.createElement('span');
-    playGeneric.className = 'history-icon-play generic';
-    playGeneric.innerHTML = PLAY_ICON_SVG;
-
-    const playYoutube = document.createElement('span');
-    playYoutube.className = 'history-icon-play youtube';
-    playYoutube.innerHTML = YOUTUBE_ICON_SVG;
-
-    icon.appendChild(mark);
-    icon.appendChild(playGeneric);
-    icon.appendChild(playYoutube);
-
-    // Тело карточки
-    const body = document.createElement('div');
-    body.className = 'history-card-body';
-
-    const server = document.createElement('div');
-    server.className = 'history-card-server';
-    // Оба присваивания — свойства элемента, а не разметка: браузер не парсит их как HTML.
-    server.title = serverName;
-    server.textContent = serverName;
-
-    const meta = document.createElement('div');
-    meta.className = 'history-card-meta';
-
-    // Моноширинный бейдж протокола
-    const protoChip = document.createElement('span');
-    protoChip.className = 'history-proto-chip';
-    protoChip.textContent = proto;
-    meta.appendChild(protoChip);
-
-    // Длительность и время подключения
-    const durItem = document.createElement('span');
-    durItem.className = 'history-meta-item';
-    durItem.innerHTML = iconSvg('clock', 12);
-    const durText = document.createElement('span');
-    durText.textContent = dur;
-    durItem.appendChild(durText);
-    meta.appendChild(durItem);
-
-    const dateItem = document.createElement('span');
-    dateItem.className = 'history-meta-item';
-    dateItem.innerHTML = iconSvg('calendar', 12);
-    const dateText = document.createElement('span');
-    dateText.textContent = `${dateStr} ${timeStr}`;
-    dateItem.appendChild(dateText);
-    meta.appendChild(dateItem);
-
-    body.appendChild(server);
-    body.appendChild(meta);
-
-    // Трафик
-    const traffic = document.createElement('div');
-    traffic.className = 'history-card-traffic';
-
-    const downSpan = document.createElement('span');
-    downSpan.className = 'history-traffic-badge down';
-    downSpan.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
-    const downText = document.createElement('span');
-    downText.textContent = down;
-    downSpan.appendChild(downText);
-
-    const upSpan = document.createElement('span');
-    upSpan.className = 'history-traffic-badge up';
-    upSpan.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="17 14 12 9 7 14"/><line x1="12" y1="9" x2="12" y2="21"/></svg>`;
-    const upText = document.createElement('span');
-    upText.textContent = up;
-    upSpan.appendChild(upText);
-
-    traffic.appendChild(downSpan);
-    traffic.appendChild(upSpan);
-
-    // Кнопка удаления отдельной записи
-    const delBtn = document.createElement('button');
-    delBtn.type = 'button';
-    delBtn.className = 'history-delete-btn';
-    delBtn.dataset.deleteId = entry.id;
-    delBtn.title = t.historyDeleteTitle;
-    delBtn.setAttribute('aria-label', `${t.historyDeleteTitle}: ${serverName}`);
-    delBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`;
-
-    card.appendChild(icon);
-    card.appendChild(body);
-    card.appendChild(traffic);
-    card.appendChild(delBtn);
-    fragment.appendChild(card);
-  });
-
-  list.appendChild(fragment);
-
-  // Обработчик клика по иконке запуска и кнопке удаления (через делегирование)
-  list.onclick = (e) => {
-    const target = e.target as HTMLElement;
-
-    // Удаление отдельной записи
-    const delBtn = target.closest<HTMLElement>('.history-delete-btn');
-    if (delBtn) {
-      e.stopPropagation();
-      const deleteId = delBtn.dataset.deleteId;
-      if (deleteId) {
-        const hist = loadHistory();
-        const updated = hist.filter(item => item.id !== deleteId);
-        saveHistory(updated);
-        renderHistoryTab();
-      }
-      return;
-    }
-
-    // Подключение к серверу
-    const iconBtn = target.closest<HTMLElement>('.history-card-icon');
-    if (iconBtn) {
-      const entryId = iconBtn.getAttribute('data-id');
-      const hist = loadHistory();
-      const entry = hist.find(item => item.id === entryId);
-      if (entry) {
-        const link = entry.link || findServerLink(entry.server, entry.address, entry.protocol);
-        if (link) {
-          selectAndConnectServer(link);
-        } else {
-          showAlert(translations[currentLanguage].alertDialogTitle, translations[currentLanguage].historyServerNotFound, false, translations[currentLanguage]);
-        }
-      }
-    }
-  };
-
-  // Клавиатурная доступность
-  list.onkeydown = (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      const activeEl = document.activeElement as HTMLElement | null;
-      if (activeEl && (activeEl.classList.contains('history-card-icon') || activeEl.classList.contains('history-delete-btn'))) {
-        e.preventDefault();
-        activeEl.click();
-      }
-    }
-  };
-
-  // Динамический Shift-пасхалка при движении мыши (для мгновенной реакции на зажатый Shift)
-  list.onmousemove = (e) => {
-    const iconBtn = (e.target as HTMLElement).closest('.history-card-icon');
-    if (iconBtn) {
-      const entryId = iconBtn.getAttribute('data-id');
-      const hist = loadHistory();
-      const entry = hist.find(item => item.id === entryId);
-      if (entry) {
-        const isStableEgg = entry.server?.toLowerCase().includes('youtube') || 
-                            entry.server?.toLowerCase().includes('yt') || 
-                            entry.server?.toLowerCase().includes('goog') || 
-                            entry.server?.toLowerCase().includes('dpi') ||
-                            (entry.id && entry.id.charCodeAt(0) % 10 === 0);
-        if (e.shiftKey) {
-          iconBtn.classList.add('youtube-easter-egg');
-        } else if (!isStableEgg) {
-          iconBtn.classList.remove('youtube-easter-egg');
-        }
-      }
-    }
-  };
-}
-
-el('clearHistoryBtn').onclick = () => {
-  saveHistory([]);
-  renderHistoryTab();
-};
-
-// ── DNS Leak Test ────────────────────────────────────────────────────────────
-// Удержание фокуса ставится один раз на открытие: «Повторить» перезапускает
-// проверку в уже открытом окне, и повторный trapFocus положил бы в стек второй
-// экземпляр того же диалога.
-let dnsLeakRelease: (() => void) | null = null;
-
-function closeDnsLeakModal(): void {
-  el('dnsLeakModalOverlay').style.display = 'none';
-  dnsLeakRelease?.();
-  dnsLeakRelease = null;
-}
-
-el('dnsLeakBtn').onclick = () => runDnsLeakTest();
-el('dnsLeakCloseBtn').onclick = closeDnsLeakModal;
-el('dnsLeakRetryBtn').onclick = () => runDnsLeakTest();
-
-async function runDnsLeakTest() {
-  const t = translations[currentLanguage];
-  const overlay = el('dnsLeakModalOverlay');
-  const loading = el('dnsLeakLoading');
-  const result  = el('dnsLeakResult');
-  const iconWrap = el('dnsLeakIconWrap');
-  const banner   = el('dnsLeakStatusBanner');
-  const statusTxt = el('dnsLeakStatusText');
-  const statusIcon = el('dnsLeakStatusIcon');
-  const ipEl     = el('dnsLeakIp');
-  const dnsList  = el('dnsLeakDnsList');
-  const retryBtn = el('dnsLeakRetryBtn');
-
-  // Показываем модалку, сбрасываем состояние
-  overlay.style.display = 'flex';
-  if (!dnsLeakRelease) {
-    dnsLeakRelease = trapFocus(overlay, el('dnsLeakCloseBtn'), closeDnsLeakModal);
-  }
-  loading.style.display = 'flex';
-  result.style.display  = 'none';
-  retryBtn.style.display = 'none';
-  iconWrap.className = 'dns-leak-icon-wrap';
-  banner.className = 'dns-leak-status-banner';
-
-  try {
-    // 1. Получаем внешний IP через ipify
-    const ipRes = await fetch('https://api.ipify.org?format=json').then(r => r.json());
-    const myIp = ipRes.ip || '?';
-
-    // 2. Спрашиваем, какой резолвер на самом деле обслужил запрос.
-    //
-    // Раньше здесь стоял TXT-запрос whoami.cloudflare.com, отправленный прямо в
-    // cloudflare-dns.com. Такой запрос ничего не проверял: резолвером в нём
-    // всегда оказывался Cloudflare — его и просили, — поэтому проверка отвечала
-    // «утечек нет» при любом состоянии туннеля, а сверка с захардкоженными
-    // префиксами Cloudflare начала врать сразу, как только настройка DNS
-    // заработала и стало можно выбрать Google или Quad9.
-    //
-    // edns.ip-api.com отвечает редиректом на случайное имя в своей зоне. Это имя
-    // резолвится обычным путём — то есть тем DNS, который у приложения
-    // настроен, — а авторитетный сервер зоны видит, кто именно спросил, и
-    // возвращает его адрес и владельца. Проверяется поэтому реальный путь
-    // запроса, а не то, кому мы этот запрос адресовали.
-    const edns = await fetch('https://edns.ip-api.com/json').then(r => r.json());
-    const resolverIp: string = edns?.dns?.ip ?? '';
-    const resolverGeo: string = edns?.dns?.geo ?? '';
-
-    // Владелец сети резолвера для каждого встроенного варианта из dnsSelect.
-    //
-    // Сравнивается именно владелец, а не адрес: DoH-провайдер принимает запросы
-    // на 1.1.1.1, а к авторитетным серверам ходит с совсем других адресов своей
-    // сети. Строка geo от ip-api имеет вид «Russia - Cloudflare, Inc.» — то есть
-    // содержит имя организации из записи AS, по нему и опознаём.
-    //
-    // Карта приходит с бэкенда (core.DNSResolverOwners) — та же, по которой
-    // собирается конфиг. Своя копия здесь разошлась бы с ней при первом
-    // добавленном провайдере, и разошлась бы худшим образом: проверка объявила
-    // бы утечку на исправном туннеле, не зная владельца нового резолвера.
-    const resolverOwners = await window.api.dnsResolverOwners();
-
-    // Сверять надо с тем DNS, который ядро использует сейчас, а не с тем, что
-    // выбран в списке: настройка вступает в силу только при перезапуске ядра.
-    const expectedOwner = resolverOwners[getAppliedDns() || currentDnsSetting()];
-    const seen = `${resolverGeo} ${resolverIp}`.toLowerCase();
-
-    // Отображаем результат
-    loading.style.display = 'none';
-    result.style.display  = 'block';
-    retryBtn.style.display = 'flex';
-    ipEl.textContent = myIp;
-
-    // textContent, а не innerHTML: строка приходит из ответа стороннего сервиса.
-    dnsList.innerHTML = '';
-    const div = document.createElement('div');
-    div.className = 'dns-leak-dns-entry';
-    if (resolverIp) {
-      div.textContent = resolverGeo ? `${resolverIp} (${resolverGeo})` : resolverIp;
-    } else {
-      div.style.color = 'var(--text-dim)';
-      div.textContent = t.dnsLeakUnknown;
-    }
-    dnsList.appendChild(div);
-
-    // Три исхода, а не два. Своему DoH-адресу владельца сети взять неоткуда, и
-    // называть это утечкой нельзя: красная плашка на исправном туннеле — ровно
-    // та ошибка, из-за которой проверку и переписали. Показываем резолвера и
-    // говорим прямо, что подтвердить не смогли.
-    if (!resolverIp) {
-      iconWrap.className = 'dns-leak-icon-wrap';
-      banner.className   = 'dns-leak-status-banner';
-      statusIcon.innerHTML = iconSvg('shield', 18);
-      statusTxt.textContent  = t.dnsLeakUnknown;
-    } else if (!expectedOwner) {
-      iconWrap.className = 'dns-leak-icon-wrap';
-      banner.className   = 'dns-leak-status-banner';
-      statusIcon.innerHTML = iconSvg('shield', 18);
-      statusTxt.textContent  = t.dnsLeakUnverified;
-    } else if (seen.includes(expectedOwner)) {
-      iconWrap.className = 'dns-leak-icon-wrap safe';
-      banner.className   = 'dns-leak-status-banner';
-      statusIcon.innerHTML = iconSvg('checkCircle', 18);
-      statusTxt.textContent  = t.dnsLeakSafe;
-    } else {
-      iconWrap.className = 'dns-leak-icon-wrap leak';
-      banner.className   = 'dns-leak-status-banner leak';
-      statusIcon.innerHTML = iconSvg('alertTriangle', 18);
-      statusTxt.textContent  = t.dnsLeakDetected;
-    }
-  } catch (err) {
-    loading.style.display = 'none';
-    result.style.display  = 'block';
-    retryBtn.style.display = 'flex';
-    banner.className = 'dns-leak-status-banner leak';
-    statusIcon.innerHTML = iconSvg('xCircle', 18);
-    statusTxt.textContent  = t.dnsLeakTestError;
-    ipEl.textContent = '—';
-    // Сообщение об ошибке может содержать данные ответа DoH — рендерим как текст.
-    dnsList.innerHTML = '';
-    const errDiv = document.createElement('div');
-    errDiv.className = 'dns-leak-dns-entry';
-    errDiv.style.color = 'var(--danger)';
-    errDiv.textContent = errorText(err);
-    dnsList.appendChild(errDiv);
-  }
-}
+// DNS leak test modal and execution extracted to views/dns-leak.view.ts
 
 // restartCore перезапускает ядро на текущем сервере.
 //
@@ -1899,7 +1349,7 @@ function collectAndSaveSettings(showFeedback = true) {
     processListBlacklist: getProcessListBlacklist(),
     processListWhitelist: getProcessListWhitelist(),
     favoriteLinks: Array.from(favoriteLinks),
-    profiles: profiles,
+    profiles: getProfiles(),
     customRules: getCustomRules(),
     connectionsView: getConnectionsView(),
     theme: getCurrentTheme()
@@ -1907,163 +1357,7 @@ function collectAndSaveSettings(showFeedback = true) {
   return window.api.saveSettings(settings);
 }
 
-// ── Профили ──────────────────────────────────────────────────────────────────
-//
-// Именованный набор того, что различается между сценариями: маршрутизация,
-// DNS, раздельное туннелирование, защита. Всё остальное — язык, тема,
-// автозапуск, горячие клавиши — принадлежит приложению, а не сценарию, и
-// профилем не трогается.
-//
-// Хранятся профили в зашифрованной половине настроек, потому что могут нести
-// ссылку на сервер; по той же причине не попадают в переносимый файл. См.
-// secretSettingKeys в backend/service/settings.go.
-let profiles: Profile[] = [];
-
-/** Снимок тех полей, которые профиль запоминает. */
-function currentProfileSettings(): ProfileSettings {
-  return {
-    dns: currentDnsSetting(),
-    bypassRu: el<HTMLInputElement>('bypassRuCheckbox').checked,
-    tunMode: el<HTMLInputElement>('tunModeCheckbox').checked,
-    systemProxy: el<HTMLInputElement>('systemProxyCheckbox').checked,
-    processMode: getProcessMode(),
-    processListBlacklist: getProcessListBlacklist(),
-    processListWhitelist: getProcessListWhitelist(),
-    // Копия, а не ссылка: customRules правится на месте кнопкой «удалить», и
-    // сохранённый профиль менялся бы вместе с текущими настройками.
-    customRules: getCustomRules().map(r => ({ ...r })),
-    killSwitch: el<HTMLInputElement>('killSwitchCheckbox').checked,
-    dnsLeak: el<HTMLInputElement>('dnsLeakCheckbox').checked,
-    ipv6Leak: el<HTMLInputElement>('ipv6LeakCheckbox').checked,
-    fakeDns: el<HTMLInputElement>('fakeDnsCheckbox').checked,
-    tlsFragment: el<HTMLInputElement>('tlsFragmentCheckbox').checked,
-  };
-}
-
-/**
- * Раскладывает профиль по элементам интерфейса.
- *
- * Именно по интерфейсу, а не в объект настроек напрямую: collectAndSaveSettings
- * читает состояние с элементов, и любой другой путь означал бы второй источник
- * истины, который разойдётся с первым при следующей добавленной галке.
- */
-function applyProfileSettings(p: ProfileSettings): void {
-  setDnsSetting(p.dns);
-  el<HTMLInputElement>('bypassRuCheckbox').checked = p.bypassRu;
-  el<HTMLInputElement>('tunModeCheckbox').checked = p.tunMode;
-  el<HTMLInputElement>('systemProxyCheckbox').checked = p.systemProxy;
-  setProcessListBlacklist(p.processListBlacklist);
-  setProcessListWhitelist(p.processListWhitelist);
-  setProcessMode(p.processMode);
-  setCustomRules(p.customRules.map(r => ({ ...r })));
-  el<HTMLInputElement>('killSwitchCheckbox').checked = p.killSwitch;
-  el<HTMLInputElement>('dnsLeakCheckbox').checked = p.dnsLeak;
-  el<HTMLInputElement>('ipv6LeakCheckbox').checked = p.ipv6Leak;
-  el<HTMLInputElement>('fakeDnsCheckbox').checked = p.fakeDns;
-  el<HTMLInputElement>('tlsFragmentCheckbox').checked = !!p.tlsFragment;
-  updateInterceptionGuidance();
-  void refreshKillSwitchStatus();
-}
-
-function renderProfiles(): void {
-  const t = translations[currentLanguage];
-  const list = el('profilesList');
-  list.textContent = '';
-  el('profilesEmpty').style.display = profiles.length === 0 ? 'block' : 'none';
-
-  profiles.forEach(profile => {
-    const row = document.createElement('div');
-    row.className = 'profile-row';
-
-    const apply = document.createElement('button');
-    apply.type = 'button';
-    apply.className = 'btn-glass profile-apply';
-    apply.textContent = profile.name;
-    // Наличие сервера в профиле видно до нажатия: переключение, которое ещё и
-    // меняет сервер, — заметно другое действие, чем смена одних маршрутов.
-    apply.title = profile.server ? t.profileAppliesServer : t.profileRoutingOnly;
-    apply.onclick = () => void applyProfile(profile);
-
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'btn-glass profile-delete';
-    del.textContent = t.deleteBtn;
-    del.setAttribute('aria-label', `${t.deleteBtn}: ${profile.name}`);
-    del.onclick = async () => {
-      if (!(await showConfirm(t.profileDeleteConfirm.replace('{name}', profile.name)))) return;
-      profiles = profiles.filter(p => p.id !== profile.id);
-      renderProfiles();
-      await collectAndSaveSettings();
-      void window.api.rebuildTrayProfiles();
-    };
-
-    if (profile.server) {
-      const mark = document.createElement('span');
-      mark.className = 'profile-server-mark';
-      mark.textContent = t.profileServerMark;
-      row.append(apply, mark, del);
-    } else {
-      row.append(apply, del);
-    }
-    list.appendChild(row);
-  });
-}
-
-async function applyProfile(profile: Profile): Promise<void> {
-  const t = translations[currentLanguage];
-  applyProfileSettings(profile.settings);
-
-  if (profile.server) {
-    activeServerLink = profile.server;
-    const info = parseBasicInfo(profile.server);
-    activeServerName.textContent = info.name || info.address || t.proxyFallbackName;
-    activeServerDetails.textContent = `${info.type.toUpperCase()} • ${info.address}`;
-    updateCards();
-  }
-
-  await collectAndSaveSettings();
-
-  // Правила и DNS применяются ядром при сборке конфига, поэтому на работающем
-  // подключении смена профиля обязана дойти до ядра — иначе трафик продолжит
-  // идти по прежним правилам, а интерфейс будет показывать новые.
-  if (appState === 'on') {
-    restartCore();
-  }
-  flashConnectionsStatus(t.profileApplied.replace('{name}', profile.name));
-}
-
-el('saveProfileBtn').onclick = async () => {
-  const t = translations[currentLanguage];
-  const name = (await showPrompt(t.profileNamePrompt))?.trim();
-  if (!name) return;
-
-  const includeServer = el<HTMLInputElement>('profileIncludeServerCheckbox').checked;
-  const profile: Profile = {
-    id: Date.now().toString(),
-    name,
-    server: includeServer ? activeServerLink : null,
-    settings: currentProfileSettings(),
-  };
-
-  // Совпадение имён — это почти всегда «перезаписать», а не «завести второй с
-  // тем же именем»: два одинаковых пункта в списке различить нечем.
-  const existing = profiles.findIndex(p => p.name.toLowerCase() === name.toLowerCase());
-  if (existing !== -1) {
-    if (!(await showConfirm(t.profileOverwriteConfirm.replace('{name}', name)))) return;
-    profile.id = profiles[existing].id;
-    profiles[existing] = profile;
-  } else {
-    profiles.push(profile);
-  }
-
-  renderProfiles();
-  await collectAndSaveSettings();
-  // Меню трея собрано из скрытого пула на стороне Go и о правке ничего не
-  // знает: systray не умеет удалять пункты, поэтому перестроить его — это
-  // отдельный вызов, а не следствие сохранения.
-  void window.api.rebuildTrayProfiles();
-  flashConnectionsStatus(t.profileSaved.replace('{name}', name));
-};
+// Profiles CRUD and management extracted to views/profiles.view.ts
 
 // Быстрая галка из меню трея. Ставит её здесь по той же причине, по которой
 // здесь же применяется профиль: TUN и Kill Switch — это состав конфигурации, и
@@ -2088,12 +1382,6 @@ window.api.onTrayToggleSetting(async (key) => {
   }
 });
 
-window.api.onTrayProfileSelected((id: string) => {
-  const profile = profiles.find(p => p.id === id);
-  // Профиль мог быть удалён между тем, как меню собрали, и тем, как по нему
-  // нажали: подменю трея перестраивается вдогонку, а не мгновенно.
-  if (profile) void applyProfile(profile);
-});
 
 el('saveAppsBtn').onclick = async () => {
   await collectAndSaveSettings();
@@ -2342,6 +1630,60 @@ async function checkForUpdates() {
   } catch (e) { console.error('Update check failed:', e); }
 }
 
+// Поиск ссылки сервера в подписках по метаданным (для обратной совместимости)
+function findServerLink(name: string, address: string, protocol: string) {
+  if (!allSubscriptions) return null;
+  for (const sub of allSubscriptions) {
+    if (sub.links) {
+      for (const link of sub.links) {
+        const info = parseBasicInfo(link);
+        if (info && info.address === address && info.type.toLowerCase() === protocol.toLowerCase()) {
+          return link;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// Установка активного сервера и запуск подключения
+async function selectAndConnectServer(link: string) {
+  if (!link) return;
+  const info = parseBasicInfo(link);
+  if (!info) return;
+
+  const isNewServer = activeServerLink !== link;
+  activeServerLink = link;
+  activeServerName.textContent = info.name;
+  activeServerDetails.textContent = `${info.type} • ${info.address}`;
+
+  updateCards();
+  collectAndSaveSettings();
+
+  // Если VPN выключен — подключаемся, если включен/подключается — перезапускаем
+  if (appState === 'off') {
+    updateAppInterface('connecting');
+    try {
+      const res = await window.api.startXray(activeServerLink, el<HTMLInputElement>('systemProxyCheckbox').checked);
+      if (res && !res.success) {
+        showAlert(translations[currentLanguage].errorDialogTitle, res.error || 'Unknown error', true, translations[currentLanguage]);
+        updateAppInterface('off');
+      }
+    } catch (e) {
+      showAlert(translations[currentLanguage].errorDialogTitle, errorText(e), true, translations[currentLanguage]);
+      updateAppInterface('off');
+    }
+  } else {
+    restartBtn.click();
+  }
+
+  // Переключаем вкладку на Главную
+  const homeTab = document.querySelector<HTMLElement>('.nav-item[data-target="view-home"]');
+  if (homeTab) {
+    homeTab.click();
+  }
+}
+
 // Инициализация
 async function init() {
   // The title bar reads the version from the backend rather than carrying its own
@@ -2385,6 +1727,40 @@ async function init() {
     onSaveSettings: () => {
       collectAndSaveSettings();
     },
+  });
+
+  initDnsLeakView({
+    getCurrentLanguage: () => currentLanguage,
+    getCurrentDnsSetting: () => currentDnsSetting(),
+    getAppliedDns: () => getAppliedDns(),
+  });
+
+  initHistoryView({
+    getCurrentLanguage: () => currentLanguage,
+    onSelectServer: (link) => selectAndConnectServer(link),
+    findServerLink: (name, addr, proto) => findServerLink(name, addr, proto),
+    showAlert,
+  });
+
+  initProfilesView({
+    getCurrentLanguage: () => currentLanguage,
+    isCoreActive: () => appState === 'on',
+    restartCore: () => restartCore(),
+    onSaveSettings: () => collectAndSaveSettings(),
+    getActiveServerLink: () => activeServerLink ?? '',
+    onSelectServer: (link) => {
+      activeServerLink = link;
+      const info = parseBasicInfo(link);
+      activeServerName.textContent = info.name || info.address || translations[currentLanguage].proxyFallbackName;
+      activeServerDetails.textContent = `${info.type.toUpperCase()} • ${info.address}`;
+      updateCards();
+    },
+    onRefreshKillSwitch: () => {
+      void refreshKillSwitchStatus();
+      void refreshKillSwitchBadge();
+    },
+    onUpdateInterceptionGuidance: () => updateInterceptionGuidance(),
+    showAlert,
   });
 
   initSettingsView({
@@ -2473,9 +1849,8 @@ async function init() {
       favoriteLinks = new Set(settings.favoriteLinks);
     }
     if (settings.profiles) {
-      profiles = settings.profiles;
+      setProfiles(settings.profiles);
     }
-    renderProfiles();
     void window.api.rebuildTrayProfiles();
     // persist=false: настройки сейчас читаются, записывать их обратно на этом
     // шаге значило бы сохранять полусобранный объект.

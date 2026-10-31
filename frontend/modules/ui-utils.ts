@@ -187,7 +187,11 @@ export async function fetchIP(
           cache: 'no-store',
         });
 
-        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+
+        const data = (await res.json()) as { ip?: string };
         if (data && data.ip) {
           currentIpElement.textContent = data.ip;
           return;
@@ -399,6 +403,17 @@ export function formatConnectionAge(ms: number): string {
   const m = Math.floor(total / 60) % 60;
   const h = Math.floor(total / 3600);
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${String(m).padStart(2, '0')}:${s}`;
+}
+
+export function formatDuration(seconds: number, t: Translations): string {
+  const sec = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
+  if (sec < 60) return `${sec}${t.durationSec}`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m < 60) return `${m}${t.durationMin} ${s}${t.durationSec}`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return `${h}${t.durationHour} ${rm}${t.durationMin}`;
 }
 
 /**
