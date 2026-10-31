@@ -14,6 +14,7 @@ type windowsPlatform struct {
 	privileges windows.PrivilegeManager
 	prober     windows.Prober
 	lifecycle  windows.LifecycleManager
+	dns        windows.DNSManager
 }
 
 func (p *windowsPlatform) Paths() PathManager           { return &p.paths }
@@ -23,6 +24,7 @@ func (p *windowsPlatform) Proxy() ProxyManager           { return &p.proxy }
 func (p *windowsPlatform) Privileges() PrivilegeManager { return &p.privileges }
 func (p *windowsPlatform) Prober() NetworkProber         { return &p.prober }
 func (p *windowsPlatform) Lifecycle() LifecycleManager   { return &p.lifecycle }
+func (p *windowsPlatform) DNS() DNSManager               { return &p.dns }
 
 func init() {
 	SetCurrent(&windowsPlatform{})

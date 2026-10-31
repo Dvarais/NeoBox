@@ -1024,3 +1024,37 @@ func TestGenerateConfig_TunFullConeNAT(t *testing.T) {
 		t.Errorf("tun-in udp_timeout = %v, want 5m", got)
 	}
 }
+
+func TestBypassRuRuleSetInitialPathAndHttpClient(t *testing.T) {
+	cfg := generate(t, Settings{BypassRu: true})
+
+	httpClients, ok := cfg["http_clients"].([]map[string]interface{})
+	if !ok || len(httpClients) == 0 {
+		t.Fatal("expected top-level http_clients to be declared")
+	}
+	if httpClients[0]["tag"] != "ruleset-client" || httpClients[0]["detour"] != "proxy" {
+		t.Errorf("http_clients[0] = %v, want tag: ruleset-client, detour: proxy", httpClients[0])
+	}
+
+	routeSec := routeSection(t, cfg)
+	if routeSec["default_http_client"] != "ruleset-client" {
+		t.Errorf("route.default_http_client = %v, want ruleset-client", routeSec["default_http_client"])
+	}
+
+	sets, ok := routeSec["rule_set"].([]map[string]interface{})
+	if !ok {
+		t.Fatal("rule_set section missing")
+	}
+	for _, set := range sets {
+		tag := set["tag"].(string)
+		if set["http_client"] != "ruleset-client" {
+			t.Errorf("rule-set %s http_client = %v, want ruleset-client", tag, set["http_client"])
+		}
+		initPath, ok := set["initial_path"].(string)
+		if !ok || initPath == "" {
+			t.Errorf("rule-set %s initial_path is empty", tag)
+		} else if !strings.HasSuffix(initPath, tag+".srs") {
+			t.Errorf("rule-set %s initial_path = %q, want ending with %s.srs", tag, initPath, tag)
+		}
+	}
+}

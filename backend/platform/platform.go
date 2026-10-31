@@ -11,6 +11,12 @@ type Platform interface {
 	Privileges() PrivilegeManager
 	Prober() NetworkProber
 	Lifecycle() LifecycleManager
+	DNS() DNSManager
+}
+
+// DNSManager controls OS-level DNS cache operations.
+type DNSManager interface {
+	FlushCache() error
 }
 
 // PathManager resolves OS-specific application directories.

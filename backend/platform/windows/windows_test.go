@@ -19,4 +19,7 @@ func TestWindowsPlatformInitialized(t *testing.T) {
 	if !strings.Contains(userData, "AppData") || !strings.Contains(userData, "NeoBox") {
 		t.Fatalf("unexpected Windows UserDataDir: %s", userData)
 	}
+	if err := p.DNS().FlushCache(); err != nil {
+		t.Errorf("expected DnsFlushResolverCache to succeed on Windows, got: %v", err)
+	}
 }

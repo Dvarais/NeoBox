@@ -14,6 +14,7 @@ type linuxPlatform struct {
 	privileges linux.PrivilegeManager
 	prober     linux.Prober
 	lifecycle  linux.LifecycleManager
+	dns        linux.DNSManager
 }
 
 func (p *linuxPlatform) Paths() PathManager           { return &p.paths }
@@ -23,6 +24,7 @@ func (p *linuxPlatform) Proxy() ProxyManager           { return &p.proxy }
 func (p *linuxPlatform) Privileges() PrivilegeManager { return &p.privileges }
 func (p *linuxPlatform) Prober() NetworkProber         { return &p.prober }
 func (p *linuxPlatform) Lifecycle() LifecycleManager   { return &p.lifecycle }
+func (p *linuxPlatform) DNS() DNSManager               { return &p.dns }
 
 func init() {
 	p := &linuxPlatform{}

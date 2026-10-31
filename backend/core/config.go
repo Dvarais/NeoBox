@@ -15,6 +15,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -1661,12 +1662,27 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 		// The domain list is "geosite-category-ru": sing-geosite has no
 		// "geosite-ru.srs", so that URL answered 404 and only the geoip half of
 		// the bypass ever had a chance of loading.
+		// Configure top-level HTTP client and route default client (sing-box 1.14+).
+		config["http_clients"] = []map[string]interface{}{
+			{
+				"tag":    "ruleset-client",
+				"detour": downloadDetour,
+			},
+		}
+		routeSection["default_http_client"] = "ruleset-client"
+
+		rulesDir := filepath.Join(filepath.Dir(cacheDBPath), "rules")
+		initialGeoIP := filepath.Join(rulesDir, "geoip-ru.srs")
+		initialGeosite := filepath.Join(rulesDir, "geosite-category-ru.srs")
+
 		routeSection["rule_set"] = []map[string]interface{}{
 			{
 				"tag":             "geoip-ru",
 				"type":            "remote",
 				"format":          "binary",
 				"url":             "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs",
+				"initial_path":    initialGeoIP,
+				"http_client":     "ruleset-client",
 				"download_detour": downloadDetour,
 			},
 			{
@@ -1674,6 +1690,8 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 				"type":            "remote",
 				"format":          "binary",
 				"url":             "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs",
+				"initial_path":    initialGeosite,
+				"http_client":     "ruleset-client",
 				"download_detour": downloadDetour,
 			},
 		}

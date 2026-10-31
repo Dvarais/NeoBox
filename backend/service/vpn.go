@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"NeoBox/backend/core"
+	"NeoBox/backend/platform"
 	"NeoBox/backend/i18n"
 
 	sclog "github.com/sagernet/sing-box/log"
@@ -57,6 +58,7 @@ func (s *AppService) StartXray(link string, settingsJSON string, useSystemProxy 
 			s.stateMu.Unlock()
 			_ = s.coreManager.Stop()
 			s.stopLogStream()
+	_ = platform.Current().DNS().FlushCache()
 			s.setTrayConnected(false, "")
 			s.emitSafe("xray-stopped", nil)
 			releaseIdleMemory()
@@ -232,6 +234,7 @@ func (s *AppService) startCore(link string, _ string, useSystemProxy bool, newSe
 	// the core's log level — and to the UI receiving a line it does not
 	// otherwise need. Every start path (including the watchdog's reconnect)
 	// comes through here, so this is both the earlier and the surer signal.
+	_ = platform.Current().DNS().FlushCache()
 	s.emitSafe("xray-started", nil)
 
 	response["success"] = true
@@ -577,4 +580,12 @@ func (s *AppService) streamTraffic(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// FlushDNS flushes the OS-level local DNS resolver cache.
+func (s *AppService) FlushDNS() (bool, error) {
+	if err := platform.Current().DNS().FlushCache(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
