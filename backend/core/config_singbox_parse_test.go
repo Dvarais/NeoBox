@@ -58,3 +58,41 @@ func TestGeneratedConfigParsesInSingbox(t *testing.T) {
 		}
 	}
 }
+func TestGeneratedConfigParsesInSingbox_TlsFragment(t *testing.T) {
+	trueVal := true
+	outbound := map[string]interface{}{
+		"type":        "trojan",
+		"tag":         "proxy",
+		"server":      testServerIP,
+		"server_port": 443,
+		"password":    "secret",
+		"tls": map[string]interface{}{
+			"enabled":     true,
+			"server_name": "example.com",
+		},
+	}
+	cfg, err := GenerateConfig(outbound, Settings{TlsFragment: &trueVal}, false, "cache.db", "secret")
+	if err != nil {
+		t.Fatalf("GenerateConfig failed: %v", err)
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	ctx := include.Context(context.Background())
+	opts, err := sjson.UnmarshalExtendedContext[option.Options](ctx, raw)
+	if err != nil {
+		t.Fatalf("sing-box rejected config with TlsFragment: %v", err)
+	}
+	if len(opts.Outbounds) == 0 {
+		t.Fatal("no outbounds in parsed config")
+	}
+	trojanOpt, ok := opts.Outbounds[0].Options.(*option.TrojanOutboundOptions)
+	if !ok {
+		t.Fatalf("outbound options type = %T, want *option.TrojanOutboundOptions", opts.Outbounds[0].Options)
+	}
+	if trojanOpt.TLS == nil || !trojanOpt.TLS.RecordFragment {
+		t.Errorf("trojanOpt.TLS.RecordFragment = %v, want true", trojanOpt.TLS != nil && trojanOpt.TLS.RecordFragment)
+	}
+}

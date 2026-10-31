@@ -350,6 +350,9 @@ type Settings struct {
 	// when diagnosing routing but is a firehose during ordinary browsing — and
 	// every line has to cross into the WebView2 renderer. Off by default.
 	VerboseLogging bool `json:"verboseLogging"`
+	// TlsFragment enables TLS record fragmentation (Anti-DPI) to bypass censorship/TSPU.
+	// When nil, falls back to link query parameter (fragment=1/record_fragment=1).
+	TlsFragment *bool `json:"tlsFragment"`
 }
 
 // CustomRule represents a single user-defined routing rule.
@@ -472,6 +475,43 @@ func parseReserved(value string) []int {
 	return nil
 }
 
+func isFragmentRequested(params url.Values) bool {
+	for _, key := range []string{"fragment", "record_fragment", "anti-dpi", "antidpi"} {
+		v := strings.ToLower(params.Get(key))
+		if v == "1" || v == "true" || v == "yes" {
+			return true
+		}
+	}
+	return false
+}
+
+func isFragmentRequestedVMess(data map[string]interface{}) bool {
+	for _, key := range []string{"fragment", "record_fragment", "anti-dpi", "antidpi"} {
+		if v, ok := data[key]; ok {
+			switch val := v.(type) {
+			case bool:
+				if val {
+					return true
+				}
+			case string:
+				vStr := strings.ToLower(val)
+				if vStr == "1" || vStr == "true" || vStr == "yes" {
+					return true
+				}
+			case int:
+				if val == 1 {
+					return true
+				}
+			case float64:
+				if val == 1 {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // ParseProxyLink parses protocol-specific proxy URLs into a generic outbound map.
 // Links longer than maxLinkLength are rejected before any parsing, so a
 // malformed or hostile entry cannot turn into unbounded work.
@@ -569,6 +609,9 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 					"public_key": params.Get("pbk"),
 					"short_id":   params.Get("sid"),
 				}
+			}
+			if isFragmentRequested(params) {
+				tlsMap["record_fragment"] = true
 			}
 			outbound["tls"] = tlsMap
 		}
@@ -705,7 +748,7 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 			if fpVal == "" {
 				fpVal = "chrome"
 			}
-			outbound["tls"] = map[string]interface{}{
+			vmessTLS := map[string]interface{}{
 				"enabled":     true,
 				"server_name": sniVal,
 				"utls": map[string]interface{}{
@@ -713,6 +756,10 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 					"fingerprint": fpVal,
 				},
 			}
+			if isFragmentRequestedVMess(vmessData) {
+				vmessTLS["record_fragment"] = true
+			}
+			outbound["tls"] = vmessTLS
 		}
 
 		netVal, _ := vmessData["net"].(string)
@@ -1248,6 +1295,22 @@ func GenerateConfig(outbound map[string]interface{}, settings Settings, useSyste
 	serverDomain, _ := ServerEndpoint(workOutbound)
 	serverDomain = strings.Trim(serverDomain, "[]")
 	workOutbound["domain_resolver"] = "dns-direct"
+
+	// Apply TLS record fragmentation (Anti-DPI) setting
+	if tlsMap, ok := workOutbound["tls"].(map[string]interface{}); ok {
+		workTLS := make(map[string]interface{}, len(tlsMap)+1)
+		for k, v := range tlsMap {
+			workTLS[k] = v
+		}
+		if settings.TlsFragment != nil {
+			if *settings.TlsFragment {
+				workTLS["record_fragment"] = true
+			} else {
+				delete(workTLS, "record_fragment")
+			}
+		}
+		workOutbound["tls"] = workTLS
+	}
 	wgPeer := copyFirstWireGuardPeer(workOutbound)
 	if net.ParseIP(serverDomain) == nil && serverDomain != "" {
 		// Через ResolveHost, а не через системный резолвер: обычный DNS на пути к

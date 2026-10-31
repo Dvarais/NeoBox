@@ -79,6 +79,7 @@ export interface AppSettings {
   ipv6Leak: boolean;
   fakeDns: boolean;
   verboseLogging: boolean;
+  tlsFragment?: boolean;
   lastSelectedServer: string | null;
   processMode: 'blacklist' | 'whitelist';
   processListBlacklist: string[];
@@ -124,6 +125,7 @@ export type ProfileSettings = Pick<
   | 'dnsLeak'
   | 'ipv6Leak'
   | 'fakeDns'
+  | 'tlsFragment'
 >;
 
 /**

@@ -1058,3 +1058,89 @@ func TestBypassRuRuleSetInitialPathAndHttpClient(t *testing.T) {
 		}
 	}
 }
+func TestParseProxyLink_FragmentParameters(t *testing.T) {
+	links := []string{
+		"vless://96c4d7b2-d3cf-4279-b1d5-2244249a5629@example.com:443?security=reality&pbk=jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0&sid=0123456789abcdef&sni=example.com&fragment=1#vless-frag",
+		"trojan://password@example.com:443?security=tls&sni=example.com&record_fragment=true#trojan-frag",
+		"vmess://eyJ2IjoiMiIsInBzIjoidm1lc3MtZnJhZyIsImFkZCI6ImV4YW1wbGUuY29tIiwicG9ydCI6NDQzLCJpZCI6Ijk2YzRkN2IyLWQzY2YtNDI3OS1iMWQ1LTIyNDQyNDlhNTYyOSIsImFpZCI6MCwic2N5IjoiYXV0byIsIm5ldCI6InRjcCIsInRscyI6InRscyIsInNuaSI6ImV4YW1wbGUuY29tIiwiZnJhZ21lbnQiOiIxIn0=",
+	}
+
+	for _, link := range links {
+		ob, err := ParseProxyLink(link)
+		if err != nil {
+			t.Fatalf("ParseProxyLink(%q) failed: %v", link, err)
+		}
+		tlsMap, ok := ob["tls"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("outbound for %q has no tls map", link)
+		}
+		if frag, ok := tlsMap["record_fragment"].(bool); !ok || !frag {
+			t.Errorf("expected tls.record_fragment == true for link %q, got %v", link, tlsMap["record_fragment"])
+		}
+	}
+}
+
+func TestGenerateConfig_TlsFragmentSetting(t *testing.T) {
+	baseOutbound := map[string]interface{}{
+		"type":        "trojan",
+		"tag":         "proxy",
+		"server":      testServerIP,
+		"server_port": 443,
+		"password":    "secret",
+		"tls": map[string]interface{}{
+			"enabled":     true,
+			"server_name": "example.com",
+		},
+	}
+
+	trueVal := true
+	falseVal := false
+
+	// Case 1: TlsFragment explicitly true -> sets record_fragment: true
+	cfgTrue, err := GenerateConfig(baseOutbound, Settings{TlsFragment: &trueVal}, false, "cache.db", "secret")
+	if err != nil {
+		t.Fatalf("GenerateConfig failed: %v", err)
+	}
+	outbounds := cfgTrue["outbounds"].([]interface{})
+	ob0 := outbounds[0].(map[string]interface{})
+	tls0 := ob0["tls"].(map[string]interface{})
+	if frag, ok := tls0["record_fragment"].(bool); !ok || !frag {
+		t.Errorf("expected record_fragment: true when TlsFragment is true, got %v", tls0["record_fragment"])
+	}
+
+	// Case 2: Outbound had record_fragment: true, but TlsFragment explicitly false -> disables it
+	baseOutboundWithFrag := map[string]interface{}{
+		"type":        "trojan",
+		"tag":         "proxy",
+		"server":      testServerIP,
+		"server_port": 443,
+		"password":    "secret",
+		"tls": map[string]interface{}{
+			"enabled":         true,
+			"server_name":     "example.com",
+			"record_fragment": true,
+		},
+	}
+	cfgFalse, err := GenerateConfig(baseOutboundWithFrag, Settings{TlsFragment: &falseVal}, false, "cache.db", "secret")
+	if err != nil {
+		t.Fatalf("GenerateConfig failed: %v", err)
+	}
+	outboundsF := cfgFalse["outbounds"].([]interface{})
+	obF := outboundsF[0].(map[string]interface{})
+	tlsF := obF["tls"].(map[string]interface{})
+	if frag, _ := tlsF["record_fragment"].(bool); frag {
+		t.Errorf("expected record_fragment to be disabled when TlsFragment is false, got %v", tlsF["record_fragment"])
+	}
+
+	// Case 3: Outbound had record_fragment: true, and TlsFragment is nil (default) -> preserves link setting
+	cfgNil, err := GenerateConfig(baseOutboundWithFrag, Settings{TlsFragment: nil}, false, "cache.db", "secret")
+	if err != nil {
+		t.Fatalf("GenerateConfig failed: %v", err)
+	}
+	outboundsNil := cfgNil["outbounds"].([]interface{})
+	obNil := outboundsNil[0].(map[string]interface{})
+	tlsNil := obNil["tls"].(map[string]interface{})
+	if frag, ok := tlsNil["record_fragment"].(bool); !ok || !frag {
+		t.Errorf("expected record_fragment: true preserved when TlsFragment is nil, got %v", tlsNil["record_fragment"])
+	}
+}

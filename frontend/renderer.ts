@@ -841,6 +841,8 @@ function applyLanguage() {
   el('fakeDnsDesc').textContent = t.fakeDnsDesc;
   setText('verboseLoggingLabel', t.verboseLoggingLabel);
   setText('verboseLoggingDesc', t.verboseLoggingDesc);
+  setText('tlsFragmentLabel', t.tlsFragmentLabel);
+  setText('tlsFragmentDesc', t.tlsFragmentDesc);
   el('saveAppsBtn').textContent = t.saveAppsBtn;
   el('appsStatus').textContent = t.statusDone;
   const autoSaveText = optionalEl('settingsAutoSaveText');
@@ -2394,6 +2396,7 @@ function collectAndSaveSettings(showFeedback = true) {
     ipv6Leak: el<HTMLInputElement>('ipv6LeakCheckbox').checked,
     fakeDns: el<HTMLInputElement>('fakeDnsCheckbox').checked,
     verboseLogging: el<HTMLInputElement>('verboseLoggingCheckbox').checked,
+    tlsFragment: el<HTMLInputElement>('tlsFragmentCheckbox').checked,
     lastSelectedServer: activeServerLink,
     processMode: processModeHidden.value as AppSettings['processMode'],
     processListBlacklist: processListBlacklistEl.value.split('\n').map(s => s.trim()).filter(s => s.length > 0),
@@ -2436,6 +2439,7 @@ function currentProfileSettings(): ProfileSettings {
     dnsLeak: el<HTMLInputElement>('dnsLeakCheckbox').checked,
     ipv6Leak: el<HTMLInputElement>('ipv6LeakCheckbox').checked,
     fakeDns: el<HTMLInputElement>('fakeDnsCheckbox').checked,
+    tlsFragment: el<HTMLInputElement>('tlsFragmentCheckbox').checked,
   };
 }
 
@@ -2462,6 +2466,7 @@ function applyProfileSettings(p: ProfileSettings): void {
   el<HTMLInputElement>('dnsLeakCheckbox').checked = p.dnsLeak;
   el<HTMLInputElement>('ipv6LeakCheckbox').checked = p.ipv6Leak;
   el<HTMLInputElement>('fakeDnsCheckbox').checked = p.fakeDns;
+  el<HTMLInputElement>('tlsFragmentCheckbox').checked = !!p.tlsFragment;
   updateInterceptionGuidance();
   void refreshKillSwitchStatus();
 }
@@ -2970,6 +2975,7 @@ async function init() {
     el<HTMLInputElement>('ipv6LeakCheckbox').checked = settings.ipv6Leak !== undefined ? !!settings.ipv6Leak : true;
     el<HTMLInputElement>('fakeDnsCheckbox').checked = settings.fakeDns !== undefined ? !!settings.fakeDns : true;
     el<HTMLInputElement>('verboseLoggingCheckbox').checked = !!settings.verboseLogging;
+    el<HTMLInputElement>('tlsFragmentCheckbox').checked = !!settings.tlsFragment;
     updateInterceptionGuidance();
     void refreshKillSwitchStatus();
     
@@ -5037,6 +5043,7 @@ const autoSaveSecurityCheckboxes = [
   'ipv6LeakCheckbox',
   'fakeDnsCheckbox',
   'verboseLoggingCheckbox',
+  'tlsFragmentCheckbox',
 ];
 
 autoSaveSecurityCheckboxes.forEach((id) => {
