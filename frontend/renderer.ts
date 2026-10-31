@@ -1,34 +1,36 @@
-import { el, optionalEl, query, setText, setTitle, setAria } from './modules/dom';
-import { translations, translate } from './modules/translations';
+import { el, optionalEl, query, setText, setLabel, setAria } from './modules/dom';
+import { translations } from './modules/translations';
 import type { Language, Translations } from './modules/translations';
 import type {
   AppSettings,
-  CustomRule,
   SessionTraffic,
   UpdateInfo,
 } from './modules/api';
 import { fetchIP, isDialogOpen, showConfirm, showAlert, trapFocus, errorText } from './modules/ui-utils';
+import { allSubscriptions } from './modules/subscription-manager';
+import { parseBasicInfo, pingData, pingDisplay } from './modules/server-manager';
 import {
-    allSubscriptions,
-    currentActiveSubId,
-    loadSubscriptions as loadSubsBase,
-    renderSubStatus,
-    renderSubTabs,
-    setActiveSubId,
-    setSubscriptions
-} from './modules/subscription-manager';
+  initKillSwitchView,
+  refreshKillSwitchStatus,
+  refreshKillSwitchBadge,
+  updateInterceptionGuidance,
+  isKillSwitchArmed,
+} from './views/kill-switch.view';
 import {
-    renderCards,
-    parseBasicInfo,
-    pingData,
-    currentSortMode,
-    setSortMode,
-    setPingData,
-    updateCardPing,
-    pingDisplay
-} from './modules/server-manager';
-import type { SortMode } from './modules/server-manager';
-import { iconSvg } from './modules/icons';
+  initServersView,
+  applyServersLanguage,
+  updateCards,
+  getFavoriteLinks,
+  setFavoriteLinks,
+  handlePingResult,
+} from './views/servers.view';
+import {
+  initSubscriptionsView,
+  applySubscriptionsLanguage,
+  loadSubscriptions,
+} from './views/subscriptions.view';
+import { initScrollWidget, updateCustomScroll } from './modules/scroll-widget';
+import { makeSelectCustom, syncCustomSelectLabels } from './modules/dom';
 import {
   DEFAULT_THEME,
   applyTheme,
@@ -111,8 +113,6 @@ const statusText = el('statusText');
 const currentIp = el('currentIp');
 const activeServerName = el('activeServerName');
 const activeServerDetails = el('activeServerDetails');
-const serversGrid = el('serversGrid');
-const subTabsContainer = el('subscription-tabs');
 
 /** Состояние соединения, каким его показывает интерфейс. */
 type AppState = 'off' | 'connecting' | 'on';
@@ -176,33 +176,6 @@ let uiActive = true;
 // startMinimized), и тогда первый же фокус обязан бэкенд разбудить. Если же
 // окно открылось нормально и уже с фокусом, бэкенд и так прав — будить некого.
 let backendThinksHidden = !document.hasFocus();
-
-// Kill Switch. Объявлено здесь, а не рядом с refreshKillSwitchBadge внизу
-// файла: applyLanguage обращается к состоянию раньше по тексту, и `let` в
-// точке использования дал бы временную мёртвую зону.
-//
-// killSwitchArmed — последнее известное состояние, его читает обработчик
-// watchdog-waiting. killSwitchStuckReported — про застрявшие правила говорим
-// один раз за запуск: это модальное окно, и показывать его на каждом опросе
-// значило бы не давать работать.
-let killSwitchArmed = false;
-let killSwitchStuckReported = false;
-
-// Favorites
-let favoriteLinks = new Set<string>();
-
-// Search query for server filter
-let serverSearchQuery = '';
-
-function onToggleFavorite(link: string) {
-  if (favoriteLinks.has(link)) {
-    favoriteLinks.delete(link);
-  } else {
-    favoriteLinks.add(link);
-  }
-  updateCards();
-  collectAndSaveSettings();
-}
 
 // Навигация
 //
@@ -423,159 +396,11 @@ bindHotkeyInput('hotkeyShowInput');
 window.api.onHotkeyToggleConnection(() => powerBtn.click());
 window.api.onHotkeyShowWindow(() => void window.api.bringToFront());
 
-function setSubManagePanelCollapsed(collapsed: boolean) {
-  const panel = optionalEl('subManagePanel');
-  const header = optionalEl('subManageHeader');
-  const toggleBtn = optionalEl<HTMLButtonElement>('toggleSubPanelBtn');
-  if (!panel || !header) return;
-
-  panel.classList.toggle('is-collapsed', collapsed);
-  header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-  if (toggleBtn) {
-    toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-  }
-}
-
-function syncSubManagePanelBadge() {
-  const badge = optionalEl('subManageBadge');
-  if (badge) {
-    const subCount = allSubscriptions.length;
-    badge.textContent = subCount > 0 ? (currentLanguage === 'RU' ? `${subCount} подп.` : `${subCount} subs`) : '';
-  }
-  const stored = localStorage.getItem('neobox_sub_panel_collapsed');
-  if (stored === null && allSubscriptions.length === 0) {
-    setSubManagePanelCollapsed(false);
-  }
-}
-
-function initSubManagePanel() {
-  const panel = optionalEl('subManagePanel');
-  const header = optionalEl('subManageHeader');
-  const toggleBtn = optionalEl<HTMLButtonElement>('toggleSubPanelBtn');
-  if (!panel || !header) return;
-
-  const toggle = () => {
-    const isCollapsed = panel.classList.contains('is-collapsed');
-    const next = !isCollapsed;
-    setSubManagePanelCollapsed(next);
-    localStorage.setItem('neobox_sub_panel_collapsed', next ? '1' : '0');
-  };
-
-  header.addEventListener('click', (e) => {
-    if ((e.target as HTMLElement).closest('input, button, a')) return;
-    toggle();
-  });
-
-  header.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      toggle();
-    }
-  });
-
-  if (toggleBtn) {
-    toggleBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggle();
-    });
-  }
-
-  const stored = localStorage.getItem('neobox_sub_panel_collapsed');
-  if (stored !== null) {
-    setSubManagePanelCollapsed(stored === '1');
-  } else {
-    setSubManagePanelCollapsed(allSubscriptions.length > 0);
-  }
-}
-
-function updateCards() {
-    let servers: string[] = [];
-    if (currentActiveSubId === 'all') {
-        allSubscriptions.forEach(s => servers.push(...s.links));
-    } else if (currentActiveSubId === 'favorites') {
-        servers = Array.from(favoriteLinks);
-    } else {
-        const sub = allSubscriptions.find(s => s.id === currentActiveSubId);
-        if (sub) servers = sub.links;
-    }
-    renderCards(serversGrid, servers, activeServerLink, pingData, currentSortMode, (link, name, type, address) => {
-        const isNewServer = activeServerLink !== link;
-        activeServerLink = link;
-        activeServerName.textContent = name;
-        activeServerDetails.textContent = `${type} • ${address}`;
-        updateCards();
-        collectAndSaveSettings();
-        if (isNewServer && (appState === 'on' || appState === 'connecting')) {
-            restartBtn.click();
-        }
-    }, serverSearchQuery, favoriteLinks, onToggleFavorite, translations[currentLanguage]);
-
-    const countBadge = optionalEl('serversCountBadge');
-    if (countBadge) {
-      const count = serversGrid.children.length;
-      countBadge.textContent = count > 0 ? (currentLanguage === 'RU' ? `${count} серв.` : `${count} servers`) : '';
-    }
-
-    // Пустое состояние списка. Сообщений два, и выбираются они так, чтобы ни
-    // один случай не оказался ложным: «нет подписок» — только когда подписок
-    // действительно нет; пустое «Избранное» и безрезультатный поиск получают
-    // нейтральное «ничего не найдено».
-    const emptyEl = optionalEl('serversEmpty');
-    if (emptyEl) {
-      const isEmpty = serversGrid.children.length === 0;
-      emptyEl.style.display = isEmpty ? 'flex' : 'none';
-      if (isEmpty) {
-        const t = translations[currentLanguage];
-        // Пишем напрямую, а не через setText: тот объявлен ниже по файлу через
-        // const, а updateCards поднимается и может быть вызвана раньше.
-        const textEl = optionalEl('serversEmptyText');
-        if (textEl) textEl.textContent = allSubscriptions.length === 0 ? t.noSubscriptions : t.noSearchResults;
-      }
-    }
-}
-
-async function loadSubscriptions() {
-    await loadSubsBase(() => {
-        renderSubTabs(subTabsContainer, translations, currentLanguage, () => {
-            updateCards();
-            // Строка состояния относится к ВЫБРАННОЙ подписке, поэтому
-            // перерисовывается и при смене вкладки, а не только списка.
-            renderSubStatus(optionalEl('subStatusLine'), translations, currentLanguage);
-        }, loadSubscriptions);
-        updateCards();
-        renderSubStatus(optionalEl('subStatusLine'), translations, currentLanguage);
-        syncSubManagePanelBadge();
-    });
-}
+// Subscription panel and card rendering extracted to views/subscriptions.view.ts and views/servers.view.ts
 
 // applyLanguage touches a lot of nodes; these guarded helpers keep it readable and
 // tolerate elements that only exist in some states of the UI.
-// DOM helpers (setText, setTitle, setPlaceholder, setAria, escapeHtml) imported from ./modules/dom
-
-/**
- * Имя иконочной кнопки для вспомогательной технологии плюс подсказка для мыши.
- *
- * title всплывает по наведению, но с клавиатуры не показывается никогда, и
- * скринридеры читают его непоследовательно. Поэтому одна и та же строка идёт и
- * в title, и в aria-label — второй и есть имя элемента.
- */
-const setLabel = (id: string, value: string) => {
-  const node = optionalEl(id);
-  if (!node) return;
-  node.title = value;
-  node.setAttribute('aria-label', value);
-};
-
-/**
- * Подпись поля, у которого нет видимого <label>: placeholder исчезает при
- * первом же символе и именем служить не может.
- */
-const setFieldLabel = (id: string, value: string) => {
-  const node = optionalEl<HTMLInputElement | HTMLTextAreaElement>(id);
-  if (!node) return;
-  node.placeholder = value;
-  node.setAttribute('aria-label', value);
-};
+// DOM helpers (setText, setTitle, setPlaceholder, setAria, setLabel, escapeHtml) imported from ./modules/dom
 
 function applyLanguage() {
   const t = translations[currentLanguage];
@@ -649,43 +474,8 @@ function applyLanguage() {
 
   el('restartBtnText').textContent = t.restartBtn;
 
-  el('importQrBtn').textContent = t.importQrBtn;
-  el('qrModalTitle').textContent = t.qrModalTitle;
-  // Подпись в отдельном span: у обеих кнопок рядом стоит иконка, и запись в
-  // textContent самой кнопки стирала бы её.
-  setText('qrStartCameraBtnText', t.qrStartCameraBtn);
-  setText('qrUploadFileBtnText', t.qrUploadFileBtn);
-  el('qrPlaceholderText').textContent = t.qrPlaceholderText;
-  el('qrModalClose').textContent = t.errorDialogClose;
-
-  el('subManagementTitle').textContent = t.subManagement;
-  setFieldLabel('subName', t.subNamePlaceholder);
-  setFieldLabel('subUrl', t.subUrlPlaceholder);
-  el('addSubBtn').textContent = t.addBtn;
-  el('updateSubBtn').textContent = t.updateCurrentBtn;
-  setTitle('updateSubBtn', t.updateCurrentBtnTitle);
-  el('importClipboardBtn').textContent = t.importClipboardBtn;
-  el('myLocationsTitle').textContent = t.myLocations;
-  const pingAllText = optionalEl('pingAllBtnText');
-  if (pingAllText) {
-    pingAllText.textContent = t.pingAllBtn;
-  } else {
-    el('pingAllBtn').textContent = t.pingAllBtn;
-  }
-  el('sortBtnText').textContent = t.sortBtn;
-  setFieldLabel('serverSearchInput', t.serverSearchPlaceholder);
-  // Подсказки о сочетаниях живут в title, а не в доступном имени: диктору они
-  // не нужны, а увидеть их надо тому, кто наводит мышь.
-  setTitle('serverSearchInput', `${t.serverSearchPlaceholder} (Ctrl+K)`);
-  setTitle('bestServerBtn', t.bestServerBtnTitle);
-  setText('bestServerBtnText', t.bestServerBtn);
-
-  document.querySelectorAll<HTMLElement>('.sort-item').forEach(item => {
-    const mode = item.dataset.sort ?? '';
-    // Подпись живёт в span рядом с иконкой; запись в сам пункт стёрла бы её.
-    const label = item.querySelector('span');
-    if (label) label.textContent = translate(t, `sort${mode.charAt(0).toUpperCase() + mode.slice(1)}`);
-  });
+    applySubscriptionsLanguage(t);
+  applyServersLanguage(t);
 
   applyRoutingLanguage(t);
 
@@ -758,9 +548,6 @@ function applyLanguage() {
   syncCustomSelectLabels('newRuleAction');
   syncCustomSelectLabels('newRuleType');
   syncCustomSelectLabels('dnsSelect');
-
-  renderSubTabs(subTabsContainer, translations, currentLanguage, updateCards, loadSubscriptions);
-  renderSubStatus(optionalEl('subStatusLine'), translations, currentLanguage);
   updateCards();
 }
 
@@ -770,72 +557,7 @@ el('langToggle').onclick = () => {
   collectAndSaveSettings();
 };
 
-// Сортировка
-const sortDropdown = query('.sort-dropdown');
-const sortMenu = query('.sort-menu');
-const sortBtn = el<HTMLButtonElement>('sortBtn');
-const sortItems = Array.from(document.querySelectorAll<HTMLElement>('.sort-item'));
-let sortMenuTimeout: ReturnType<typeof setTimeout>;
-
-// Меню открывалось и закрывалось только мышью — с клавиатуры до сортировки было
-// не добраться вовсе. Теперь состояние держится в одном месте и отражается в
-// aria-expanded, а CSS дополнительно раскрывает меню по :focus-within.
-function setSortMenuOpen(open: boolean): void {
-  sortMenu.classList.toggle('show', open);
-  sortBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-}
-
-sortDropdown.addEventListener('mouseenter', () => {
-  clearTimeout(sortMenuTimeout);
-  setSortMenuOpen(true);
-});
-
-sortDropdown.addEventListener('mouseleave', () => {
-  // Пока фокус внутри меню, уводить его из-под клавиатуры нельзя.
-  sortMenuTimeout = setTimeout(() => {
-    if (!sortDropdown.contains(document.activeElement)) setSortMenuOpen(false);
-  }, 550);
-});
-
-sortBtn.addEventListener('click', () => {
-  setSortMenuOpen(sortBtn.getAttribute('aria-expanded') !== 'true');
-});
-
-sortBtn.addEventListener('keydown', (e: KeyboardEvent) => {
-  if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
-    e.preventDefault();
-    setSortMenuOpen(true);
-    sortItems[0]?.focus();
-  }
-});
-
-sortDropdown.addEventListener('keydown', (e: KeyboardEvent) => {
-  if (e.key !== 'Escape') return;
-  setSortMenuOpen(false);
-  sortBtn.focus();
-});
-
-sortItems.forEach((item, index) => {
-  item.addEventListener('click', () => {
-    sortItems.forEach(i => {
-      i.classList.remove('active');
-      i.setAttribute('aria-checked', 'false');
-    });
-    item.classList.add('active');
-    item.setAttribute('aria-checked', 'true');
-    setSortMode(item.dataset.sort as SortMode);
-    updateCards();
-    setSortMenuOpen(false);
-    sortBtn.focus();
-  });
-
-  item.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-    e.preventDefault();
-    const delta = e.key === 'ArrowDown' ? 1 : -1;
-    sortItems[(index + delta + sortItems.length) % sortItems.length].focus();
-  });
-});
+// Sort dropdown interactions extracted to views/servers.view.ts
 
 // Split tunneling process tabs extracted to views/routing.view.ts
 
@@ -1040,9 +762,6 @@ if (restoreTunBtn) {
 
 // Логгер
 
-/** Уровень строки лога, как его определяет parseLogLine. */
-type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
-
 // Log state and buffer extracted to views/logs.view.ts
 
 // connectErrorText — текст отказа в подключении для показа пользователю.
@@ -1108,37 +827,11 @@ window.api.onStopped(() => {
 // каждое из них — это список, собранный столько раз, сколько в нём карточек;
 // см. pingCells в server-manager.ts. Вписываем результат в одну ячейку.
 window.api.onPingResult((data) => {
-  setPingData(data.link, data.latency);
+  handlePingResult(data.link, data.latency);
   if (data.link === activeServerLink) {
     updateActiveServerPing();
   }
-
-  // Сортировка по задержке — единственный случай, когда новый замер меняет ещё
-  // и порядок, так что список приходится собирать заново. Такие перерисовки
-  // объединяются, иначе получится ровно то, от чего мы здесь уходим.
-  if (currentSortMode === 'ping') {
-    scheduleCardsUpdate();
-  } else {
-    updateCardPing(data.link, data.latency);
-  }
 });
-
-// scheduleCardsUpdate сводит пачку запросов на перерисовку списка к одной.
-//
-// Окно намеренно заметно длиннее кадра: пересборка нескольких сотен карточек
-// стоит достаточно, чтобы делать её шестьдесят раз в секунду было немногим
-// лучше, чем не объединять вовсе, а перестроение списка по мере поступления
-// замеров и так воспринимается как «список утрясается».
-const CARDS_UPDATE_COALESCE_MS = 250;
-let cardsUpdateTimer: ReturnType<typeof setTimeout> | null = null;
-
-function scheduleCardsUpdate() {
-  if (cardsUpdateTimer !== null) return;
-  cardsUpdateTimer = setTimeout(() => {
-    cardsUpdateTimer = null;
-    updateCards();
-  }, CARDS_UPDATE_COALESCE_MS);
-}
 
 window.api.onTrayToggleConnection(() => powerBtn.click());
 window.api.onTrayRestart(() => restartBtn.click());
@@ -1348,7 +1041,7 @@ function collectAndSaveSettings(showFeedback = true) {
     processMode: getProcessMode(),
     processListBlacklist: getProcessListBlacklist(),
     processListWhitelist: getProcessListWhitelist(),
-    favoriteLinks: Array.from(favoriteLinks),
+    favoriteLinks: getFavoriteLinks(),
     profiles: getProfiles(),
     customRules: getCustomRules(),
     connectionsView: getConnectionsView(),
@@ -1631,7 +1324,7 @@ async function checkForUpdates() {
 }
 
 // Поиск ссылки сервера в подписках по метаданным (для обратной совместимости)
-function findServerLink(name: string, address: string, protocol: string) {
+function findServerLink(_name: string, address: string, protocol: string) {
   if (!allSubscriptions) return null;
   for (const sub of allSubscriptions) {
     if (sub.links) {
@@ -1652,7 +1345,6 @@ async function selectAndConnectServer(link: string) {
   const info = parseBasicInfo(link);
   if (!info) return;
 
-  const isNewServer = activeServerLink !== link;
   activeServerLink = link;
   activeServerName.textContent = info.name;
   activeServerDetails.textContent = `${info.type} • ${info.address}`;
@@ -1777,6 +1469,37 @@ async function init() {
     showConfirm,
   });
 
+  initKillSwitchView({
+    getCurrentLanguage: () => currentLanguage,
+    getAppState: () => appState,
+    showAlert,
+  });
+
+  initServersView({
+    getCurrentLanguage: () => currentLanguage,
+    getActiveServerLink: () => activeServerLink,
+    setActiveServer: (link, name, type, address) => {
+      activeServerLink = link;
+      activeServerName.textContent = name;
+      activeServerDetails.textContent = `${type} • ${address}`;
+    },
+    getAppState: () => appState,
+    restartCore: () => restartCore(),
+    startCore: async (link) => {
+      await selectAndConnectServer(link);
+    },
+    onSaveSettings: () => collectAndSaveSettings(),
+    showAlert,
+    showConfirm,
+  });
+
+  initSubscriptionsView({
+    getCurrentLanguage: () => currentLanguage,
+    onUpdateCards: () => updateCards(),
+    onSubscriptionsLoaded: () => renderHistoryTab(),
+    showAlert,
+  });
+
   const settings = await window.api.getSettings();
   if (settings) {
     if (settings.language) currentLanguage = settings.language;
@@ -1846,7 +1569,7 @@ async function init() {
     if (settings.autoConnect && activeServerLink) startConnection(false);
 
     if (settings.favoriteLinks) {
-      favoriteLinks = new Set(settings.favoriteLinks);
+      setFavoriteLinks(settings.favoriteLinks);
     }
     if (settings.profiles) {
       setProfiles(settings.profiles);
@@ -1862,50 +1585,9 @@ async function init() {
   } else {
     applyLanguage();
   }
-  initSubManagePanel();
-  await loadSubscriptions();
-  // Второй проход по вкладке: initHistory отрисовал её до того, как подписки
-  // были загружены, а карточка сессии ищет по ним ссылку сервера.
-  renderHistoryTab();
-
-  // Listen to background auto-update events to hot-reload the UI server cards
-  window.api.onSubscriptionsUpdated(() => {
-    loadSubscriptions();
-  });
-
-  // Listen to clipboard import result
-  window.api.onSubscriptionResult(async (links) => {
-    if (!links || links.length === 0) {
-      showAlert(
-        translations[currentLanguage].alertDialogTitle,
-        translations[currentLanguage].clipboardNoLinks,
-        false,
-        translations[currentLanguage]
-      );
-      return;
-    }
-    
-    // Find if a clipboard subscription already exists
-    let clipSub = allSubscriptions.find(s => s.url === 'clipboard');
-    if (clipSub) {
-      // Merge links, avoiding duplicates
-      const existing = new Set(clipSub.links);
-      links.forEach(l => existing.add(l));
-      clipSub.links = Array.from(existing);
-    } else {
-      const name = translations[currentLanguage].clipboardSubName;
-      clipSub = {
-        id: Date.now().toString(),
-        name: name,
-        url: 'clipboard',
-        links: links
-      };
-      allSubscriptions.push(clipSub);
-    }
-    
-    await window.api.saveSubscriptions(allSubscriptions);
     await loadSubscriptions();
-  });
+  renderHistoryTab();
+  initScrollWidget();
 
   // Convert standard select dropdowns to custom glassmorphic dropdowns to prevent WebView2 transparency rendering bugs.
   makeSelectCustom('dnsSelect');
@@ -1923,110 +1605,7 @@ async function init() {
 
 let connectionsViewActive = false;
 
-// ── SEARCH LIVE FILTER ───────────────────────────────────────────────────────
-const serverSearchInput = optionalEl<HTMLInputElement>('serverSearchInput');
-if (serverSearchInput) {
-  serverSearchInput.addEventListener('input', (e) => {
-    serverSearchQuery = (e.target as HTMLInputElement).value;
-    updateCards();
-  });
-}
-
-// ── AUTO-BEST SERVER ──────────────────────────────────────────────────────────
-const bestServerBtn = optionalEl<HTMLButtonElement>('bestServerBtn');
-if (bestServerBtn) {
-  bestServerBtn.onclick = async () => {
-    const links: string[] = [];
-    allSubscriptions.forEach(s => links.push(...s.links));
-    const uniqueLinks = Array.from(new Set(links));
-    if (uniqueLinks.length === 0) return;
-    
-    // Show pinging status
-    uniqueLinks.forEach(l => {
-      setPingData(l, 'pinging');
-      window.api.pingServer(l);
-    });
-    updateCards();
-    
-    // Only the label span is swapped — writing to the button itself would drop
-    // the lightning icon that sits next to it.
-    const bestServerBtnText = el('bestServerBtnText');
-    bestServerBtn.disabled = true;
-    const originalText = bestServerBtnText.textContent;
-    bestServerBtnText.textContent = translations[currentLanguage].bestServerSearching;
-
-    setTimeout(async () => {
-      bestServerBtn.disabled = false;
-      bestServerBtnText.textContent = originalText;
-
-      let bestLink = null;
-      let minPing = Infinity;
-      uniqueLinks.forEach(l => {
-        const ping = pingData[l];
-        if (typeof ping === 'number' && ping > 0 && ping < minPing) {
-          minPing = ping;
-          bestLink = l;
-        }
-      });
-      
-      if (bestLink) {
-        const isNewServer = activeServerLink !== bestLink;
-        const wasActive = (appState === 'on' || appState === 'connecting');
-
-        if (wasActive && isNewServer) {
-          const info = parseBasicInfo(bestLink);
-          const confirmMsg = translations[currentLanguage].bestServerSwitchConfirm
-            .replace('{name}', info.name);
-
-          const confirmed = await showConfirm(confirmMsg);
-          if (!confirmed) {
-            return;
-          }
-        } else if (wasActive && !isNewServer) {
-          showAlert(
-            translations[currentLanguage].alertDialogTitle,
-            translations[currentLanguage].bestServerAlready,
-            false,
-            translations[currentLanguage]
-          );
-          return;
-        }
-
-        activeServerLink = bestLink;
-        const info = parseBasicInfo(bestLink);
-        activeServerName.textContent = info.name;
-        activeServerDetails.textContent = `${info.type.toUpperCase()} • ${info.address}`;
-        updateCards();
-        collectAndSaveSettings();
-        
-        updateAppInterface('connecting');
-        try {
-          const freshSettings = await window.api.getSettings();
-          const useSystemProxy = freshSettings && freshSettings.systemProxy != null
-            ? !!freshSettings.systemProxy
-            : el<HTMLInputElement>('systemProxyCheckbox').checked;
-          
-          let res;
-          if (wasActive) {
-            res = await window.api.restartXray(bestLink, useSystemProxy);
-          } else {
-            res = await window.api.startXray(bestLink, useSystemProxy);
-          }
-
-          if (res && !res.success) {
-            showAlert(translations[currentLanguage].errorDialogTitle, res.error || 'Unknown error', true, translations[currentLanguage]);
-            updateAppInterface('off');
-          }
-        } catch (e) {
-          showAlert(translations[currentLanguage].errorDialogTitle, errorText(e), true, translations[currentLanguage]);
-          updateAppInterface('off');
-        }
-      } else {
-        showAlert(translations[currentLanguage].alertDialogTitle, translations[currentLanguage].bestServerFailed, false, translations[currentLanguage]);
-      }
-    }, 2000);
-  };
-}
+// Server search filter and auto-best server extracted to views/servers.view.ts
 
 // ── СКОРОСТЬ СОЕДИНЕНИЯ ──────────────────────────────────────────────────────
 //
@@ -2122,123 +1701,7 @@ function setSpeedMeterVisible(visible: boolean): void {
 
 // Theme editor, presets, and settings transfer extracted to views/settings.view.ts
 
-// ── KILL SWITCH: ВИДИМОСТЬ СОСТОЯНИЯ И ТЕЛЕМЕТРИЯ ────────────────────────────
-//
-// Правила брандмауэра переживают процесс, который их поставил. Пока состояние
-// жило только галкой в «Настройках», у пользователя не было ни одного способа
-// связать пропавший интернет с приложением — а именно приложение его и резало.
-// Здесь состояние спрашивается у бэкенда и показывается как на «Главной»,
-// так и в приборном виджете настроек.
-
-async function refreshKillSwitchStatus(): Promise<void> {
-  const box = optionalEl<HTMLInputElement>('killSwitchCheckbox');
-  const badge = optionalEl('killSwitchStatusBadge');
-  const textEl = optionalEl('killSwitchStatusText');
-  if (!box || !badge || !textEl) return;
-
-  const t = translations[currentLanguage];
-  let state = { active: false, stuck: false };
-  try {
-    state = await window.api.getKillSwitchState();
-  } catch (e) {
-    console.error('getKillSwitchState failed:', e);
-  }
-
-  badge.className = 'security-status-pill';
-
-  if (state.stuck) {
-    badge.classList.add('security-status-pill--danger');
-    textEl.textContent = t.killSwitchStatusStuck;
-    badge.title = t.killSwitchStuckAlert;
-    return;
-  }
-
-  if (!box.checked) {
-    badge.classList.add('security-status-pill--off');
-    textEl.textContent = t.killSwitchStatusOff;
-    badge.title = '';
-    return;
-  }
-
-  if (appState === 'on') {
-    if (state.active) {
-      badge.classList.add('security-status-pill--active');
-      textEl.textContent = t.killSwitchStatusActive;
-      badge.title = t.killSwitchBadgeTitle;
-    } else {
-      badge.classList.add('security-status-pill--pending');
-      textEl.textContent = t.killSwitchStatusPending;
-      badge.title = t.killSwitchBadgeTitle;
-    }
-  } else {
-    badge.classList.add('security-status-pill--standby');
-    textEl.textContent = t.killSwitchStatusStandby;
-    badge.title = '';
-  }
-}
-
-function updateInterceptionGuidance(): void {
-  const tunBox = optionalEl<HTMLInputElement>('tunModeCheckbox');
-  const proxyBox = optionalEl<HTMLInputElement>('systemProxyCheckbox');
-  const banner = optionalEl('networkInterceptionHint');
-  const textEl = optionalEl('networkInterceptionText');
-  if (!tunBox || !proxyBox || !banner || !textEl) return;
-
-  const t = translations[currentLanguage];
-  const isTun = tunBox.checked;
-  const isProxy = proxyBox.checked;
-
-  banner.classList.remove('settings-interception-banner--warning');
-
-  if (isTun && isProxy) {
-    textEl.textContent = t.interceptionBoth;
-  } else if (isTun && !isProxy) {
-    textEl.textContent = t.interceptionTunOnly;
-  } else if (!isTun && isProxy) {
-    textEl.textContent = t.interceptionProxyOnly;
-  } else {
-    banner.classList.add('settings-interception-banner--warning');
-    textEl.textContent = t.interceptionNone;
-  }
-}
-
-async function refreshKillSwitchBadge(): Promise<void> {
-  void refreshKillSwitchStatus();
-  const badge = optionalEl('killSwitchBadge');
-  if (!badge) return;
-
-  let state;
-  try {
-    state = await window.api.getKillSwitchState();
-  } catch (e) {
-    console.error('getKillSwitchState failed:', e);
-    return;
-  }
-
-  const t = translations[currentLanguage];
-  killSwitchArmed = state.active;
-
-  badge.style.display = state.active ? 'flex' : 'none';
-  badge.classList.toggle('status-badge--danger', state.stuck);
-  badge.classList.toggle('status-badge--warning', !state.stuck);
-  setText('killSwitchBadgeText', state.stuck ? t.killSwitchStuck : t.killSwitchBadge);
-  badge.title = state.stuck ? t.killSwitchStuckAlert : t.killSwitchBadgeTitle;
-
-  // Застрявшие правила — худшее состояние продукта: машина без сети,
-  // приложение даже не подключено, причина видна только в crash-логе. Здесь
-  // она произносится вслух, вместе с тем, что делать.
-  if (state.stuck && !killSwitchStuckReported) {
-    killSwitchStuckReported = true;
-    badge.style.display = 'flex';
-    showAlert(t.errorDialogTitle, t.killSwitchStuckAlert, true, t);
-  }
-}
-
-// Состояние меняется на подключении и отключении, а застрявшие правила видны
-// уже при старте — поэтому опрос и там, и там.
-void refreshKillSwitchBadge();
-window.api.onStarted(() => void refreshKillSwitchBadge());
-window.api.onStopped(() => void refreshKillSwitchBadge());
+// Kill Switch state and telemetry extracted to views/kill-switch.view.ts
 
 // ── WATCHDOG EVENT LISTENERS ──────────────────────────────────────────────────
 if (window.api.onWatchdogReconnecting) {
@@ -2261,7 +1724,7 @@ if (window.api.onWatchdogWaiting) {
     // «Нет сети» — правда лишь наполовину, когда сеть режет собственный Kill
     // Switch. Для пользователя это разные ситуации: в одной он ждёт провайдера,
     // в другой — понимает, что интернет вернётся отключением VPN.
-    statusText.textContent = killSwitchArmed ? t.watchdogNoNetworkKillSwitch : t.watchdogNoNetwork;
+    statusText.textContent = isKillSwitchArmed() ? t.watchdogNoNetworkKillSwitch : t.watchdogNoNetwork;
     statusText.style.color = 'var(--accent-color)';
     statusDot.className = 'status-dot connecting';
     void refreshKillSwitchBadge();
@@ -2340,557 +1803,3 @@ if (window.api.onWatchdogFailed) {
 // никуда — открывалось только со второго.
 
 init();
-
-// --- Логика QR-сканера ---
-const importQrBtn = el('importQrBtn');
-const qrModalOverlay = el('qrModalOverlay');
-const qrModalClose = el('qrModalClose');
-const qrStartCameraBtn = el('qrStartCameraBtn');
-const qrUploadFileBtn = el('qrUploadFileBtn');
-const qrFileInput = el<HTMLInputElement>('qrFileInput');
-const qrVideo = el<HTMLVideoElement>('qrVideo');
-const qrCanvas = el<HTMLCanvasElement>('qrCanvas');
-const qrPlaceholder = el('qrScannerPlaceholder');
-const qrPlaceholderText = el('qrPlaceholderText');
-const qrReticle = el('qrScannerReticle');
-
-let qrStream: MediaStream | null = null;
-let qrAnimationId: number | null = null;
-
-function stopQrCamera() {
-  if (qrAnimationId) {
-    cancelAnimationFrame(qrAnimationId);
-    qrAnimationId = null;
-  }
-  if (qrStream) {
-    qrStream.getTracks().forEach(track => track.stop());
-    qrStream = null;
-  }
-  qrVideo.pause();
-  qrVideo.srcObject = null;
-  qrVideo.style.display = 'none';
-  qrReticle.style.display = 'none';
-  qrPlaceholder.style.display = 'flex';
-}
-
-let qrModalRelease: (() => void) | null = null;
-
-function closeQrModal() {
-  stopQrCamera();
-  qrModalOverlay.style.display = 'none';
-  qrModalRelease?.();
-  qrModalRelease = null;
-}
-
-importQrBtn.onclick = () => {
-  const t = translations[currentLanguage];
-  qrPlaceholderText.textContent = t.qrPlaceholderText;
-  qrModalOverlay.style.display = 'flex';
-  qrModalRelease = trapFocus(qrModalOverlay, el('qrStartCameraBtn'), closeQrModal);
-};
-
-qrModalClose.onclick = closeQrModal;
-
-qrUploadFileBtn.onclick = () => {
-  stopQrCamera();
-  qrFileInput.click();
-};
-
-qrFileInput.onchange = (e) => {
-  const input = e.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
-
-  const t = translations[currentLanguage];
-  const reader = new FileReader();
-  reader.onload = (event) => {
-    const img = new Image();
-    img.onload = async () => {
-      const tempCanvas = document.createElement('canvas');
-      const ctx = tempCanvas.getContext('2d')!;
-      tempCanvas.width = img.width;
-      tempCanvas.height = img.height;
-      ctx.drawImage(img, 0, 0);
-
-      const imageData = ctx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-      if (typeof jsQR !== 'undefined') {
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
-        if (code && code.data) {
-          await handleQrImport(code.data);
-        } else {
-          showAlert(t.errorDialogTitle, t.qrNoCodeError, true, t);
-        }
-      } else {
-        console.error("jsQR is not loaded yet");
-      }
-    };
-    img.src = String(event.target?.result ?? '');
-  };
-  reader.readAsDataURL(file);
-  input.value = ''; // Reset file input
-};
-
-qrStartCameraBtn.onclick = async () => {
-  stopQrCamera();
-  const t = translations[currentLanguage];
-
-  try {
-    qrStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment' }
-    });
-    qrVideo.srcObject = qrStream;
-    qrVideo.setAttribute('playsinline', 'true');
-    qrVideo.style.display = 'block';
-    qrReticle.style.display = 'block';
-    qrPlaceholder.style.display = 'none';
-    await qrVideo.play();
-    
-    qrAnimationId = requestAnimationFrame(scanQrFrame);
-  } catch (err) {
-    console.error("Camera access failed:", err);
-    showAlert(t.errorDialogTitle, t.qrCameraError, true, t);
-  }
-};
-
-function scanQrFrame() {
-  if (qrVideo.readyState === qrVideo.HAVE_ENOUGH_DATA) {
-    const canvasCtx = qrCanvas.getContext('2d')!;
-    qrCanvas.width = qrVideo.videoWidth;
-    qrCanvas.height = qrVideo.videoHeight;
-    canvasCtx.drawImage(qrVideo, 0, 0, qrCanvas.width, qrCanvas.height);
-
-    const imageData = canvasCtx.getImageData(0, 0, qrCanvas.width, qrCanvas.height);
-    if (typeof jsQR !== 'undefined') {
-      const code = jsQR(imageData.data, imageData.width, imageData.height);
-      if (code && code.data) {
-        handleQrImport(code.data);
-        return;
-      }
-    }
-  }
-  if (qrStream) {
-    qrAnimationId = requestAnimationFrame(scanQrFrame);
-  }
-}
-
-async function handleQrImport(link: string) {
-  const t = translations[currentLanguage];
-  const trimmed = link.trim();
-  
-  // Kept in step with proxySchemes in backend/core/protocol.go. "http" is left
-  // out on purpose: a QR code holding a web address must not import as a
-  // server, and only the backend can tell the two shapes apart.
-  const qrSchemes = [
-    'vless', 'vmess', 'ss', 'trojan', 'tuic',
-    'hysteria', 'hysteria2', 'hy2', 'anytls',
-    'socks', 'socks5', 'wireguard', 'wg',
-  ];
-
-  if (qrSchemes.some(scheme => trimmed.toLowerCase().startsWith(`${scheme}://`))) {
-
-    let qrSub = allSubscriptions.find(s => s.url === 'qrcode');
-    if (qrSub) {
-      const existing = new Set(qrSub.links);
-      existing.add(trimmed);
-      qrSub.links = Array.from(existing);
-    } else {
-      const name = translations[currentLanguage].qrSubName;
-      qrSub = {
-        id: Date.now().toString(),
-        name: name,
-        url: 'qrcode',
-        links: [trimmed]
-      };
-      allSubscriptions.push(qrSub);
-    }
-
-    await window.api.saveSubscriptions(allSubscriptions);
-    closeQrModal();
-    await loadSubscriptions();
-    showAlert(t.alertDialogTitle, t.qrSuccessImport, false, t);
-    return;
-  }
-
-  // Most QR codes handed out by a provider hold the subscription address, not a
-  // single node. Rejecting those was the whole reason scanning "did not work":
-  // the code read perfectly and was then thrown away.
-  if (/^https?:\/\//i.test(trimmed)) {
-    closeQrModal();
-    // Name it after the host, which is all the code carries and still tells one
-    // provider from another in the tab strip.
-    let name = trimmed;
-    try {
-      name = new URL(trimmed).hostname || trimmed;
-    } catch (e) {
-      // Not a URL the browser can parse; the raw text still names the tab.
-    }
-    await addSubscriptionByUrl(name, trimmed);
-    return;
-  }
-
-  showAlert(t.errorDialogTitle, t.qrUnsupportedContent.replace('{content}', trimmed.slice(0, 120)), true, t);
-}
-
-el('pingAllBtn').onclick = () => {
-  const links: string[] = [];
-  allSubscriptions.forEach(s => links.push(...s.links));
-  Array.from(new Set(links)).forEach(l => {
-    setPingData(l, 'pinging');
-    window.api.pingServer(l);
-  });
-  updateCards();
-};
-
-// DNS controls and TUN checkbox handled by views/settings.view.ts
-// Wails rejects a bound call with the text of the Go error, sometimes wrapped
-// in an Error and sometimes as a bare string. The backend already translates
-// the message, so it goes straight to the user.
-function subscriptionErrorText(e: unknown): string {
-  return errorText(e);
-}
-
-// Adds a subscription and fetches it in the background, showing the tab with a
-// spinner straight away. Shared by the "add" button and the QR import, since a
-// QR code carrying a subscription address has to end up in exactly the same
-// state as one typed by hand — auto-update included.
-async function addSubscriptionByUrl(name: string, url: string) {
-  const newSubId = Date.now().toString();
-  const newSub = { id: newSubId, name, url, links: [], loading: true };
-  allSubscriptions.push(newSub);
-
-  await window.api.saveSubscriptions(allSubscriptions);
-  await loadSubscriptions(); // Renders the tab instantly with hourglass spinner
-
-  // Background fetch
-  (async () => {
-    try {
-      const links = await window.api.fetchSubscription(url);
-      const sub = allSubscriptions.find(s => s.id === newSubId);
-      if (sub) {
-        sub.links = links || [];
-        sub.loading = false;
-        await window.api.saveSubscriptions(allSubscriptions);
-        await loadSubscriptions(); // Refresh tabs to remove hourglass spinner
-        if (currentActiveSubId === newSubId || currentActiveSubId === 'all') {
-          updateCards();
-        }
-      }
-    } catch (e) {
-      console.error('Failed to fetch subscription:', e);
-      const sub = allSubscriptions.find(s => s.id === newSubId);
-      if (sub) {
-        sub.loading = false;
-        await window.api.saveSubscriptions(allSubscriptions);
-        await loadSubscriptions();
-      }
-      const t = translations[currentLanguage];
-      showAlert(t.errorDialogTitle, subscriptionErrorText(e), true, t);
-    }
-  })();
-}
-
-el('addSubBtn').onclick = async () => {
-  const nameInput = el<HTMLInputElement>('subName');
-  const urlInput = el<HTMLInputElement>('subUrl');
-  const name = nameInput.value.trim();
-  const url = urlInput.value.trim();
-  if (!name || !url) return;
-
-  nameInput.value = '';
-  urlInput.value = '';
-
-  await addSubscriptionByUrl(name, url);
-};
-
-el('importClipboardBtn').onclick = () => {
-  window.api.importFromClipboard();
-};
-
-el('updateSubBtn').onclick = async () => {
-  const t = translations[currentLanguage];
-  const originalText = el('updateSubBtn').textContent;
-  el('updateSubBtn').textContent = translations[currentLanguage].updateSubBtnBusy;
-  
-  if (currentActiveSubId === 'all') {
-    // Update all subscriptions. Failures are collected rather than reported one
-    // by one, so a dead subscription cannot bury the user in dialogs.
-    const failures = [];
-    for (const sub of allSubscriptions) {
-      try {
-        const links = await window.api.fetchSubscription(sub.url);
-        if (links && links.length > 0) {
-          sub.links = links;
-        }
-      } catch (e) {
-        console.error('Failed to update subscription:', sub.name, e);
-        failures.push(`${sub.name}: ${subscriptionErrorText(e)}`);
-      }
-    }
-    await window.api.saveSubscriptions(allSubscriptions);
-    await loadSubscriptions();
-    if (failures.length > 0) {
-      showAlert(t.errorDialogTitle, failures.join('\n\n'), true, t);
-    }
-  } else {
-    // Update the selected active subscription
-    const sub = allSubscriptions.find(s => s.id === currentActiveSubId);
-    if (sub) {
-      try {
-        const links = await window.api.fetchSubscription(sub.url);
-        if (links && links.length > 0) {
-          sub.links = links;
-          await window.api.saveSubscriptions(allSubscriptions);
-          await loadSubscriptions();
-        }
-      } catch (e) {
-        console.error('Failed to update subscription:', sub.name, e);
-        showAlert(t.errorDialogTitle, subscriptionErrorText(e), true, t);
-      }
-    }
-  }
-  el('updateSubBtn').textContent = originalText;
-};
-
-// Auto-save settings and checkbox listeners extracted to views/settings.view.ts
-
-// --- Специальный интерактивный виджет прокрутки ---
-let isDraggingScroll = false;
-let startScrollY = 0;
-let startScrollTop = 0;
-
-const scrollWidget = el('serversScrollWidget');
-const scrollTrack = el('scrollTrack');
-const scrollThumb = el('scrollThumb');
-const scrollUpBtn = el('scrollUpBtn');
-const scrollDownBtn = el('scrollDownBtn');
-const mainContainer = query('main');
-
-function updateCustomScroll() {
-  if (!scrollWidget || !mainContainer || !scrollTrack || !scrollThumb) return;
-
-  const scrollHeight = mainContainer.scrollHeight;
-  const clientHeight = mainContainer.clientHeight;
-  const scrollTop = mainContainer.scrollTop;
-
-  // Если весь контент помещается на экране, скрываем бегунок и трек, но оставляем область наведения активной
-  if (scrollHeight <= clientHeight) {
-    scrollThumb.style.display = 'none';
-    scrollTrack.style.opacity = '0';
-    return;
-  }
-
-  scrollThumb.style.display = 'block';
-  scrollTrack.style.opacity = '';
-
-  const trackHeight = scrollTrack.clientHeight;
-  // Высота бегунка пропорциональна видимой области
-  const thumbHeight = Math.max(40, Math.min(150, (clientHeight / scrollHeight) * trackHeight));
-  scrollThumb.style.height = `${thumbHeight}px`;
-
-  // Положение бегунка на треке
-  const maxScrollTop = scrollHeight - clientHeight;
-  const scrollRatio = scrollTop / maxScrollTop;
-  const maxThumbTop = trackHeight - thumbHeight;
-  const thumbTop = scrollRatio * maxThumbTop;
-
-  scrollThumb.style.transform = `translateY(${thumbTop}px)`;
-}
-
-// Слушатель события прокрутки основного контейнера
-mainContainer.addEventListener('scroll', updateCustomScroll);
-window.addEventListener('resize', updateCustomScroll);
-
-// Перетаскивание бегунка
-scrollThumb.addEventListener('mousedown', (e) => {
-  isDraggingScroll = true;
-  startScrollY = e.clientY;
-  startScrollTop = mainContainer.scrollTop;
-  scrollThumb.style.transition = 'none'; // Отключаем переходы во время перетаскивания
-  document.body.style.cursor = 'grabbing';
-  document.body.style.userSelect = 'none'; // Предотвращаем выделение текста
-  e.preventDefault();
-});
-
-document.addEventListener('mousemove', (e) => {
-  if (!isDraggingScroll) return;
-
-  const trackHeight = scrollTrack.clientHeight;
-  const thumbHeight = scrollThumb.clientHeight;
-  const maxThumbTop = trackHeight - thumbHeight;
-
-  const deltaY = e.clientY - startScrollY;
-  const scrollHeight = mainContainer.scrollHeight;
-  const clientHeight = mainContainer.clientHeight;
-  const maxScrollTop = scrollHeight - clientHeight;
-
-  // Рассчитываем новое положение прокрутки на основе дельты мыши
-  const scrollDelta = (deltaY / maxThumbTop) * maxScrollTop;
-  mainContainer.scrollTop = Math.max(0, Math.min(maxScrollTop, startScrollTop + scrollDelta));
-});
-
-document.addEventListener('mouseup', () => {
-  if (isDraggingScroll) {
-    isDraggingScroll = false;
-    scrollThumb.style.transition = '';
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-  }
-});
-
-// Клик по треку скролла (быстрый переход к позиции)
-scrollTrack.addEventListener('click', (e) => {
-  if (e.target === scrollThumb) return; // Игнорируем клик по самому бегунку
-
-  const trackRect = scrollTrack.getBoundingClientRect();
-  const clickY = e.clientY - trackRect.top;
-  const thumbHeight = scrollThumb.clientHeight;
-  const trackHeight = scrollTrack.clientHeight;
-
-  // Центрируем бегунок по клику
-  const targetRatio = (clickY - thumbHeight / 2) / (trackHeight - thumbHeight);
-  const scrollHeight = mainContainer.scrollHeight;
-  const clientHeight = mainContainer.clientHeight;
-  const maxScrollTop = scrollHeight - clientHeight;
-
-  mainContainer.scrollTo({
-    top: Math.max(0, Math.min(maxScrollTop, targetRatio * maxScrollTop)),
-    behavior: 'smooth'
-  });
-});
-
-// Стрелочка ВВЕРХ
-scrollUpBtn.addEventListener('click', () => {
-  mainContainer.scrollBy({ top: -200, behavior: 'smooth' });
-});
-
-// Стрелочка ВНИЗ
-scrollDownBtn.addEventListener('click', () => {
-  mainContainer.scrollBy({ top: 200, behavior: 'smooth' });
-});
-
-// Дополнительно: обновляем при изменении сетки серверов
-if (serversGrid) {
-  const observer = new MutationObserver(() => {
-    setTimeout(updateCustomScroll, 50);
-  });
-  observer.observe(serversGrid, { childList: true, subtree: true });
-}
-
-/**
- * Переносит подписи с нативных <option> на уже построенный стеклянный список.
- * Возвращает false, если списка ещё нет — тогда его надо собрать.
- *
- * Существует потому, что стеклянный список — это КОПИЯ текстов, снятая в момент
- * сборки, а не живое отражение <select>. Смена языка переписывает нативные
- * <option>, но копию не трогала, и на «Маршрутах» подпись кнопки оставалась на
- * прежнем языке: в английском интерфейсе висели «Напрямую» и «.суффикс домена».
- * Заметно это было только на кнопке, потому что она видна всегда, — но и весь
- * раскрытый список отставал ровно так же.
- *
- * Тексты подменяются на месте, а не пересборкой: на каждом <div> висит onclick,
- * замкнутый на свой <option>, и пересборка стоила бы их всех на ровном месте.
- */
-function syncCustomSelectLabels(selectId: string): boolean {
-  const select = optionalEl<HTMLSelectElement>(selectId);
-  if (!select) return false;
-
-  const wrapper = select.nextElementSibling;
-  if (!wrapper || !wrapper.classList.contains('custom-select-wrapper')) return false;
-
-  const trigger = wrapper.querySelector('.custom-select-trigger');
-  const selectedOption = select.options[select.selectedIndex];
-  if (trigger && selectedOption) {
-    trigger.textContent = selectedOption.textContent;
-  }
-
-  wrapper.querySelectorAll('.custom-select-option').forEach((optDiv, idx) => {
-    const opt = select.options[idx];
-    if (opt) optDiv.textContent = opt.textContent;
-  });
-  return true;
-}
-
-// Function to convert native <select> elements to custom glassmorphic dropdowns
-function makeSelectCustom(selectId: string) {
-  const select = optionalEl<HTMLSelectElement>(selectId);
-  if (!select) return;
-
-  // If already customized, skip but re-read the labels off the native options
-  if (syncCustomSelectLabels(selectId)) return;
-
-  // Create wrapper
-  const wrapper = document.createElement('div');
-  wrapper.className = 'custom-select-wrapper';
-
-  // Hide the original select
-  select.style.display = 'none';
-  select.parentNode?.insertBefore(wrapper, select.nextSibling);
-
-  // Create trigger
-  const trigger = document.createElement('div');
-  trigger.className = 'custom-select-trigger';
-  const selectedOption = select.options[select.selectedIndex];
-  trigger.textContent = selectedOption ? selectedOption.textContent : '';
-  wrapper.appendChild(trigger);
-
-  // Create options container
-  const optionsContainer = document.createElement('div');
-  optionsContainer.className = 'custom-select-options';
-  wrapper.appendChild(optionsContainer);
-
-  // Function to build options list dynamically
-  const buildOptions = () => {
-    optionsContainer.innerHTML = '';
-    Array.from(select.options).forEach((opt, idx) => {
-      const optDiv = document.createElement('div');
-      optDiv.className = 'custom-select-option';
-      if (opt.value === select.value) {
-        optDiv.classList.add('selected');
-      }
-      optDiv.textContent = opt.textContent;
-      optDiv.onclick = (e) => {
-        e.stopPropagation();
-        select.value = opt.value;
-        trigger.textContent = opt.textContent;
-        // Trigger native change event
-        select.dispatchEvent(new Event('change'));
-        wrapper.classList.remove('open');
-        buildOptions(); // Rebuild to update selected class styling
-      };
-      optionsContainer.appendChild(optDiv);
-    });
-  };
-
-  buildOptions();
-
-  // Toggle dropdown visibility
-  trigger.onclick = (e) => {
-    e.stopPropagation();
-    // Close all other custom selects first to prevent overlapping menus
-    document.querySelectorAll('.custom-select-wrapper').forEach(w => {
-      if (w !== wrapper) w.classList.remove('open');
-    });
-    wrapper.classList.toggle('open');
-  };
-
-  // Close dropdown if user clicks anywhere else in the document
-  document.addEventListener('click', () => {
-    wrapper.classList.remove('open');
-  });
-
-  // Re-sync values when the original select is changed externally (e.g. settings loaded)
-  select.addEventListener('change', () => {
-    const selected = select.options[select.selectedIndex];
-    if (selected) {
-      trigger.textContent = selected.textContent;
-    }
-    // Update selected class styling
-    Array.from(optionsContainer.children).forEach((child, idx) => {
-      if (select.options[idx] && select.options[idx].value === select.value) {
-        child.classList.add('selected');
-      } else {
-        child.classList.remove('selected');
-      }
-    });
-  });
-}
