@@ -1,7 +1,8 @@
 import { el, optionalEl, query, setText, syncCustomSelectLabels } from '../modules/dom';
-import { errorText } from '../modules/ui-utils';
+import { errorText, trapFocus } from '../modules/ui-utils';
 import { translations, translate } from '../modules/translations';
 import type { Language, Translations } from '../modules/translations';
+import type { LanIPInfo } from '../modules/api';
 import {
   DEFAULT_THEME,
   PRESETS,
@@ -40,6 +41,106 @@ let themeSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let appliedDns = '';
 let dnsCheckTimer: ReturnType<typeof setTimeout> | null = null;
 let isInitialized = false;
+
+let lanSharingRelease: (() => void) | null = null;
+let lanIPs: LanIPInfo[] = [];
+let currentLanIP = '127.0.0.1';
+let currentLanProtocol: 'socks5' | 'http' = 'socks5';
+const LAN_PROXY_PORT = 20809;
+
+export function closeLanSharingModal(): void {
+  const overlay = optionalEl('lanSharingModalOverlay');
+  if (overlay) overlay.style.display = 'none';
+  lanSharingRelease?.();
+  lanSharingRelease = null;
+}
+
+export async function openLanSharingModal(): Promise<void> {
+  const overlay = optionalEl('lanSharingModalOverlay');
+  if (!overlay) return;
+
+  const currentLang = getLang();
+  const t = translations[currentLang];
+
+  overlay.style.display = 'flex';
+  lanSharingRelease = trapFocus(overlay, optionalEl('lanSharingCloseBtn'), closeLanSharingModal);
+
+  const select = optionalEl<HTMLSelectElement>('lanInterfaceSelect');
+  const qrLoading = optionalEl('lanQrLoading');
+  if (qrLoading) qrLoading.style.display = 'flex';
+
+  try {
+    lanIPs = await window.api.getLanIPs();
+  } catch (err) {
+    console.error('Failed to get LAN IPs:', err);
+    lanIPs = [];
+  }
+
+  if (select) {
+    select.innerHTML = '';
+    if (lanIPs.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '127.0.0.1';
+      opt.textContent = t.lanNoInterfaces;
+      select.appendChild(opt);
+      currentLanIP = '127.0.0.1';
+    } else {
+      for (const info of lanIPs) {
+        const opt = document.createElement('option');
+        opt.value = info.ip;
+        opt.textContent = `${info.name} (${info.ip})`;
+        select.appendChild(opt);
+      }
+      currentLanIP = lanIPs[0].ip;
+    }
+  }
+
+  const protoSelect = optionalEl<HTMLSelectElement>('lanProtocolSelect');
+  if (protoSelect) {
+    currentLanProtocol = protoSelect.value as 'socks5' | 'http';
+  }
+
+  await updateLanSharingDisplay();
+}
+
+async function updateLanSharingDisplay(): Promise<void> {
+  const qrImg = optionalEl<HTMLImageElement>('lanQrImage');
+  const qrLoading = optionalEl('lanQrLoading');
+  const addrVal = optionalEl('lanAddressValue');
+
+  const address = `${currentLanIP}:${LAN_PROXY_PORT}`;
+  if (addrVal) addrVal.textContent = address;
+
+  const proxyURI = `${currentLanProtocol}://${currentLanIP}:${LAN_PROXY_PORT}#NeoBox-LAN`;
+
+  if (qrLoading) qrLoading.style.display = 'flex';
+  try {
+    const dataUri = await window.api.generateQRCodePNG(proxyURI);
+    if (qrImg) {
+      qrImg.src = dataUri;
+      qrImg.alt = `QR Code: ${proxyURI}`;
+    }
+  } catch (err) {
+    console.error('Failed to generate QR code:', err);
+  } finally {
+    if (qrLoading) qrLoading.style.display = 'none';
+  }
+}
+
+function copyTextWithFeedback(text: string, buttonTextElId: string, originalText: string): void {
+  void navigator.clipboard.writeText(text).then(() => {
+    const textEl = optionalEl(buttonTextElId);
+    const t = translations[getLang()];
+    if (textEl) {
+      textEl.textContent = t.lanCopied;
+      setTimeout(() => {
+        textEl.textContent = originalText;
+      }, 1500);
+    }
+  }).catch((err) => {
+    console.error('Failed to copy to clipboard:', err);
+  });
+}
 
 const DNS_CHECK_DEBOUNCE_MS = 400;
 
@@ -325,6 +426,19 @@ export function applySettingsLanguage(t: Translations): void {
   setText('tunModeLabel', t.tunModeLabel);
   setText('tunModeDesc', t.tunModeDesc);
   setText('systemProxyLabel', t.systemProxyLabel);
+  setText('allowLanLabel', t.allowLanLabel);
+  setText('allowLanDesc', t.allowLanDesc);
+  setText('openLanSharingBtnText', t.openLanSharingBtn);
+  setText('lanSharingTitle', t.lanSharingTitle);
+  setText('lanSharingSubtitle', t.lanSharingSubtitle);
+  setText('lanSelectInterfaceLabel', t.lanSelectInterface);
+  setText('lanProtocolLabel', t.lanProtocolLabel);
+  setText('lanAddressLabel', t.lanAddressLabel);
+  setText('lanCopyAddressBtnText', t.lanCopyAddress);
+  setText('lanCopyLinkBtnText', t.lanCopyLink);
+  setText('lanManualGuideTitle', t.lanManualGuideTitle);
+  setText('lanManualGuideDesc', t.lanManualGuideDesc);
+  setText('lanSharingCloseBtn', t.closeBtnTitle);
 
   setText('appearanceTitle', t.appearanceTitle);
   setText('appearanceDesc', t.appearanceDesc);
@@ -538,6 +652,78 @@ export function initSettingsView(options: SettingsViewOptions): void {
       Promise.resolve(onSaveSettingsFn()).catch((err) =>
         console.error('Failed to save settings on systemProxy change:', err),
       );
+    };
+  }
+
+  // Allow LAN checkbox & sharing button
+  const allowLanBox = optionalEl<HTMLInputElement>('allowLanCheckbox');
+  if (allowLanBox) {
+    allowLanBox.onchange = () => {
+      const openBtn = optionalEl('openLanSharingBtn');
+      if (openBtn) openBtn.style.display = allowLanBox.checked ? 'inline-flex' : 'none';
+      Promise.resolve(onSaveSettingsFn()).catch((err) =>
+        console.error('Failed to save settings on allowLan change:', err),
+      );
+      if (isCoreActiveFn()) {
+        onMarkRulesPendingFn();
+      }
+    };
+  }
+
+  const openLanBtn = optionalEl('openLanSharingBtn');
+  if (openLanBtn) {
+    openLanBtn.onclick = () => {
+      void openLanSharingModal();
+    };
+  }
+
+  const lanCloseBtn = optionalEl('lanSharingCloseBtn');
+  if (lanCloseBtn) {
+    lanCloseBtn.onclick = () => {
+      closeLanSharingModal();
+    };
+  }
+
+  const lanOverlay = optionalEl('lanSharingModalOverlay');
+  if (lanOverlay) {
+    lanOverlay.addEventListener('click', (e) => {
+      if (e.target === lanOverlay) {
+        closeLanSharingModal();
+      }
+    });
+  }
+
+  const lanInterfaceSel = optionalEl<HTMLSelectElement>('lanInterfaceSelect');
+  if (lanInterfaceSel) {
+    lanInterfaceSel.onchange = () => {
+      currentLanIP = lanInterfaceSel.value;
+      void updateLanSharingDisplay();
+    };
+  }
+
+  const lanProtoSel = optionalEl<HTMLSelectElement>('lanProtocolSelect');
+  if (lanProtoSel) {
+    lanProtoSel.onchange = () => {
+      currentLanProtocol = lanProtoSel.value as 'socks5' | 'http';
+      void updateLanSharingDisplay();
+    };
+  }
+
+  const copyAddrBtn = optionalEl('lanCopyAddressBtn');
+  if (copyAddrBtn) {
+    copyAddrBtn.onclick = () => {
+      const addr = `${currentLanIP}:${LAN_PROXY_PORT}`;
+      const t = translations[getLang()];
+      copyTextWithFeedback(addr, 'lanCopyAddressBtnText', t.lanCopyAddress);
+    };
+  }
+
+  const copyLinkBtn = optionalEl('lanCopyLinkBtn');
+  if (copyLinkBtn) {
+    copyLinkBtn.onclick = () => {
+      const link = `${currentLanProtocol}://${currentLanIP}:${LAN_PROXY_PORT}#NeoBox-LAN`;
+      const t = translations[getLang()];
+      copyTextWithFeedback(link, 'lanCopyLinkBtnText', t.lanCopyLink);
     };
   }
 

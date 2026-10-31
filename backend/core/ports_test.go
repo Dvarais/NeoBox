@@ -74,3 +74,24 @@ func TestGenerateConfigUsesPortConstants(t *testing.T) {
 		t.Errorf("external_controller = %v, want %q", got, ClashAPIAddr)
 	}
 }
+
+func TestGenerateConfigAllowLan(t *testing.T) {
+	outbound := map[string]interface{}{
+		"type":   "vless",
+		"tag":    "proxy",
+		"server": "203.0.113.10",
+	}
+
+	config, err := GenerateConfig(outbound, Settings{AllowLan: true}, false, "cache.db", "secret")
+	if err != nil {
+		t.Fatalf("GenerateConfig failed: %v", err)
+	}
+
+	inbounds, ok := config["inbounds"].([]map[string]interface{})
+	if !ok || len(inbounds) == 0 {
+		t.Fatal("config has no inbounds")
+	}
+	if got := inbounds[0]["listen"]; got != "0.0.0.0" {
+		t.Errorf("listen = %v, want 0.0.0.0", got)
+	}
+}

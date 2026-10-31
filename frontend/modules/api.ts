@@ -94,6 +94,7 @@ export interface AppSettings {
   fakeDns: boolean;
   verboseLogging: boolean;
   tlsFragment?: boolean;
+  allowLan?: boolean;
   lastSelectedServer: string | null;
   processMode: 'blacklist' | 'whitelist';
   processListBlacklist: string[];
@@ -140,6 +141,7 @@ export type ProfileSettings = Pick<
   | 'ipv6Leak'
   | 'fakeDns'
   | 'tlsFragment'
+  | 'allowLan'
 >;
 
 /**
@@ -232,6 +234,12 @@ export interface ProcessInfo {
   name: string;
   path?: string;
   count: number;
+}
+
+/** Информация о локальном сетевом интерфейсе и IPv4 адресе для раздачи в сеть. */
+export interface LanIPInfo {
+  name: string;
+  ip: string;
 }
 
 /** Данные события tray-start-reconnect. */
@@ -379,6 +387,10 @@ export interface NeoBoxApi {
   validateDns(value: string): Promise<string>;
   /** Получает список уникальных запущенных пользовательских процессов. */
   getRunningProcesses(): Promise<ProcessInfo[]>;
+  /** Получает список локальных IPv4 адресов для раздачи в сеть. */
+  getLanIPs(): Promise<LanIPInfo[]>;
+  /** Генерирует QR-код в формате PNG Base64 Data URI. */
+  generateQRCodePNG(text: string): Promise<string>;
   /**
    * Карта «адрес встроенного резолвера — владелец его сети», та же, по которой
    * собирается конфиг. Нужна проверке утечки: она узнаёт, кто на самом деле

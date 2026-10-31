@@ -358,6 +358,9 @@ type Settings struct {
 	// TlsFragment enables TLS record fragmentation (Anti-DPI) to bypass censorship/TSPU.
 	// When nil, falls back to link query parameter (fragment=1/record_fragment=1).
 	TlsFragment *bool `json:"tlsFragment"`
+	// AllowLan binds the mixed inbound (SOCKS5+HTTP) to 0.0.0.0 instead of 127.0.0.1,
+	// allowing other devices on the local area network to use this machine as a proxy.
+	AllowLan bool `json:"allowLan"`
 }
 
 // CustomRule represents a single user-defined routing rule.
@@ -1812,9 +1815,14 @@ func GenerateConfigWithCandidates(candidates []map[string]interface{}, outbound 
 		},
 		"inbounds": []map[string]interface{}{
 			{
-				"type":             "mixed",
-				"tag":              "mixed-in",
-				"listen":           ProxyListenHost,
+				"type": "mixed",
+				"tag":  "mixed-in",
+				"listen": func() string {
+					if settings.AllowLan {
+						return "0.0.0.0"
+					}
+					return ProxyListenHost
+				}(),
 				"listen_port":      ProxyListenPort,
 				"set_system_proxy": useSystemProxy,
 			},

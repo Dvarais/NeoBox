@@ -39,6 +39,8 @@ import {
   DNSResolverOwners,
   ValidateDNS,
   GetRunningProcesses,
+  GetLanIPs,
+  GenerateQRCodePNG,
 } from './wailsjs/go/service/AppService';
 
 import { EventsOn } from './wailsjs/runtime/runtime';
@@ -49,6 +51,7 @@ import type {
   ConnectionsSnapshot,
   HistoryEntry,
   KillSwitchState,
+  LanIPInfo,
   NeoBoxApi,
   PingResult,
   ProcessInfo,
@@ -139,6 +142,8 @@ if (typeof window !== 'undefined') {
           UpdateSubscriptionNow: async () => {},
           DNSResolverOwners: async () => ({}),
           GetRunningProcesses: async () => [],
+          GetLanIPs: async () => [{ name: 'Wi-Fi', ip: '192.168.1.100' }],
+          GenerateQRCodePNG: async () => 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
         },
       },
     };
@@ -204,6 +209,8 @@ const api: NeoBoxApi = {
   validateDns: (value) => ValidateDNS(value),
   dnsResolverOwners: () => DNSResolverOwners(),
   getRunningProcesses: () => GetRunningProcesses() as Promise<ProcessInfo[]>,
+  getLanIPs: () => GetLanIPs() as Promise<LanIPInfo[]>,
+  generateQRCodePNG: (text) => GenerateQRCodePNG(text),
   getSubscriptions: async (): Promise<Subscription[]> => {
     try {
       const s = await GetSubscriptions();

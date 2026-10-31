@@ -66,6 +66,7 @@ export function currentProfileSettings(): ProfileSettings {
     ipv6Leak: optionalEl<HTMLInputElement>('ipv6LeakCheckbox')?.checked ?? false,
     fakeDns: optionalEl<HTMLInputElement>('fakeDnsCheckbox')?.checked ?? false,
     tlsFragment: optionalEl<HTMLInputElement>('tlsFragmentCheckbox')?.checked ?? false,
+    allowLan: optionalEl<HTMLInputElement>('allowLanCheckbox')?.checked ?? false,
   };
 }
 
@@ -103,6 +104,13 @@ export function applyProfileSettings(p: ProfileSettings): void {
 
   const tlsFragment = optionalEl<HTMLInputElement>('tlsFragmentCheckbox');
   if (tlsFragment) tlsFragment.checked = !!p.tlsFragment;
+
+  const allowLan = optionalEl<HTMLInputElement>('allowLanCheckbox');
+  if (allowLan) {
+    allowLan.checked = !!p.allowLan;
+    const btn = optionalEl('openLanSharingBtn');
+    if (btn) btn.style.display = allowLan.checked ? 'inline-flex' : 'none';
+  }
 
   onUpdateInterceptionGuidanceFn();
   onRefreshKillSwitchFn();

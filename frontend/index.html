@@ -588,6 +588,16 @@
             <label class="check-row">
               <input type="checkbox" id="systemProxyCheckbox" checked> <span id="systemProxyLabel">Системный прокси (HTTP/SOCKS)</span>
             </label>
+            <div class="lan-sharing-row">
+              <label class="check-row">
+                <input type="checkbox" id="allowLanCheckbox"> 
+                <span id="allowLanLabel">Раздача в сеть (Allow LAN)</span> <span id="allowLanDesc" class="check-desc">(Доступ к прокси с телефона и других устройств)</span>
+              </label>
+              <button type="button" id="openLanSharingBtn" class="btn-glass lan-sharing-btn" style="display: none;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right: 6px;"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                <span id="openLanSharingBtnText">Подключить телефон (QR-код)</span>
+              </button>
+            </div>
             <div id="networkInterceptionHint" class="settings-interception-banner" role="status">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
               <span id="networkInterceptionText">Полный перехват: драйвер Wintun (TUN) перехватывает весь трафик системы, а системный прокси активен для браузеров.</span>
@@ -1047,6 +1057,70 @@
           <button id="processPickerCancelBtn" class="btn-glass" type="button">Отмена</button>
           <button id="processPickerApplyBtn" class="btn-glass btn-glass--primary" type="button">Добавить в список</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно раздачи прокси в локальную сеть (LAN Sharing & QR) -->
+  <div id="lanSharingModalOverlay" class="modal-overlay">
+    <div class="modal-content lan-sharing-modal" role="dialog" aria-modal="true" aria-labelledby="lanSharingTitle" aria-describedby="lanSharingSubtitle">
+      <div class="lan-sharing-header">
+        <div class="lan-sharing-icon-wrap" aria-hidden="true">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+        </div>
+        <div>
+          <h3 id="lanSharingTitle">Раздача прокси в сеть</h3>
+          <p id="lanSharingSubtitle">Подключите телефон, телевизор или консоль через локальный прокси</p>
+        </div>
+      </div>
+
+      <div class="lan-controls-grid">
+        <div class="lan-field-group">
+          <label id="lanSelectInterfaceLabel" for="lanInterfaceSelect" class="lan-field-label">Сетевой адаптер:</label>
+          <select id="lanInterfaceSelect" class="custom-select-control"></select>
+        </div>
+        <div class="lan-field-group">
+          <label id="lanProtocolLabel" for="lanProtocolSelect" class="lan-field-label">Протокол:</label>
+          <select id="lanProtocolSelect" class="custom-select-control">
+            <option value="socks5" selected>SOCKS5 (рекомендуется)</option>
+            <option value="http">HTTP</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="lan-qr-container">
+        <div class="lan-qr-frame">
+          <img id="lanQrImage" src="" alt="LAN Proxy QR Code" class="lan-qr-img">
+          <div id="lanQrLoading" class="lan-qr-loading" style="display: none;">
+            <div class="dns-leak-spinner" aria-hidden="true"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="lan-address-card">
+        <div class="lan-address-info">
+          <span class="lan-address-label" id="lanAddressLabel">Адрес прокси (IP:Порт)</span>
+          <span class="lan-address-value" id="lanAddressValue">192.168.1.100:20809</span>
+        </div>
+        <div class="lan-address-actions">
+          <button id="lanCopyAddressBtn" class="btn-glass" type="button">
+            <svg class="btn-inline-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+            <span id="lanCopyAddressBtnText">Копировать IP:Порт</span>
+          </button>
+          <button id="lanCopyLinkBtn" class="btn-glass" type="button">
+            <svg class="btn-inline-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            <span id="lanCopyLinkBtnText">Копировать ссылку</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="lan-guide-box">
+        <span class="lan-guide-title" id="lanManualGuideTitle">Инструкция для смартфона:</span>
+        <p class="lan-guide-text" id="lanManualGuideDesc">Отсканируйте QR-код в приложении (v2rayNG, Shadowrocket, NekoBox) или укажите IP и порт 20809 в настройках прокси Wi-Fi сети телефона.</p>
+      </div>
+
+      <div class="modal-actions modal-actions--divided">
+        <button id="lanSharingCloseBtn" class="btn-glass" type="button">Закрыть</button>
       </div>
     </div>
   </div>

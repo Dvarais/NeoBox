@@ -1033,6 +1033,7 @@ function collectAndSaveSettings(showFeedback = true) {
     fakeDns: el<HTMLInputElement>('fakeDnsCheckbox').checked,
     verboseLogging: el<HTMLInputElement>('verboseLoggingCheckbox').checked,
     tlsFragment: el<HTMLInputElement>('tlsFragmentCheckbox').checked,
+    allowLan: el<HTMLInputElement>('allowLanCheckbox').checked,
     lastSelectedServer: activeServerLink,
     processMode: getProcessMode(),
     processListBlacklist: getProcessListBlacklist(),
@@ -1431,6 +1432,10 @@ async function init() {
     // По умолчанию включён — так же, как атрибут checked в index.html.
     el<HTMLInputElement>('systemProxyCheckbox').checked =
       settings.systemProxy !== undefined ? !!settings.systemProxy : true;
+    const allowLanChecked = !!settings.allowLan;
+    el<HTMLInputElement>('allowLanCheckbox').checked = allowLanChecked;
+    const openLanBtn = optionalEl('openLanSharingBtn');
+    if (openLanBtn) openLanBtn.style.display = allowLanChecked ? 'inline-flex' : 'none';
     el<HTMLInputElement>('autoConnectCheckbox').checked = !!settings.autoConnect;
     el<HTMLInputElement>('autoUpdateSubsCheckbox').checked = !!settings.autoUpdateSubs;
     el<HTMLInputElement>('rememberServerCheckbox').checked = rememberServer;

@@ -116,3 +116,7 @@ export function UpdateSubscriptionNow(arg1:string):Promise<void>;
 export function ValidateDNS(arg1:string):Promise<string>;
 
 export function GetRunningProcesses():Promise<Array<any>>;
+
+export function GetLanIPs():Promise<Array<any>>;
+
+export function GenerateQRCodePNG(arg1:string):Promise<string>;

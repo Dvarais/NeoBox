@@ -229,3 +229,11 @@ export function ValidateDNS(arg1) {
 export function GetRunningProcesses() {
   return window['go']['service']['AppService']['GetRunningProcesses']();
 }
+
+export function GetLanIPs() {
+  return window['go']['service']['AppService']['GetLanIPs']();
+}
+
+export function GenerateQRCodePNG(arg1) {
+  return window['go']['service']['AppService']['GenerateQRCodePNG'](arg1);
+}

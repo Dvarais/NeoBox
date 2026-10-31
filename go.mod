@@ -162,6 +162,7 @@ require (
 	github.com/sagernet/wireguard-go v0.0.8-0.20261022215841-e4d85ef2ed38 // indirect
 	github.com/sagernet/ws v0.0.0-20231204124109-acfe8907c854 // indirect
 	github.com/samber/lo v1.49.1 // indirect
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	github.com/smallstep/pkcs7 v0.1.1 // indirect
 	github.com/tailscale/certstore v0.1.1-0.20260409135935-3638fb84b77d // indirect
 	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55 // indirect

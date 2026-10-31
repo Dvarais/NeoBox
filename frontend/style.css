@@ -2693,6 +2693,189 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   gap: 10px;
 }
 
+/* ── LAN Sharing & QR Modal ─────────────────────────────────────────────────── */
+.lan-sharing-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.lan-sharing-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-label);
+  padding: 6px 12px;
+}
+
+.lan-sharing-modal {
+  width: 480px !important;
+  max-width: 90vw !important;
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(circle at top left, var(--card-bg), var(--panel-deep)) !important;
+  border: 1px solid var(--accent-edge) !important;
+  animation: modalScaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  padding: 24px !important;
+  box-sizing: border-box;
+}
+
+.lan-sharing-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.lan-sharing-icon-wrap {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  background: var(--accent-tint);
+  border: 1px solid rgb(var(--accent-rgb) / 0.25);
+  color: var(--accent-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 0 16px var(--accent-tint);
+}
+
+.lan-sharing-header h3 {
+  margin: 0 0 4px 0;
+  font-size: var(--fs-title);
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+.lan-sharing-header p {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-dim);
+}
+
+.lan-controls-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.lan-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lan-field-label {
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.lan-qr-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 10px 0 16px;
+}
+
+.lan-qr-frame {
+  position: relative;
+  background: #ffffff;
+  padding: 10px;
+  border-radius: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+
+.lan-qr-img {
+  width: 170px;
+  height: 170px;
+  display: block;
+}
+
+.lan-qr-loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lan-address-card {
+  background: var(--glass-01);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.lan-address-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lan-address-label {
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.lan-address-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-title);
+  font-weight: 700;
+  color: var(--accent-color);
+  letter-spacing: 0.5px;
+}
+
+.lan-address-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lan-guide-box {
+  background: var(--glass-01);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+
+.lan-guide-title {
+  display: block;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 4px;
+}
+
+.lan-guide-text {
+  font-size: var(--fs-label);
+  color: var(--text-dim);
+  margin: 0;
+  line-height: 1.4;
+}
+
 
 /* Custom Select Dropdown Styling */
 .custom-select-wrapper {
