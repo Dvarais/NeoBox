@@ -424,6 +424,10 @@
 
           <div class="routes-save-row">
             <button id="saveAppsBtn" class="btn-glass">Сохранить приложения</button>
+            <button id="openProcessPickerBtn" class="btn-glass" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right: 6px;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <span id="openProcessPickerBtnText">Выбрать программы...</span>
+            </button>
             <span id="appsStatus" class="routes-status-indicator">Готово!</span>
           </div>
         </div>
@@ -1002,6 +1006,47 @@
           <span id="dnsLeakRetryBtnText">Повторить</span>
         </button>
         <button id="dnsLeakCloseBtn" class="btn-glass">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно выбора запущенных процессов (Process Picker) -->
+  <div id="processPickerModalOverlay" class="modal-overlay">
+    <div class="modal-content process-picker-modal" role="dialog" aria-modal="true" aria-labelledby="processPickerTitle" aria-describedby="processPickerSubtitle">
+      <div class="process-picker-header">
+        <div class="process-picker-icon-wrap" aria-hidden="true">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+        </div>
+        <div>
+          <h3 id="processPickerTitle">Выбор запущенных программ</h3>
+          <p id="processPickerSubtitle">Выберите программы для добавления в текущий список туннелирования</p>
+        </div>
+      </div>
+
+      <div class="process-picker-search-bar">
+        <svg class="process-search-icon" aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="processPickerSearch" class="process-search-input" placeholder="Поиск по названию программы..." aria-label="Поиск по названию программы">
+      </div>
+
+      <div id="processPickerLoading" class="process-picker-loading" role="status">
+        <div class="dns-leak-spinner" aria-hidden="true"></div>
+        <span id="processPickerLoadingText">Загрузка списка программ...</span>
+      </div>
+
+      <div id="processPickerList" class="process-picker-list" role="group" aria-label="Список процессов"></div>
+
+      <div id="processPickerEmpty" class="process-picker-empty" style="display: none;">
+        <span id="processPickerEmptyText">Запущенные программы не найдены</span>
+      </div>
+
+      <div class="modal-actions modal-actions--spaced modal-actions--divided">
+        <div class="process-picker-counter">
+          <span id="processPickerSelectedCount">Выбрано: 0</span>
+        </div>
+        <div class="process-picker-btns">
+          <button id="processPickerCancelBtn" class="btn-glass" type="button">Отмена</button>
+          <button id="processPickerApplyBtn" class="btn-glass btn-glass--primary" type="button">Добавить в список</button>
+        </div>
       </div>
     </div>
   </div>

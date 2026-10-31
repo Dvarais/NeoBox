@@ -19,6 +19,7 @@ type mockPlatform struct {
 	prober     platform.NetworkProber
 	lifecycle  platform.LifecycleManager
 	dns        platform.DNSManager
+	processes  platform.ProcessManager
 }
 
 func (m *mockPlatform) Paths() platform.PathManager           { return m.paths }
@@ -29,6 +30,7 @@ func (m *mockPlatform) Privileges() platform.PrivilegeManager { return m.privile
 func (m *mockPlatform) Prober() platform.NetworkProber         { return m.prober }
 func (m *mockPlatform) Lifecycle() platform.LifecycleManager   { return m.lifecycle }
 func (m *mockPlatform) DNS() platform.DNSManager               { return m.dns }
+func (m *mockPlatform) Processes() platform.ProcessManager     { return m.processes }
 
 func TestPlatformRegistration(t *testing.T) {
 	mock := &mockPlatform{dns: &mockDNSManager{}}

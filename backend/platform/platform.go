@@ -12,6 +12,19 @@ type Platform interface {
 	Prober() NetworkProber
 	Lifecycle() LifecycleManager
 	DNS() DNSManager
+	Processes() ProcessManager
+}
+
+// ProcessInfo represents an enumerated running process.
+type ProcessInfo struct {
+	Name  string `json:"name"`  // executable name, e.g. "chrome.exe"
+	Path  string `json:"path"`  // full path if accessible
+	Count int    `json:"count"` // number of running instances/workers
+}
+
+// ProcessManager enumerates running user applications for split tunneling.
+type ProcessManager interface {
+	GetRunningProcesses() ([]ProcessInfo, error)
 }
 
 // DNSManager controls OS-level DNS cache operations.

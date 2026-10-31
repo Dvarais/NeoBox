@@ -225,6 +225,15 @@ export interface ServerSpeedResult {
   error?: string;
 }
 
+/**
+ * Информация о запущенном процессе для выбора в Split Tunneling.
+ */
+export interface ProcessInfo {
+  name: string;
+  path?: string;
+  count: number;
+}
+
 /** Данные события tray-start-reconnect. */
 export interface TrayReconnectRequest {
   link: string;
@@ -368,6 +377,8 @@ export interface NeoBoxApi {
    * значение, на котором потом упадёт подключение.
    */
   validateDns(value: string): Promise<string>;
+  /** Получает список уникальных запущенных пользовательских процессов. */
+  getRunningProcesses(): Promise<ProcessInfo[]>;
   /**
    * Карта «адрес встроенного резолвера — владелец его сети», та же, по которой
    * собирается конфиг. Нужна проверке утечки: она узнаёт, кто на самом деле

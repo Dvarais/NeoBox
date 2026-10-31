@@ -1,8 +1,9 @@
 import { el, optionalEl, escapeHtml, setAria, setText } from '../modules/dom';
 import { iconSvg } from '../modules/icons';
+import { trapFocus } from '../modules/ui-utils';
 import { translations } from '../modules/translations';
 import type { Language, Translations } from '../modules/translations';
-import type { AppSettings, CustomRule } from '../modules/api';
+import type { AppSettings, CustomRule, ProcessInfo } from '../modules/api';
 
 export interface RoutingViewOptions {
   getCurrentLanguage: () => Language;
@@ -316,11 +317,239 @@ export function applyRoutingLanguage(t: Translations): void {
     ruleVal.setAttribute('aria-label', t.ruleValuePlaceholder);
   }
 
+  setText('openProcessPickerBtnText', t.openProcessPickerBtn);
+  setText('processPickerTitle', t.processPickerTitle);
+  setText('processPickerSubtitle', t.processPickerSubtitle);
+  const procSearch = optionalEl<HTMLInputElement>('processPickerSearch');
+  if (procSearch) {
+    procSearch.placeholder = t.processPickerSearch;
+    procSearch.setAttribute('aria-label', t.processPickerSearch);
+  }
+  setText('processPickerLoadingText', t.processPickerLoading);
+  setText('processPickerEmptyText', t.processPickerEmpty);
+  setText('processPickerCancelBtn', t.modalCancel);
+  setText('processPickerApplyBtn', t.processPickerApply);
+  updateSelectedCount();
+
   renderCustomRules();
   renderRulesPending();
 }
 
 let appsStatusTimer: ReturnType<typeof setTimeout> | null = null;
+let processPickerRelease: (() => void) | null = null;
+let allProcesses: ProcessInfo[] = [];
+const selectedProcessMap = new Map<string, string>(); // lowerName -> originalName
+
+function updateSelectedCount(): void {
+  const countEl = optionalEl('processPickerSelectedCount');
+  if (!countEl) return;
+  const currentLang = getLang();
+  const t = translations[currentLang];
+  countEl.textContent = t.processPickerSelected.replace('{n}', String(selectedProcessMap.size));
+}
+
+export function closeProcessPicker(): void {
+  const overlay = optionalEl('processPickerModalOverlay');
+  if (overlay) overlay.style.display = 'none';
+  processPickerRelease?.();
+  processPickerRelease = null;
+}
+
+function renderProcessList(): void {
+  const listEl = optionalEl('processPickerList');
+  const emptyEl = optionalEl('processPickerEmpty');
+  const searchInput = optionalEl<HTMLInputElement>('processPickerSearch');
+  if (!listEl) return;
+
+  const currentLang = getLang();
+  const t = translations[currentLang];
+  const query = (searchInput?.value ?? '').trim().toLowerCase();
+
+  const filtered = allProcesses.filter((proc) => {
+    if (!query) return true;
+    return (
+      proc.name.toLowerCase().includes(query) ||
+      (proc.path && proc.path.toLowerCase().includes(query))
+    );
+  });
+
+  listEl.innerHTML = '';
+
+  if (filtered.length === 0) {
+    listEl.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = 'block';
+    return;
+  }
+
+  if (emptyEl) emptyEl.style.display = 'none';
+  listEl.style.display = 'flex';
+
+  for (const proc of filtered) {
+    const row = document.createElement('div');
+    row.className = 'process-item';
+    const lower = proc.name.toLowerCase();
+    const isSelected = selectedProcessMap.has(lower);
+    if (isSelected) {
+      row.classList.add('selected');
+    }
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'process-item-checkbox';
+    checkbox.checked = isSelected;
+    checkbox.setAttribute('aria-label', proc.name);
+
+    const content = document.createElement('div');
+    content.className = 'process-item-content';
+
+    const topRow = document.createElement('div');
+    topRow.className = 'process-item-top';
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'process-name';
+    nameEl.textContent = proc.name;
+    topRow.appendChild(nameEl);
+
+    if (proc.count > 1) {
+      const badge = document.createElement('span');
+      badge.className = 'process-badge';
+      badge.textContent = `${proc.count}`;
+      badge.title = t.processPickerInstances.replace('{n}', String(proc.count));
+      topRow.appendChild(badge);
+    }
+    content.appendChild(topRow);
+
+    if (proc.path) {
+      const pathEl = document.createElement('span');
+      pathEl.className = 'process-path';
+      pathEl.textContent = proc.path;
+      pathEl.title = proc.path;
+      content.appendChild(pathEl);
+    }
+
+    row.appendChild(checkbox);
+    row.appendChild(content);
+
+    const toggle = (nextState?: boolean) => {
+      const checked = typeof nextState === 'boolean' ? nextState : !selectedProcessMap.has(lower);
+      checkbox.checked = checked;
+      if (checked) {
+        selectedProcessMap.set(lower, proc.name);
+        row.classList.add('selected');
+      } else {
+        selectedProcessMap.delete(lower);
+        row.classList.remove('selected');
+      }
+      updateSelectedCount();
+    };
+
+    checkbox.addEventListener('change', (e) => {
+      e.stopPropagation();
+      toggle(checkbox.checked);
+    });
+
+    row.addEventListener('click', (e) => {
+      if (e.target === checkbox) return;
+      toggle();
+    });
+
+    listEl.appendChild(row);
+  }
+}
+
+export async function openProcessPicker(): Promise<void> {
+  const overlay = optionalEl('processPickerModalOverlay');
+  if (!overlay) return;
+
+  const currentLang = getLang();
+  const t = translations[currentLang];
+
+  const hiddenMode = optionalEl<HTMLInputElement>('processModeHidden');
+  const mode = (hiddenMode?.value ?? 'blacklist') as 'blacklist' | 'whitelist';
+  const targetTextarea = optionalEl<HTMLTextAreaElement>(
+    mode === 'whitelist' ? 'processListWhitelist' : 'processListBlacklist'
+  );
+
+  selectedProcessMap.clear();
+  if (targetTextarea) {
+    const lines = targetTextarea.value.split('\n');
+    for (const raw of lines) {
+      const trimmed = raw.trim();
+      if (trimmed) {
+        selectedProcessMap.set(trimmed.toLowerCase(), trimmed);
+      }
+    }
+  }
+
+  const searchInput = optionalEl<HTMLInputElement>('processPickerSearch');
+  if (searchInput) searchInput.value = '';
+
+  overlay.style.display = 'flex';
+  const loadingEl = optionalEl('processPickerLoading');
+  const listEl = optionalEl('processPickerList');
+  const emptyEl = optionalEl('processPickerEmpty');
+  if (loadingEl) loadingEl.style.display = 'flex';
+  if (listEl) {
+    listEl.style.display = 'none';
+    listEl.innerHTML = '';
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  updateSelectedCount();
+
+  processPickerRelease = trapFocus(overlay, searchInput, closeProcessPicker);
+
+  try {
+    const list = await window.api.getRunningProcesses();
+    allProcesses = Array.isArray(list) ? list : [];
+  } catch (err) {
+    console.error('Failed to get running processes:', err);
+    allProcesses = [];
+  }
+
+  if (loadingEl) loadingEl.style.display = 'none';
+  renderProcessList();
+}
+
+function applyProcessPicker(): void {
+  const hiddenMode = optionalEl<HTMLInputElement>('processModeHidden');
+  const mode = (hiddenMode?.value ?? 'blacklist') as 'blacklist' | 'whitelist';
+  const targetTextarea = optionalEl<HTMLTextAreaElement>(
+    mode === 'whitelist' ? 'processListWhitelist' : 'processListBlacklist'
+  );
+
+  if (targetTextarea) {
+    const existingLines = targetTextarea.value
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+
+    const existingLower = new Set(existingLines.map((l) => l.toLowerCase()));
+    const finalLines = [...existingLines];
+
+    for (const [lower, name] of selectedProcessMap.entries()) {
+      if (!existingLower.has(lower)) {
+        finalLines.push(name);
+        existingLower.add(lower);
+      }
+    }
+
+    targetTextarea.value = finalLines.join('\n');
+    safeSaveSettings();
+
+    const status = optionalEl('appsStatus');
+    if (status) {
+      status.style.display = 'inline';
+      if (appsStatusTimer !== null) clearTimeout(appsStatusTimer);
+      appsStatusTimer = setTimeout(() => {
+        status.style.display = 'none';
+        appsStatusTimer = null;
+      }, 2000);
+    }
+  }
+
+  closeProcessPicker();
+}
 
 export function initRoutingView(options: RoutingViewOptions): void {
   getLang = options.getCurrentLanguage;
@@ -421,4 +650,48 @@ export function initRoutingView(options: RoutingViewOptions): void {
       }
     };
   });
+
+  // Process Picker modal buttons & events
+  const openProcessPickerBtn = optionalEl('openProcessPickerBtn');
+  if (openProcessPickerBtn) {
+    openProcessPickerBtn.onclick = () => {
+      void openProcessPicker();
+    };
+  }
+
+  const processPickerCancelBtn = optionalEl('processPickerCancelBtn');
+  if (processPickerCancelBtn) {
+    processPickerCancelBtn.onclick = () => {
+      closeProcessPicker();
+    };
+  }
+
+  const processPickerApplyBtn = optionalEl('processPickerApplyBtn');
+  if (processPickerApplyBtn) {
+    processPickerApplyBtn.onclick = () => {
+      applyProcessPicker();
+    };
+  }
+
+  const procSearch = optionalEl<HTMLInputElement>('processPickerSearch');
+  if (procSearch) {
+    procSearch.oninput = () => {
+      renderProcessList();
+    };
+    procSearch.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        applyProcessPicker();
+      }
+    };
+  }
+
+  const procOverlay = optionalEl('processPickerModalOverlay');
+  if (procOverlay) {
+    procOverlay.addEventListener('click', (e) => {
+      if (e.target === procOverlay) {
+        closeProcessPicker();
+      }
+    });
+  }
 }

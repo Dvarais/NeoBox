@@ -38,6 +38,7 @@ import {
   UpdateSubscriptionNow,
   DNSResolverOwners,
   ValidateDNS,
+  GetRunningProcesses,
 } from './wailsjs/go/service/AppService';
 
 import { EventsOn } from './wailsjs/runtime/runtime';
@@ -50,6 +51,7 @@ import type {
   KillSwitchState,
   NeoBoxApi,
   PingResult,
+  ProcessInfo,
   ServerSpeedResult,
   StoredSettings,
   Subscription,
@@ -136,6 +138,7 @@ if (typeof window !== 'undefined') {
           SaveLogs: async () => 'C:/Users/User/Desktop/neobox.log',
           UpdateSubscriptionNow: async () => {},
           DNSResolverOwners: async () => ({}),
+          GetRunningProcesses: async () => [],
         },
       },
     };
@@ -200,6 +203,7 @@ const api: NeoBoxApi = {
   importSettings: () => ImportSettings(),
   validateDns: (value) => ValidateDNS(value),
   dnsResolverOwners: () => DNSResolverOwners(),
+  getRunningProcesses: () => GetRunningProcesses() as Promise<ProcessInfo[]>,
   getSubscriptions: async (): Promise<Subscription[]> => {
     try {
       const s = await GetSubscriptions();

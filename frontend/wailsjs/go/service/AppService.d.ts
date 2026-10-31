@@ -114,3 +114,5 @@ export function TestServerSpeed(arg1:string):Promise<Record<string, any>>;
 export function UpdateSubscriptionNow(arg1:string):Promise<void>;
 
 export function ValidateDNS(arg1:string):Promise<string>;
+
+export function GetRunningProcesses():Promise<Array<any>>;

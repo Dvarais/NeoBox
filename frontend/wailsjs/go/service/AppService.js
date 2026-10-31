@@ -225,3 +225,7 @@ export function UpdateSubscriptionNow(arg1) {
 export function ValidateDNS(arg1) {
   return window['go']['service']['AppService']['ValidateDNS'](arg1);
 }
+
+export function GetRunningProcesses() {
+  return window['go']['service']['AppService']['GetRunningProcesses']();
+}
