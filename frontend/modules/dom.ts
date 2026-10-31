@@ -35,3 +35,35 @@ export function query<T extends HTMLElement = HTMLElement>(selector: string): T 
   }
   return node;
 }
+export function setText(id: string, value: string): void {
+  const node = optionalEl(id);
+  if (node) node.textContent = value;
+}
+
+export function setTitle(id: string, value: string): void {
+  const node = optionalEl(id);
+  if (node) node.title = value;
+}
+
+export function setPlaceholder(id: string, value: string): void {
+  const node = optionalEl<HTMLInputElement>(id);
+  if (node) node.placeholder = value;
+}
+
+export function setAria(id: string, value: string): void {
+  const node = optionalEl(id);
+  if (node) node.setAttribute('aria-label', value);
+}
+
+/**
+ * Экранирует спецсимволы HTML для защиты от XSS при вставке в innerHTML.
+ */
+export function escapeHtml(str: unknown): string {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+

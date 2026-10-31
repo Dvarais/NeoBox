@@ -181,16 +181,19 @@ export async function fetchIP(
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-      const res = await fetch('https://api.ipify.org?format=json', {
-        signal: controller.signal,
-        cache: 'no-store',
-      });
-      clearTimeout(timeoutId);
+      try {
+        const res = await fetch('https://api.ipify.org?format=json', {
+          signal: controller.signal,
+          cache: 'no-store',
+        });
 
-      const data = await res.json();
-      if (data && data.ip) {
-        currentIpElement.textContent = data.ip;
-        return;
+        const data = await res.json();
+        if (data && data.ip) {
+          currentIpElement.textContent = data.ip;
+          return;
+        }
+      } finally {
+        clearTimeout(timeoutId);
       }
     } catch (e) {
       console.error(`IP fetch attempt ${i + 1} failed:`, e);
@@ -381,3 +384,33 @@ export function showAlert(
     };
   });
 }
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
+  return (bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 2) + ' ' + sizes[i];
+}
+
+export function formatConnectionAge(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '00:00';
+  const total = Math.floor(ms / 1000);
+  const s = String(total % 60).padStart(2, '0');
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${String(m).padStart(2, '0')}:${s}`;
+}
+
+/**
+ * Извлекает читаемый текст ошибки из неизвестного объекта исключения.
+ */
+export function errorText(e: unknown): string {
+  if (!e) return '';
+  if (typeof e === 'string') return e;
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'object' && e !== null && 'message' in e && typeof (e as { message: unknown }).message === 'string') {
+    return (e as { message: string }).message;
+  }
+  return String(e);
+}
+

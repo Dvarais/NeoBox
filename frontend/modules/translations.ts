@@ -737,3 +737,10 @@ const EN: Translations = {
 };
 
 export const translations: Record<Language, Translations> = { RU, EN };
+
+/**
+ * Извлекает перевод по ключу или возвращает сам ключ как запасной вариант.
+ */
+export function translate(t: Translations, key: string): string {
+  return (t as unknown as Record<string, string>)[key] ?? key;
+}

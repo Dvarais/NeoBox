@@ -1,4 +1,4 @@
-import { el, optionalEl, query } from './modules/dom';
+import { el, optionalEl, query, setText, setTitle, setPlaceholder, setAria, escapeHtml } from './modules/dom';
 import { translations } from './modules/translations';
 import type { Language, Translations } from './modules/translations';
 import type {
@@ -12,7 +12,7 @@ import type {
   SessionTraffic,
   UpdateInfo,
 } from './modules/api';
-import { fetchIP, isDialogOpen, showConfirm, showAlert, showPrompt, trapFocus } from './modules/ui-utils';
+import { fetchIP, isDialogOpen, showConfirm, showAlert, showPrompt, trapFocus, errorText } from './modules/ui-utils';
 import {
     allSubscriptions,
     currentActiveSubId,
@@ -45,6 +45,15 @@ import {
   parseTheme,
 } from './modules/theme';
 import type { BackgroundMode, Scheme, ThemeSpec } from './modules/theme';
+import { initLogsView, onLogsTabActivated, applyLogsLanguage } from './views/logs.view';
+import {
+  initConnectionsView,
+  syncConnectionsPolling,
+  applyConnectionsLanguage,
+  setConnectionsView,
+  getConnectionsView,
+  flashConnectionsStatus,
+} from './views/connections.view';
 
 // ── ТЕМА: раннее применение ──────────────────────────────────────────────────
 //
@@ -76,8 +85,6 @@ const restartBtn = el('restartBtn');
 const statusDot = el('statusDot');
 const statusText = el('statusText');
 const currentIp = el('currentIp');
-const fullLogOutput = el('fullLogOutput');
-const clearLogsBtn = el('clearLogsBtn');
 const activeServerName = el('activeServerName');
 const activeServerDetails = el('activeServerDetails');
 const serversGrid = el('serversGrid');
@@ -213,9 +220,7 @@ function selectTab(item: HTMLElement, moveFocus = false): void {
   if (targetId === 'view-servers') {
     setTimeout(updateCustomScroll, 50);
   }
-  // Lines that arrived while this view was closed were kept out of the DOM;
-  // rebuild the panel now that it is visible.
-  if (targetId === 'view-logs' && logsDomStale) renderLogs();
+  if (targetId === 'view-logs') onLogsTabActivated();
 
   // Опрос соединений идёт только пока открыт их экран: это единственное, что
   // делает его бесплатным для всех остальных вкладок.
@@ -533,10 +538,7 @@ function translate(t: Translations, key: string): string {
 
 // applyLanguage touches a lot of nodes; these guarded helpers keep it readable and
 // tolerate elements that only exist in some states of the UI.
-const setText = (id: string, value: string) => { const node = optionalEl(id); if (node) node.textContent = value; };
-const setTitle = (id: string, value: string) => { const node = optionalEl(id); if (node) node.title = value; };
-const setPlaceholder = (id: string, value: string) => { const node = optionalEl<HTMLInputElement>(id); if (node) node.placeholder = value; };
-const setAria = (id: string, value: string) => { const node = optionalEl(id); if (node) node.setAttribute('aria-label', value); };
+// DOM helpers (setText, setTitle, setPlaceholder, setAria, escapeHtml) imported from ./modules/dom
 
 /**
  * Имя иконочной кнопки для вспомогательной технологии плюс подсказка для мыши.
@@ -608,10 +610,6 @@ function applyLanguage() {
 
   setAria('serversGrid', t.serverListLabel);
   setAria('sortMenu', t.sortMenuLabel);
-  setAria('connTable', t.connTableLabel);
-  setAria('fullLogOutput', t.logsTitle);
-  const logTabs = document.querySelector('.log-tabs');
-  if (logTabs) logTabs.setAttribute('aria-label', t.logFilterLabel);
   const processTabsGroup = document.querySelector('.process-mode-tabs');
   if (processTabsGroup) processTabsGroup.setAttribute('aria-label', t.processModeLabel);
 
@@ -731,27 +729,14 @@ function applyLanguage() {
 
   renderCustomRules();
 
-  setText('connectionsTitle', t.connectionsTitle);
-  setText('connectionsDesc', t.connectionsDesc);
-  setText('connColHost', t.connColHost);
-  setText('connColDest', t.connColDest);
-  setText('connColProcess', t.connColProcess);
-  setText('connColRule', t.connColRule);
-  setText('connColTraffic', t.connColTraffic);
-  setText('connColAge', t.connColAge);
-  setText('connColActions', t.connColActions);
-  setText('connGroupSitesTitle', t.connGroupSites);
-  setText('connGroupProgramsTitle', t.connGroupPrograms);
-  setText('connSitesEmpty', t.connGroupSitesEmpty);
-  setText('connProgramsEmpty', processRulesAvailable() ? t.connGroupProgramsEmpty : t.connGroupProgramsNeedTun);
+  applyConnectionsLanguage(t);
+  applyLogsLanguage(t);
+
   setText('trafficColDown', t.speedDownLabel);
   setText('trafficColUp', t.speedUpLabel);
   setText('trafficRowNow', t.trafficRowNow);
   setText('trafficRowSession', t.trafficRowSession);
   setText('trafficCardTitle', t.speedMeterLabel);
-
-  setFieldLabel('logSearchInput', t.logSearchPlaceholder);
-  setText('logsEmpty', t.noSearchResults);
 
   setText('appearanceTitle', t.appearanceTitle);
   setText('appearanceDesc', t.appearanceDesc);
@@ -780,23 +765,9 @@ function applyLanguage() {
   setText('exportSettingsBtnText', t.exportSettingsBtn);
   setText('importSettingsBtnText', t.importSettingsBtn);
 
-  setText('connViewGrouped', t.connViewGrouped);
-  setText('connViewFlat', t.connViewFlat);
-  setText('connSortName', t.connSortName);
-  setText('connSortTraffic', t.connSortTraffic);
   // Плашка Kill Switch: подпись зависит и от языка, и от состояния, поэтому
   // перечитываем состояние, а не подставляем строку вслепую.
   void refreshKillSwitchBadge();
-  // По id, а не по классу: переключателей с классом .conn-view-switch теперь
-  // два — вид и порядок групп, — и querySelector нашёл бы только первый,
-  // оставив второй с русским именем в английском интерфейсе.
-  setAria('connViewSwitch', t.connViewLabel);
-  setAria('connSortSwitch', t.connSortLabel);
-
-  // Строки таблицы и папки содержат переведённые подписи кнопок, а
-  // перерисовываются только по тику опроса — на отключённом VPN его нет вовсе.
-  // Сбрасываем их, чтобы смена языка не оставила на экране прежний.
-  resetConnectionsView();
   renderRulesPending();
 
   el('appSettingsTitle').textContent = t.appSettingsTitle;
@@ -847,14 +818,6 @@ function applyLanguage() {
   el('appsStatus').textContent = t.statusDone;
   const autoSaveText = optionalEl('settingsAutoSaveText');
   if (autoSaveText) autoSaveText.textContent = t.statusSaved;
-  el('logsTitle').textContent = t.logsTitle;
-  el('clearLogsBtn').textContent = t.logsClearBtn;
-  setText('saveLogsBtnText', t.saveLogsBtn);
-  setTitle('saveLogsBtn', t.saveLogsBtnTitle);
-  document.querySelectorAll<HTMLElement>('.log-tab').forEach(tab => {
-    const filter = tab.dataset.filter ?? '';
-    tab.textContent = translate(t, `log${filter.charAt(0) + filter.slice(1).toLowerCase()}`);
-  });
 
   // History tab. The cards themselves are rebuilt by renderHistoryTab() below,
   // which picks up the language on its own.
@@ -1233,106 +1196,9 @@ if (restoreTunBtn) {
 /** Уровень строки лога, как его определяет parseLogLine. */
 type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
 
-/** Активный фильтр вкладки «Логи»; ALL означает «показывать всё». */
-type LogFilter = LogLevel | 'ALL';
-
-/** Строка лога в буфере: только сырой текст и уровень — разметка строится при показе. */
-interface LogEntry {
-  level: LogLevel;
-  text: string;
-}
-
-const MAX_LOG_ENTRIES = 500;
-const logsArray: LogEntry[] = [];
-let currentLogFilter: LogFilter = 'ALL';
-// Подстрока поиска по журналу, уже в нижнем регистре: сравнение идёт на каждой
-// строке буфера, приводить регистр там же значило бы делать это пятьсот раз.
-let logSearchQuery = '';
-let isScrolledToBottom = true;
-// True when lines arrived while the Logs view was closed, so the panel needs a
-// full rebuild before it is shown again.
-let logsDomStale = false;
-
-fullLogOutput.addEventListener('scroll', () => {
-    isScrolledToBottom = Math.abs(fullLogOutput.scrollHeight - fullLogOutput.clientHeight - fullLogOutput.scrollTop) < 5;
-});
-
-document.querySelectorAll<HTMLElement>('.log-tab').forEach(tab => {
-  tab.addEventListener('click', (e) => {
-      document.querySelectorAll<HTMLElement>('.log-tab').forEach(t => {
-        t.classList.remove('active');
-        t.setAttribute('aria-pressed', 'false');
-      });
-      const tabEl = e.currentTarget as HTMLElement;
-      tabEl.classList.add('active');
-      tabEl.setAttribute('aria-pressed', 'true');
-      currentLogFilter = tabEl.dataset.filter as LogFilter;
-      renderLogs();
-  });
-});
-
-function stripAnsi(str: string) {
-  return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-}
-
-// Prevent XSS: escape HTML special chars before injecting into innerHTML.
-// Log messages contain domain names and server addresses from the network.
-//
-// Non-string input is coerced rather than allowed to throw: callers pass values
-// parsed out of proxy links and stored history, where a field can legitimately
-// be undefined, and a TypeError here would take out the whole render.
-function escapeHtml(str: unknown) {
-  return String(str ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-// normalizeLevel сводит слово, которым ядро пометило строку, к одному из
-// четырёх уровней, которые понимают и вкладки фильтра, и стили значков.
-//
-// Раньше сюда приводилось только WARNING → WARN, а всё остальное попадало в
-// разметку как есть: строка уровня FATAL получала класс badge-fatal, которого
-// нет в стилях, и не совпадала ни с одной вкладкой фильтра — то есть исчезала
-// отовсюду, кроме «ВСЕ». Для фатальной ошибки это ровно противоположно нужному.
-function normalizeLevel(raw: string): LogLevel {
-  switch (raw.toUpperCase()) {
-    case 'WARN':
-    case 'WARNING':
-      return 'WARN';
-    case 'ERROR':
-    case 'FATAL':
-    case 'PANIC':
-      return 'ERROR';
-    case 'DEBUG':
-    case 'TRACE':
-      return 'DEBUG';
-    default:
-      return 'INFO';
-  }
-}
-
-// errorText вытаскивает читаемый текст из того, что прилетело в catch.
-//
-// Wails отклоняет вызов биндинга то объектом Error, то голой строкой, а под
-// strict пойманное значение имеет тип unknown — то есть обратиться к .message
-// напрямую нельзя. Разбор собран здесь один раз вместо приведения типа в каждом
-// catch.
-function errorText(e: unknown): string {
-  if (!e) return '';
-  if (typeof e === 'string') return e;
-  if (e instanceof Error) return e.message;
-  return String(e);
-}
+// Log state and buffer extracted to views/logs.view.ts
 
 // connectErrorText — текст отказа в подключении для показа пользователю.
-//
-// Всё, что возвращает StartXray, уже переведено на стороне Go, кроме одного:
-// admin_required — это признак, по которому запрашивается повышение прав, а не
-// сообщение. До сих пор он же и попадал в диалог, и человек с отклонённым
-// запросом UAC читал слово «admin_required».
 function connectErrorText(error: string | undefined): string {
   const t = translations[currentLanguage];
   if (error === 'admin_required') return t.adminRequiredError;
@@ -1366,225 +1232,7 @@ function handleConnectFailure(error: string | undefined, userInitiated: boolean)
   showAlert(t.errorDialogTitle, connectErrorText(error), true, t);
 }
 
-// parseLogLine splits an already ANSI-stripped line into its parts. It runs on
-// every line that arrives, so it deliberately does no escaping or highlighting
-// — that work lives in renderLogHtml and only runs for lines actually going on
-// screen.
-function parseLogLine(clean: string): {
-  level: LogLevel;
-  timeStr: string;
-  contextStr: string;
-  messageStr: string;
-  isSuccess: boolean;
-} {
-  let level: LogLevel = 'INFO';
-  let timeStr = '';
-  let contextStr = '';
-  let messageStr = clean;
-
-  const match = clean.match(/^([A-Z]+)\[([0-9]+)\]\s+(?:\[([0-9\s.a-zA-Z]+)\]\s+)?(.*)$/);
-  if (match) {
-    level = normalizeLevel(match[1]);
-    timeStr = match[2];
-    contextStr = match[3] || '';
-    messageStr = match[4];
-  } else {
-    // Fallback parsing
-    const upper = clean.toUpperCase();
-    if (upper.includes('ERROR') || upper.includes('FATAL') || upper.includes('FAILED')) {
-      level = 'ERROR';
-    } else if (upper.includes('WARN') || upper.includes('WARNING')) {
-      level = 'WARN';
-    } else if (upper.includes('DEBUG')) {
-      level = 'DEBUG';
-    }
-  }
-
-  // Fix the NOERROR -> ERROR bug
-  let isSuccess = false;
-  const upperMsg = messageStr.toUpperCase();
-  if (upperMsg.includes('NOERROR') || upperMsg.includes('SUCCESS') || upperMsg.includes('OPENED') || upperMsg.includes('STARTED')) {
-    isSuccess = true;
-    if (level === 'ERROR') {
-      level = 'INFO';
-    }
-  }
-
-  return { level, timeStr, contextStr, messageStr, isSuccess };
-}
-
-// renderLogHtml turns a parsed line into markup. Only called for lines being
-// put into the DOM, which is why the log panel costs nothing while it is closed.
-function renderLogHtml({ level, timeStr, contextStr, messageStr, isSuccess }: ReturnType<typeof parseLogLine>) {
-  let html = '';
-
-  // 1. Time badge
-  if (timeStr) {
-    let formattedTime = timeStr;
-    if (timeStr.length === 4) {
-      formattedTime = timeStr.slice(0, 2) + ':' + timeStr.slice(2);
-    }
-    html += `<span class="log-time">[${formattedTime}]</span> `;
-  }
-
-  // 2. Level badge
-  let badgeClass = `badge-${level.toLowerCase()}`;
-  let displayLevel: string = level;
-  if (isSuccess && level === 'INFO') {
-    badgeClass = 'badge-success';
-    displayLevel = 'SUCCESS';
-  }
-  html += `<span class="log-badge ${badgeClass}">${displayLevel}</span> `;
-
-  // 3. Context badge
-  if (contextStr) {
-    const cleanedContext = escapeHtml(contextStr.trim().replace(/\s+/, ' • '));
-    html += `<span class="log-context">[${cleanedContext}]</span> `;
-  }
-
-  // 4. Message formatting — escape HTML first, then apply safe highlight patterns
-  let formattedMessage = escapeHtml(messageStr);
-  
-  // Highlight elements
-  if (formattedMessage.includes('dns: exchanged')) {
-    formattedMessage = formattedMessage.replace(/exchanged\s+([a-zA-Z0-9.-]+)/g, 'exchanged <span class="log-domain">$1</span>');
-    formattedMessage = formattedMessage.replace(/NOERROR/g, '<span class="log-status-success">NOERROR</span>');
-    formattedMessage = formattedMessage.replace(/NXDOMAIN/g, '<span class="log-status-warn">NXDOMAIN</span>');
-    formattedMessage = formattedMessage.replace(/SERVFAIL/g, '<span class="log-status-error">SERVFAIL</span>');
-  }
-
-  formattedMessage = formattedMessage.replace(/(outbound\/[a-zA-Z0-9-]+\[[a-zA-Z0-9-]+\])/g, '<span class="log-component">$1</span>');
-  formattedMessage = formattedMessage.replace(/(inbound\/[a-zA-Z0-9-]+\[[a-zA-Z0-9-]+\])/g, '<span class="log-component">$1</span>');
-  formattedMessage = formattedMessage.replace(/connection opened/g, '<span class="log-status-success">connection opened</span>');
-  formattedMessage = formattedMessage.replace(/connection closed/g, '<span class="log-status-dim">connection closed</span>');
-
-  html += `<span class="log-msg">${formattedMessage}</span>`;
-
-  return html;
-}
-
-function isLogsViewOpen() {
-  return document.body.getAttribute('data-active-tab') === 'view-logs';
-}
-
-function makeLogElement(entry: LogEntry) {
-  const node = document.createElement('div');
-  node.className = `log-line log-${entry.level.toLowerCase()}`;
-  node.innerHTML = renderLogHtml(parseLogLine(entry.text));
-  return node;
-}
-
-/**
- * Проходит ли строка оба фильтра — по уровню и по подстроке.
- *
- * Предикат вынесен потому, что отбор происходит в двух местах: при полной
- * перерисовке и при добавлении пришедшей пачки. Пока условие было выписано в
- * обоих, добавить к нему поиск означало бы завести две копии, которые разойдутся
- * при первой же правке — и новые строки просачивались бы мимо фильтра.
- */
-function logMatchesFilters(entry: LogEntry): boolean {
-  if (currentLogFilter !== 'ALL' && entry.level !== currentLogFilter) return false;
-  if (logSearchQuery && !entry.text.toLowerCase().includes(logSearchQuery)) return false;
-  return true;
-}
-
-function renderLogs() {
-  fullLogOutput.innerHTML = '';
-  const fragment = document.createDocumentFragment();
-  let shown = 0;
-  logsArray.forEach(entry => {
-      if (!logMatchesFilters(entry)) return;
-      fragment.appendChild(makeLogElement(entry));
-      shown++;
-  });
-  fullLogOutput.appendChild(fragment);
-  fullLogOutput.scrollTop = fullLogOutput.scrollHeight;
-  logsDomStale = false;
-  updateLogsEmptyState(shown);
-}
-
-/**
- * Пустой журнал и «поиск ничего не нашёл» — разные сообщения.
- *
- * Без этого отфильтрованный журнал выглядит сломанным: строки идут, а на
- * экране пусто, и понять, что виноват собственный запрос, неоткуда.
- */
-function updateLogsEmptyState(shown: number): void {
-  const empty = optionalEl('logsEmpty');
-  if (!empty) return;
-  const t = translations[currentLanguage];
-  const filtering = logSearchQuery !== '' || currentLogFilter !== 'ALL';
-  empty.style.display = shown === 0 && filtering && logsArray.length > 0 ? 'block' : 'none';
-  empty.textContent = t.noSearchResults;
-}
-
-// addLogEntries takes a whole batch from the backend and touches the DOM once.
-// Entries keep only the raw line and its level: the markup is rebuilt on demand
-// in makeLogElement, which halves what a full buffer retains.
-function addLogEntries(lines: string[]) {
-  if (!Array.isArray(lines) || lines.length === 0) return;
-
-  const wasAtBottom = isScrolledToBottom;
-  // Nothing is on screen while the Logs view is closed, so skip the DOM work
-  // entirely and rebuild from the array if and when the user opens it.
-  const viewOpen = isLogsViewOpen();
-  const fragment = viewOpen ? document.createDocumentFragment() : null;
-  let appended = 0;
-
-  for (const raw of lines) {
-    const text = stripAnsi(String(raw));
-
-    // Фильтруем системный "шум" Windows, который не является ошибкой приложения
-    if (text.includes('wsasend: An established connection was aborted')) continue;
-    if (text.includes('connection was aborted by the software in your host machine')) continue;
-
-    const entry: LogEntry = { level: parseLogLine(text).level, text };
-    logsArray.push(entry);
-
-    if (fragment && logMatchesFilters(entry)) {
-      fragment.appendChild(makeLogElement(entry));
-      appended++;
-    }
-  }
-
-  if (logsArray.length > MAX_LOG_ENTRIES) {
-    logsArray.splice(0, logsArray.length - MAX_LOG_ENTRIES);
-  }
-
-  if (!fragment) {
-    logsDomStale = true;
-  } else if (appended > 0) {
-    fullLogOutput.appendChild(fragment);
-    const excess = fullLogOutput.childNodes.length - MAX_LOG_ENTRIES;
-    for (let i = 0; i < excess && fullLogOutput.firstChild; i++) fullLogOutput.removeChild(fullLogOutput.firstChild);
-    if (wasAtBottom) fullLogOutput.scrollTop = fullLogOutput.scrollHeight;
-    updateLogsEmptyState(fullLogOutput.childNodes.length);
-  }
-}
-
-// Поиск по журналу.
-//
-// Перерисовка откладывается: каждый набранный символ иначе пересобирал бы до
-// пятисот узлов, а это ровно та беда, из-за которой панель логов однажды уже
-// переписывали — непрерывная сборка и выброс узлов, за которой не поспевает
-// сборщик мусора WebView2.
-const LOG_SEARCH_DEBOUNCE_MS = 150;
-let logSearchTimer: ReturnType<typeof setTimeout> | null = null;
-
-const logSearchInput = optionalEl<HTMLInputElement>('logSearchInput');
-if (logSearchInput) {
-  logSearchInput.addEventListener('input', () => {
-    if (logSearchTimer !== null) clearTimeout(logSearchTimer);
-    logSearchTimer = setTimeout(() => {
-      logSearchTimer = null;
-      logSearchQuery = logSearchInput.value.trim().toLowerCase();
-      renderLogs();
-    }, LOG_SEARCH_DEBOUNCE_MS);
-  });
-}
-
-// События API
-window.api.onLog(addLogEntries);
+// Log parsing, streaming and search extracted to views/logs.view.ts
 
 // The backend signals this once the core is actually up. Previously the UI
 // watched the log stream for "sing-box started", which meant the connected
@@ -1603,11 +1251,6 @@ window.api.onStarted(() => {
   }
 });
 
-clearLogsBtn.onclick = () => {
-  logsArray.length = 0;
-  fullLogOutput.innerHTML = '';
-  logsDomStale = false;
-};
 
 window.api.onStopped(() => {
   if (!isRestarting) {
@@ -2404,7 +2047,7 @@ function collectAndSaveSettings(showFeedback = true) {
     favoriteLinks: Array.from(favoriteLinks),
     profiles: profiles,
     customRules: customRules,
-    connectionsView: connectionsView,
+    connectionsView: getConnectionsView(),
     theme: currentTheme
   };
   return window.api.saveSettings(settings);
@@ -2919,6 +2562,24 @@ async function init() {
   // стёрла бы с диска всё, что там лежало.
   await initHistory();
 
+  initLogsView({
+    getCurrentLanguage: () => currentLanguage,
+    showAlert,
+    showConfirm,
+  });
+
+  initConnectionsView({
+    getCurrentLanguage: () => currentLanguage,
+    getAppState: () => appState,
+    isViewActive: () => connectionsViewActive,
+    isUiActive: () => uiActive,
+    upsertCustomRule: (rule) => upsertCustomRule(rule),
+    onSaveView: () => {
+      collectAndSaveSettings();
+    },
+    initialView: 'grouped',
+  });
+
   const settings = await window.api.getSettings();
   if (settings) {
     if (settings.language) currentLanguage = settings.language;
@@ -3218,608 +2879,7 @@ document.querySelectorAll<HTMLButtonElement>('.rules-pending-apply').forEach(btn
 
 // ── Экран «Соединения» ───────────────────────────────────────────────────────
 
-// Дефолт самого sing-box для этого потока — и потолок: Snapshot() на стороне
-// ядра вызывает runtime.ReadMemStats, а это stop-the-world в процессе, который
-// в этот момент гонит трафик. Чаще опрашивать нельзя.
-const CONNECTIONS_POLL_MS = 1000;
-// Зеркалит maxConnectionRows в backend/service/connections.go. Здесь оно нужно
-// только для проверки: строк сверх лимита прийти не должно.
-const MAX_CONNECTION_ROWS = 200;
-
-// Сгруппированный вид по умолчанию: экран задуман как панель управления
-// маршрутизацией. Плоская таблица остаётся для разбора и выбирается вручную.
-let connectionsView: AppSettings['connectionsView'] = 'grouped';
-
-// Ячейки, содержимое которых меняется от тика к тику, вместе с последним, что в
-// них было записано. Сравнение до присваивания дешевле, чем трогать DOM.
-interface ConnectionRowHandles {
-  tr: HTMLTableRowElement;
-  traffic: HTMLElement;
-  age: HTMLElement;
-  lastTraffic: string;
-  lastAge: string;
-}
-
-const connectionRowHandles = new Map<string, ConnectionRowHandles>();
 let connectionsViewActive = false;
-let connectionsTimer: ReturnType<typeof setInterval> | null = null;
-let connectionsInFlight = false;
-
-function connectionsShouldPoll() {
-  return connectionsViewActive && uiActive && appState === 'on';
-}
-
-// syncConnectionsPolling — единственная точка, которая решает, идёт опрос или
-// нет. Её зовут все, кто может изменить любое из трёх условий: навигация,
-// уход окна в трей, смена состояния подключения.
-function syncConnectionsPolling() {
-  if (connectionsShouldPoll()) {
-    if (connectionsTimer !== null) return;
-    void pollConnections();
-    connectionsTimer = setInterval(() => void pollConnections(), CONNECTIONS_POLL_MS);
-    return;
-  }
-
-  if (connectionsTimer !== null) {
-    clearInterval(connectionsTimer);
-    connectionsTimer = null;
-  }
-  // Таблица остаётся от прошлой сессии ядра и врала бы: эти соединения давно
-  // закрыты. Чистим сразу, а не при следующем открытии экрана.
-  if (!connectionsViewActive || appState !== 'on') resetConnectionsView();
-}
-
-async function pollConnections() {
-  // Тик, пришедший на неотвеченный запрос, пропускается: подтормозившее ядро
-  // не должно копить очередь запросов, каждый из которых держит его же лок.
-  if (connectionsInFlight || !connectionsShouldPoll()) return;
-  connectionsInFlight = true;
-  try {
-    const snapshot = await window.api.getConnections();
-    // Пока запрос шёл, экран могли закрыть или VPN отключить.
-    if (!connectionsShouldPoll()) return;
-    renderConnections(snapshot);
-  } catch (e) {
-    console.error('getConnections failed:', e);
-  } finally {
-    connectionsInFlight = false;
-  }
-}
-
-function resetConnectionsView() {
-  const body = optionalEl('connectionsBody');
-  if (body) body.innerHTML = '';
-  connectionRowHandles.clear();
-
-  // Сгруппированный вид чистится тем же вызовом: иначе после отключения VPN на
-  // экране остались бы папки от прошлой сессии ядра.
-  for (const [, handles] of groupHandles) handles.root.remove();
-  groupHandles.clear();
-  groupOrderSignature.clear();
-  // Раскрытые папки при этом сохраняются: пользователь их открыл сам, и после
-  // переподключения к тому же серверу они должны остаться раскрытыми.
-
-  renderConnectionsPlaceholder(0, 0);
-}
-
-/**
- * Переключает вид и запоминает выбор. Плоская таблица и папки живут в разных
- * контейнерах, поэтому переключение — это показ одного и скрытие другого;
- * содержимое пересоберётся на ближайшем тике опроса.
- */
-function setConnectionsView(view: AppSettings['connectionsView'], persist = true) {
-  connectionsView = view;
-
-  const grouped = optionalEl('connectionsGrouped');
-  const flat = optionalEl('connectionsFlatWrap');
-  if (grouped) grouped.style.display = view === 'grouped' ? 'block' : 'none';
-  if (flat) flat.style.display = view === 'flat' ? 'block' : 'none';
-
-  // Селектор сужен до [data-view]. Класс .conn-view-btn носят теперь оба
-  // переключателя в шапке — вид и порядок групп, — и общий селектор считал бы
-  // кнопки сортировки кнопками вида: у них нет data-view, сравнение давало бы
-  // false, и нажатие «по трафику» переключало бы экран на папки.
-  document.querySelectorAll<HTMLButtonElement>('.conn-view-btn[data-view]').forEach((btn) => {
-    const active = btn.dataset.view === view;
-    btn.classList.toggle('active', active);
-    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-  });
-
-  if (persist) collectAndSaveSettings();
-}
-
-document.querySelectorAll<HTMLButtonElement>('.conn-view-btn[data-view]').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    setConnectionsView(btn.dataset.view === 'flat' ? 'flat' : 'grouped');
-  });
-});
-
-/**
- * Порядок папок на экране «Соединения».
- *
- * Не сохраняется в настройках, в отличие от вида, и это осознанно: алфавит —
- * рабочее состояние экрана, а сортировка по трафику нужна ровно на то время,
- * пока смотрят, кто забирает канал. Запомненная между запусками, она встречала
- * бы человека переставляющимися под курсором папками, причём он бы не помнил,
- * что сам об этом просил.
- */
-let connectionsSort: GroupSort = 'name';
-
-function setConnectionsSort(sort: GroupSort) {
-  connectionsSort = sort;
-  document.querySelectorAll<HTMLButtonElement>('.conn-view-btn[data-sort]').forEach((btn) => {
-    const active = btn.dataset.sort === sort;
-    btn.classList.toggle('active', active);
-    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-  });
-  // Порядок применяется на ближайшем тике опроса, но ждать секунду после
-  // нажатия незачем — перерисовываем сразу тем, что уже есть.
-  if (lastConnectionsSnapshot) renderConnections(lastConnectionsSnapshot);
-}
-
-document.querySelectorAll<HTMLButtonElement>('.conn-view-btn[data-sort]').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    setConnectionsSort(btn.dataset.sort === 'traffic' ? 'traffic' : 'name');
-  });
-});
-
-function renderConnectionsPlaceholder(shown: number, total: number) {
-  const t = translations[currentLanguage];
-
-  const empty = optionalEl('connectionsEmpty');
-  if (empty) {
-    empty.textContent = appState === 'on' ? t.connectionsEmpty : t.connectionsOffline;
-    empty.style.display = shown === 0 ? 'flex' : 'none';
-  }
-
-  const count = optionalEl('connectionsCount');
-  if (count) {
-    count.textContent = total > shown
-      ? t.connectionsShowing.replace('{shown}', String(shown)).replace('{total}', String(total))
-      : '';
-  }
-}
-
-// renderConnections сверяет таблицу со снимком вместо того, чтобы собирать её
-// заново.
-//
-// Перерисовка 200 строк раз в секунду — это ровно тот случай, что уже был
-// однажды с панелью логов: непрерывная сборка и выброс узлов, за которой не
-// поспевает сборщик мусора WebView2. Поэтому: у знакомых строк переписываются
-// только изменившиеся ячейки, пришедшие добавляются в начало, исчезнувшие
-// удаляются, а строка, дожившая до следующего тика, не двигается вовсе —
-// снимок приходит отсортированным по времени, новые всегда новее выживших.
-// ── Сгруппированный вид ──────────────────────────────────────────────────────
-//
-// Две папки-секции над одним и тем же снимком: по сайту и по программе.
-// Соединение попадает в обе, если у него есть и хост, и процесс.
-//
-// Порядок обновления тот же, что у плоской таблицы, и по той же причине:
-// пересобирать всё раз в секунду нельзя. Разница в том, что свёрнутая папка не
-// держит в DOM ни одной строки, поэтому обычно узлов здесь на порядок меньше,
-// чем в таблице на 200 строк.
-
-interface GroupHandles {
-  root: HTMLElement;
-  keyEl: HTMLElement;
-  countEl: HTMLElement;
-  trafficEl: HTMLElement;
-  members: HTMLElement;
-  lastCount: string;
-  lastTraffic: string;
-  lastMembers: string;
-}
-
-type GroupKind = 'site' | 'process';
-
-const groupHandles = new Map<string, GroupHandles>();
-// Раскрытые папки переживают тики: пересборка списка не должна схлопывать то,
-// что пользователь только что открыл.
-const expandedGroups = new Set<string>();
-// Подпись упорядоченного списка ключей. Пока она не меняется, порядок узлов в
-// DOM не трогается вовсе — иначе перестановка на каждом тике сбрасывала бы
-// фокус с кнопки, на которую пользователь только что перешёл клавишей.
-const groupOrderSignature = new Map<GroupKind, string>();
-
-/** Правило по программе применимо только в TUN — см. GenerateConfig. */
-function processRulesAvailable(): boolean {
-  const box = optionalEl<HTMLInputElement>('tunModeCheckbox');
-  return box ? box.checked : false;
-}
-
-function groupRuleTarget(kind: GroupKind, key: string): CustomRule | null {
-  if (kind === 'site') return { action: 'direct', type: 'domain_suffix', value: key };
-  return { action: 'direct', type: 'process', value: key };
-}
-
-function applyRule(rule: CustomRule) {
-  const t = translations[currentLanguage];
-  const outcome = upsertCustomRule(rule);
-  flashConnectionsStatus(
-    outcome === 'unchanged' ? t.ruleAlreadyExists
-      : outcome === 'replaced' ? t.ruleReplaced
-      : t.ruleAdded,
-  );
-}
-
-/** Тройка действий: напрямую / через VPN / заблокировать. */
-function buildRuleActions(
-  base: CustomRule,
-  disabledReason: string | null,
-  compact: boolean,
-): HTMLElement {
-  const t = translations[currentLanguage];
-  const wrap = document.createElement('div');
-  wrap.className = compact ? 'conn-group-actions conn-group-actions--compact' : 'conn-group-actions';
-
-  const add = (action: CustomRule['action'], className: string, label: string) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = `conn-action ${className}`;
-    btn.textContent = label;
-    if (disabledReason) {
-      btn.disabled = true;
-      btn.title = disabledReason;
-    } else {
-      btn.title = `${label}: ${base.value}`;
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        applyRule({ ...base, action });
-      };
-    }
-    wrap.appendChild(btn);
-  };
-
-  add('direct', 'conn-action-direct', t.connActionDirect);
-  add('proxy', 'conn-action-proxy', t.connActionProxy);
-  add('block', 'conn-action-block', t.connActionBlock);
-  return wrap;
-}
-
-function setGroupExpanded(handles: GroupHandles, id: string, expanded: boolean) {
-  const t = translations[currentLanguage];
-  handles.root.dataset.expanded = expanded ? 'true' : 'false';
-  handles.members.style.display = expanded ? 'flex' : 'none';
-  const toggle = handles.root.querySelector<HTMLButtonElement>('.conn-group-toggle');
-  if (toggle) {
-    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    toggle.title = expanded ? t.connGroupCollapse : t.connGroupExpand;
-  }
-  if (expanded) expandedGroups.add(id); else expandedGroups.delete(id);
-}
-
-function buildGroup(kind: GroupKind, id: string, group: ConnectionGroup): GroupHandles {
-  const t = translations[currentLanguage];
-
-  const root = document.createElement('div');
-  root.className = 'conn-group';
-  root.dataset.expanded = 'false';
-
-  const head = document.createElement('div');
-  head.className = 'conn-group-head';
-
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.className = 'conn-group-toggle';
-  toggle.setAttribute('aria-expanded', 'false');
-  toggle.title = t.connGroupExpand;
-
-  const chevron = document.createElement('span');
-  chevron.className = 'conn-group-chevron';
-  chevron.setAttribute('aria-hidden', 'true');
-  chevron.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`;
-
-  const keyEl = document.createElement('span');
-  keyEl.className = 'conn-group-key';
-  keyEl.textContent = group.key;
-
-  const countEl = document.createElement('span');
-  countEl.className = 'conn-group-count';
-
-  const trafficEl = document.createElement('span');
-  trafficEl.className = 'conn-group-traffic';
-
-  toggle.append(chevron, keyEl, countEl, trafficEl);
-
-  const members = document.createElement('div');
-  members.className = 'conn-group-members';
-  members.style.display = 'none';
-  const membersId = `conn-members-${kind}-${group.key.replace(/[^\w.-]/g, '_')}`;
-  members.id = membersId;
-  toggle.setAttribute('aria-controls', membersId);
-
-  const handles: GroupHandles = {
-    root, keyEl, countEl, trafficEl, members,
-    lastCount: '', lastTraffic: '', lastMembers: '',
-  };
-
-  toggle.onclick = () => setGroupExpanded(handles, id, root.dataset.expanded !== 'true');
-
-  head.appendChild(toggle);
-  const base = groupRuleTarget(kind, group.key);
-  if (base) {
-    const blocked = kind === 'process' && !processRulesAvailable();
-    head.appendChild(buildRuleActions(base, blocked ? t.connProcessRuleNeedsTun : null, false));
-  }
-
-  root.append(head, members);
-  return handles;
-}
-
-function renderGroupMembers(handles: GroupHandles, group: ConnectionGroup, now: number) {
-  const t = translations[currentLanguage];
-  // Подпись содержимого: пока она та же, узлы не пересобираются. Иначе список
-  // перестраивался бы раз в секунду ради неизменившихся цифр.
-  const signature = group.rows
-    .map((r) => `${r.id}|${r.upload}|${r.download}`)
-    .join(';');
-  if (signature === handles.lastMembers) return;
-  handles.lastMembers = signature;
-
-  handles.members.textContent = '';
-  for (const row of group.rows) {
-    const item = document.createElement('div');
-    item.className = 'conn-member';
-
-    const host = document.createElement('span');
-    host.className = 'conn-member-host';
-    const label = row.host || row.destIP || t.connNoHost;
-    host.textContent = row.process && row.host ? `${label} — ${row.process}` : label;
-    host.title = `${label}${row.destIP ? ` · ${row.destIP}` : ''}`;
-
-    const meta = document.createElement('span');
-    meta.className = 'conn-member-meta';
-    meta.textContent = `↑ ${formatBytes(row.upload)}  ↓ ${formatBytes(row.download)}  ·  ${formatConnectionAge(now - row.startMs)}`;
-
-    item.append(host, meta);
-
-    // Действие на отдельном соединении: правило уже посчитано бэкендом
-    // (SuggestRuleTarget), и оно точнее группового — домен целиком против
-    // одного хоста.
-    if (row.ruleType) {
-      item.appendChild(buildRuleActions(
-        { action: 'direct', type: row.ruleType as CustomRule['type'], value: row.ruleValue },
-        null,
-        true,
-      ));
-    }
-
-    handles.members.appendChild(item);
-  }
-}
-
-function renderGroupSection(
-  kind: GroupKind,
-  listId: string,
-  emptyId: string,
-  groups: ConnectionGroup[],
-  now: number,
-) {
-  const list = optionalEl(listId);
-  const empty = optionalEl(emptyId);
-  if (!list) return;
-
-  if (empty) empty.style.display = groups.length === 0 ? 'block' : 'none';
-
-  const seen = new Set<string>();
-  for (const group of groups) {
-    const id = `${kind}:${group.key}`;
-    seen.add(id);
-
-    let handles = groupHandles.get(id);
-    if (!handles) {
-      handles = buildGroup(kind, id, group);
-      groupHandles.set(id, handles);
-      list.appendChild(handles.root);
-      // Папка могла быть раскрыта до того, как исчезла и появилась снова.
-      if (expandedGroups.has(id)) setGroupExpanded(handles, id, true);
-    }
-
-    const count = translations[currentLanguage].connGroupCount.replace('{n}', String(group.rows.length));
-    if (handles.lastCount !== count) {
-      handles.countEl.textContent = count;
-      handles.lastCount = count;
-    }
-    const traffic = `↑ ${formatBytes(group.upload)}  ↓ ${formatBytes(group.download)}`;
-    if (handles.lastTraffic !== traffic) {
-      handles.trafficEl.textContent = traffic;
-      handles.lastTraffic = traffic;
-    }
-
-    if (handles.root.dataset.expanded === 'true') {
-      renderGroupMembers(handles, group, now);
-    } else if (handles.lastMembers !== '') {
-      // Свёрнутая папка не держит строк в DOM — ради этого группировка и
-      // затевалась.
-      handles.members.textContent = '';
-      handles.lastMembers = '';
-    }
-  }
-
-  for (const [id, handles] of groupHandles) {
-    if (!id.startsWith(`${kind}:`) || seen.has(id)) continue;
-    handles.root.remove();
-    groupHandles.delete(id);
-  }
-
-  // Порядок правится только когда состав действительно изменился.
-  const signature = groups.map((g) => g.key).join(' ');
-  if (groupOrderSignature.get(kind) !== signature) {
-    groupOrderSignature.set(kind, signature);
-    for (const group of groups) {
-      const handles = groupHandles.get(`${kind}:${group.key}`);
-      if (handles) list.appendChild(handles.root);
-    }
-  }
-}
-
-function renderConnectionsGrouped(rows: ConnectionRow[]) {
-  const now = Date.now();
-  const { sites, programs } = groupConnections(rows, connectionsSort);
-  renderGroupSection('site', 'connSitesList', 'connSitesEmpty', sites, now);
-  renderGroupSection('process', 'connProgramsList', 'connProgramsEmpty', programs, now);
-
-  // Пустой срез программ вне TUN — не поломка, а следствие режима. Говорим об
-  // этом прямо, иначе выглядит как потерянные данные.
-  const programsEmpty = optionalEl('connProgramsEmpty');
-  if (programsEmpty && programs.length === 0) {
-    const t = translations[currentLanguage];
-    programsEmpty.textContent = processRulesAvailable() ? t.connGroupProgramsEmpty : t.connGroupProgramsNeedTun;
-  }
-}
-
-// Последний снимок держится ради смены порядка групп: она обязана быть видна
-// сразу, а не на следующем тике опроса через секунду.
-let lastConnectionsSnapshot: ConnectionsSnapshot | null = null;
-
-function renderConnections(snapshot: ConnectionsSnapshot) {
-  lastConnectionsSnapshot = snapshot;
-  const rowsAll = (snapshot.connections ?? []).slice(0, MAX_CONNECTION_ROWS);
-  if (connectionsView === 'grouped') {
-    renderConnectionsGrouped(rowsAll);
-    renderConnectionsPlaceholder(rowsAll.length, snapshot.total ?? rowsAll.length);
-    return;
-  }
-
-  const body = optionalEl<HTMLTableSectionElement>('connectionsBody');
-  if (!body) return;
-
-  const rows = (snapshot.connections ?? []).slice(0, MAX_CONNECTION_ROWS);
-  const seen = new Set<string>();
-  const arriving = document.createDocumentFragment();
-  const now = Date.now();
-
-  for (const row of rows) {
-    seen.add(row.id);
-    const traffic = `↑ ${formatBytes(row.upload)}  ↓ ${formatBytes(row.download)}`;
-    const age = formatConnectionAge(now - row.startMs);
-
-    const known = connectionRowHandles.get(row.id);
-    if (known) {
-      if (known.lastTraffic !== traffic) {
-        known.traffic.textContent = traffic;
-        known.lastTraffic = traffic;
-      }
-      if (known.lastAge !== age) {
-        known.age.textContent = age;
-        known.lastAge = age;
-      }
-      continue;
-    }
-
-    const handles = buildConnectionRow(row, traffic, age);
-    connectionRowHandles.set(row.id, handles);
-    arriving.appendChild(handles.tr);
-  }
-
-  for (const [id, handles] of connectionRowHandles) {
-    if (seen.has(id)) continue;
-    handles.tr.remove();
-    connectionRowHandles.delete(id);
-  }
-
-  if (arriving.childNodes.length > 0) body.prepend(arriving);
-  renderConnectionsPlaceholder(rows.length, snapshot.total ?? rows.length);
-}
-
-function buildConnectionRow(row: ConnectionRow, traffic: string, age: string): ConnectionRowHandles {
-  const t = translations[currentLanguage];
-  const tr = document.createElement('tr');
-  tr.className = 'conn-row';
-
-  // Каждая ячейка собирается через textContent. host, process и rule приходят
-  // прямо из сети — это не то место, где стоит повторять innerHTML с
-  // экранированием, как сделано в renderCustomRules.
-  const cell = (className: string, text: string, title?: string) => {
-    const td = document.createElement('td');
-    td.className = className;
-    td.textContent = text;
-    if (title) td.title = title;
-    tr.appendChild(td);
-    return td;
-  };
-
-  cell('conn-cell-host', row.host || t.connNoHost, row.host);
-  cell('conn-cell-dest', row.destPort ? `${row.destIP}:${row.destPort}` : row.destIP);
-  cell('conn-cell-process', row.process, row.process);
-  cell('conn-cell-rule', row.outbound ? `${row.rule} → ${row.outbound}` : row.rule,
-    row.outbound ? `${row.rule} → ${row.outbound}` : row.rule);
-  const trafficCell = cell('conn-cell-traffic', traffic);
-  const ageCell = cell('conn-cell-age', age);
-
-  const actions = document.createElement('td');
-  actions.className = 'conn-cell-actions';
-
-  const ruleAction = (action: CustomRule['action'], className: string, label: string) => {
-    const btn = document.createElement('button');
-    btn.className = `conn-action ${className}`;
-    btn.textContent = label;
-    if (row.ruleType === '') {
-      // Ни хоста, ни адреса, для которого можно написать безопасное правило:
-      // для приватных адресов и диапазона FakeIP оно вытеснило бы правила, на
-      // которых держится туннель. См. core.SuggestRuleTarget.
-      btn.disabled = true;
-      btn.title = t.connActionUnavailable;
-    } else {
-      btn.title = `${label}: ${row.ruleValue}`;
-      btn.onclick = () => {
-        const outcome = upsertCustomRule({ action, type: row.ruleType as CustomRule['type'], value: row.ruleValue });
-        flashConnectionsStatus(
-          outcome === 'unchanged' ? t.ruleAlreadyExists
-            : outcome === 'replaced' ? t.ruleReplaced
-            : t.ruleAdded
-        );
-      };
-    }
-    actions.appendChild(btn);
-  };
-
-  ruleAction('direct', 'conn-action-direct', t.connActionDirect);
-  ruleAction('proxy', 'conn-action-proxy', t.connActionProxy);
-  ruleAction('block', 'conn-action-block', t.connActionBlock);
-
-  const closeBtn = document.createElement('button');
-  closeBtn.className = 'conn-action conn-action-close';
-  closeBtn.innerHTML = iconSvg('x', 13);
-  closeBtn.title = t.connActionClose;
-  closeBtn.onclick = () => {
-    // Строка убирается сразу, не дожидаясь подтверждения: следующий тик всё
-    // равно приведёт таблицу к тому, что на самом деле у ядра.
-    tr.remove();
-    connectionRowHandles.delete(row.id);
-    void window.api.closeConnection(row.id);
-  };
-  actions.appendChild(closeBtn);
-
-  tr.appendChild(actions);
-  return { tr, traffic: trafficCell, age: ageCell, lastTraffic: traffic, lastAge: age };
-}
-
-// Возраст соединения в моноширинной колонке: mm:ss, а за час — h:mm:ss.
-function formatConnectionAge(ms: number) {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const s = String(total % 60).padStart(2, '0');
-  const m = Math.floor(total / 60) % 60;
-  const h = Math.floor(total / 3600);
-  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${String(m).padStart(2, '0')}:${s}`;
-}
-
-let connectionsFlashTimer: ReturnType<typeof setTimeout> | null = null;
-
-// Короткое подтверждение действия в строке. Правило может оказаться уже
-// существующим или переписать прежнее — без ответа клик по кнопке выглядел бы
-// как промах.
-function flashConnectionsStatus(message: string) {
-  const node = optionalEl('connectionsFlash');
-  if (!node) return;
-  node.textContent = message;
-  node.style.display = 'inline';
-  if (connectionsFlashTimer !== null) clearTimeout(connectionsFlashTimer);
-  connectionsFlashTimer = setTimeout(() => {
-    node.style.display = 'none';
-    connectionsFlashTimer = null;
-  }, 2500);
-}
 
 // ── SEARCH LIVE FILTER ───────────────────────────────────────────────────────
 const serverSearchInput = optionalEl<HTMLInputElement>('serverSearchInput');
@@ -3923,27 +2983,6 @@ if (bestServerBtn) {
         showAlert(translations[currentLanguage].alertDialogTitle, translations[currentLanguage].bestServerFailed, false, translations[currentLanguage]);
       }
     }, 2000);
-  };
-}
-
-// ── SAVE LOGS ────────────────────────────────────────────────────────────────
-const saveLogsBtn = optionalEl('saveLogsBtn');
-if (saveLogsBtn) {
-  saveLogsBtn.onclick = async () => {
-    const rawLogs = logsArray.map(l => l.text).join('\n');
-    if (!rawLogs.trim()) {
-      showAlert(translations[currentLanguage].alertDialogTitle, translations[currentLanguage].logsEmptyAlert, false, translations[currentLanguage]);
-      return;
-    }
-    const path = await window.api.saveLogs(rawLogs);
-    if (path) {
-      const confirmed = await showConfirm(translations[currentLanguage].logsSavedConfirm.replace('{path}', path));
-      if (confirmed) {
-        window.api.openLogsFolder();
-      }
-    } else {
-      showAlert(translations[currentLanguage].errorDialogTitle, translations[currentLanguage].logsSaveFailed, true, translations[currentLanguage]);
-    }
   };
 }
 
