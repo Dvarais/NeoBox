@@ -676,6 +676,11 @@ func (s *AppService) applyTrayServers(subs []traySubscription) {
 	// переключение.
 	grouped := len(subs) > 1
 	shown := 0
+	if total >= 2 {
+		autoItem := s.mServersItem.AddSubMenuItem("⚡ Auto", core.AutoServerLink)
+		s.trayServerItems = append(s.trayServerItems, autoItem)
+		go s.watchTrayServer(autoItem, core.AutoServerLink)
+	}
 	for _, sub := range subs {
 		// Проверка стоит до создания папки, а не только внутри цикла по
 		// серверам. Раньше break выходил лишь из внутреннего цикла, и у каждой
@@ -867,6 +872,9 @@ func (s *AppService) applyTrayToggles(t trayToggles) {
 
 func parseServerNameFromLink(link string) string {
 	sanitized := strings.TrimSpace(link)
+	if sanitized == core.AutoServerLink {
+		return "⚡ Auto"
+	}
 	sanitized = strings.ReplaceAll(sanitized, " ", "%20")
 	sanitized = strings.ReplaceAll(sanitized, "\t", "%09")
 	u, err := url.Parse(sanitized)

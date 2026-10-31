@@ -141,8 +141,8 @@ func TestGenerateConfig_SelectorWithCandidates(t *testing.T) {
 			if selOpt.Default != "de-node-1" {
 				t.Errorf("selector default = %q, want de-node-1", selOpt.Default)
 			}
-			if len(selOpt.Outbounds) != 2 {
-				t.Errorf("selector outbounds count = %d, want 2", len(selOpt.Outbounds))
+			if len(selOpt.Outbounds) != 3 {
+				t.Errorf("selector outbounds count = %d, want 3", len(selOpt.Outbounds))
 			}
 		}
 	}
@@ -154,4 +154,125 @@ func TestGenerateConfig_SelectorWithCandidates(t *testing.T) {
 	if opts.Route == nil || opts.Route.Final != OutboundSelectorTag {
 		t.Errorf("route.final = %v, want %q", opts.Route.Final, OutboundSelectorTag)
 	}
+}
+
+func TestGenerateConfig_URLTestAutoGroup(t *testing.T) {
+	node1 := map[string]interface{}{
+		"type":        "vless",
+		"tag":         "de-node-1",
+		"server":      "198.51.100.1",
+		"server_port": 443,
+	}
+	node2 := map[string]interface{}{
+		"type":        "trojan",
+		"tag":         "nl-node-2",
+		"server":      "198.51.100.2",
+		"server_port": 8443,
+	}
+	candidates := []map[string]interface{}{node1, node2}
+
+	cfg, err := GenerateConfigWithCandidates(candidates, node1, Settings{TunMode: false}, false, "cache.db", "secret")
+	if err != nil {
+		t.Fatalf("GenerateConfigWithCandidates failed: %v", err)
+	}
+
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	ctx := include.Context(context.Background())
+	opts, err := sjson.UnmarshalExtendedContext[option.Options](ctx, raw)
+	if err != nil {
+		t.Fatalf("sing-box rejected config with urltest: %v\n%s", err, string(raw))
+	}
+
+	var foundAuto, foundSelector bool
+	for _, ob := range opts.Outbounds {
+		if ob.Type == "urltest" && ob.Tag == OutboundAutoTag {
+			foundAuto = true
+			urlOpt, ok := ob.Options.(*option.URLTestOutboundOptions)
+			if !ok {
+				t.Fatalf("urltest options type = %T, want *option.URLTestOutboundOptions", ob.Options)
+			}
+			if len(urlOpt.Outbounds) != 2 {
+				t.Errorf("urltest outbounds count = %d, want 2", len(urlOpt.Outbounds))
+			}
+		}
+		if ob.Type == "selector" && ob.Tag == OutboundSelectorTag {
+			foundSelector = true
+			selOpt, ok := ob.Options.(*option.SelectorOutboundOptions)
+			if !ok {
+				t.Fatalf("selector options type = %T, want *option.SelectorOutboundOptions", ob.Options)
+			}
+			// selector should include auto-out in its options
+			hasAuto := false
+			for _, tag := range selOpt.Outbounds {
+				if tag == OutboundAutoTag {
+					hasAuto = true
+					break
+				}
+			}
+			if !hasAuto {
+				t.Errorf("selector outbounds %v does not contain %q", selOpt.Outbounds, OutboundAutoTag)
+			}
+		}
+	}
+
+	if !foundAuto {
+		t.Fatalf("urltest outbound %q not found in parsed outbounds", OutboundAutoTag)
+	}
+	if !foundSelector {
+		t.Fatalf("selector outbound %q not found in parsed outbounds", OutboundSelectorTag)
+	}
+}
+
+func TestGenerateConfig_SelectorDefaultAuto(t *testing.T) {
+	node1 := map[string]interface{}{
+		"type":              "vless",
+		"tag":               "de-node-1",
+		"server":            "1.1.1.1",
+		"server_port":       443,
+		"uuid":              "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+		"_selector_default": OutboundAutoTag,
+	}
+	node2 := map[string]interface{}{
+		"type":        "vless",
+		"tag":         "nl-node-2",
+		"server":      "1.0.0.1",
+		"server_port": 443,
+		"uuid":        "b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e",
+	}
+
+	candidates := []map[string]interface{}{node1, node2}
+
+	cfg, err := GenerateConfigWithCandidates(candidates, node1, Settings{TunMode: false}, false, "cache.db", "secret")
+	if err != nil {
+		t.Fatalf("GenerateConfigWithCandidates failed: %v", err)
+	}
+
+	cfgJSON, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("Marshal config failed: %v", err)
+	}
+
+	ctx := include.Context(context.Background())
+	opts, err := sjson.UnmarshalExtendedContext[option.Options](ctx, cfgJSON)
+	if err != nil {
+		t.Fatalf("sjson.UnmarshalExtendedContext failed: %v", err)
+	}
+
+	for _, ob := range opts.Outbounds {
+		if ob.Type == "selector" && ob.Tag == OutboundSelectorTag {
+			selOpt, ok := ob.Options.(*option.SelectorOutboundOptions)
+			if !ok {
+				t.Fatalf("selector options type = %T, want *option.SelectorOutboundOptions", ob.Options)
+			}
+			if selOpt.Default != OutboundAutoTag {
+				t.Errorf("selector default = %q, want %q", selOpt.Default, OutboundAutoTag)
+			}
+			return
+		}
+	}
+	t.Fatalf("selector outbound %q not found in parsed outbounds", OutboundSelectorTag)
 }

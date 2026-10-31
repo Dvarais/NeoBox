@@ -59,6 +59,7 @@ const (
 	ErrSubBlockedByHost     = "error.sub.blocked"
 	ErrSubUnreachable       = "error.sub.unreachable"
 	ErrSubNoNodes           = "error.sub.no_nodes"
+	ErrNoAutoNodes          = "error.auto.no_nodes"
 	ErrWireGuardNoAddress   = "error.wireguard.no_address"
 	ErrTransportUnsupported = "error.transport.unsupported"
 
@@ -134,6 +135,7 @@ var messages = map[Lang]map[string]string{
 		ErrSubBlockedByHost:     "Сервер подписки вернул веб-страницу вместо списка серверов. Обычно это страница входа, оплаты или проверки — откройте ссылку в браузере и проверьте, активна ли подписка.",
 		ErrSubUnreachable:       "Не удалось загрузить подписку: %v",
 		ErrSubNoNodes:           "Подписка загружена, но не содержит серверов в поддерживаемом формате",
+		ErrNoAutoNodes:          "Нет доступных серверов в подписках для автоматического выбора (требуется как минимум 2 сервера)",
 		ErrWireGuardNoAddress:   "В ссылке WireGuard не указан адрес интерфейса (параметр address) — без него туннель не поднять",
 		ErrTransportUnsupported: "Транспорт %s не поддерживается ядром sing-box. Такой сервер работает только в клиентах на базе Xray.",
 
@@ -201,6 +203,7 @@ var messages = map[Lang]map[string]string{
 		ErrSubBlockedByHost:     "The subscription host returned a web page instead of a server list. That is usually a sign-in, payment or verification page — open the link in a browser and check that the subscription is still active.",
 		ErrSubUnreachable:       "Could not download the subscription: %v",
 		ErrSubNoNodes:           "The subscription was downloaded but holds no servers in a supported format",
+		ErrNoAutoNodes:          "No servers available in subscriptions for automatic selection (at least 2 servers required)",
 		ErrWireGuardNoAddress:   "The WireGuard link carries no interface address (the \"address\" parameter); the tunnel cannot come up without it",
 		ErrTransportUnsupported: "The %s transport is not supported by the sing-box core. Such a server only works in Xray-based clients.",
 

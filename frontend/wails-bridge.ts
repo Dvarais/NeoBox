@@ -9,6 +9,7 @@ import {
   ExportSettings,
   FetchSubscription,
   GetAppVersion,
+  GetAutoSelectedNode,
   GetConnections,
   GetHistory,
   GetKillSwitchState,
@@ -41,6 +42,7 @@ import { EventsOn } from './wailsjs/runtime/runtime';
 
 import type {
   AppSettings,
+  AutoSelectedNodeResult,
   ConnectionsSnapshot,
   HistoryEntry,
   KillSwitchState,
@@ -156,6 +158,7 @@ const api: NeoBoxApi = {
     return (await RestartXray(link, JSON.stringify(settings), useSystemProxy)) as XrayResult;
   },
   switchServer: (link) => SwitchServer(link) as Promise<SwitchServerResult>,
+  getAutoSelectedNode: () => GetAutoSelectedNode() as Promise<AutoSelectedNodeResult>,
   stopXray: () => StopXray() as Promise<XrayResult>,
   pingServer: async (link) => {
     const latency = await PingServer(link);

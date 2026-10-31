@@ -392,6 +392,7 @@ function applyLanguage() {
   syncCustomSelectLabels('newRuleType');
   syncCustomSelectLabels('dnsSelect');
   updateCards();
+  updateActiveServerInfo(activeServerLink);
 }
 
 el('langToggle').onclick = () => {
@@ -643,6 +644,62 @@ function handleConnectFailure(error: string | undefined, userInitiated: boolean)
 
 // Log parsing, streaming and search extracted to views/logs.view.ts
 
+function updateActiveServerInfo(link: string | null, activeNode?: string): void {
+  const t = translations[currentLanguage];
+  if (!link) {
+    activeServerName.textContent = t.selectLocation;
+    activeServerDetails.textContent = '';
+    return;
+  }
+  const info = parseBasicInfo(link);
+  if (link === 'neobox://auto') {
+    activeServerName.textContent = t.autoBestServerName || '⚡ Auto (Best Ping)';
+    if (activeNode) {
+      activeServerDetails.textContent = `Auto • via ${activeNode}`;
+    } else {
+      activeServerDetails.textContent = t.autoBestServerDesc;
+    }
+  } else {
+    activeServerName.textContent = info.name || info.address || t.proxyFallbackName;
+    activeServerDetails.textContent = `${info.type.toUpperCase()} • ${info.address}`;
+  }
+}
+
+let autoNodePollTimer: ReturnType<typeof setInterval> | null = null;
+
+async function refreshAutoNode(): Promise<void> {
+  if (activeServerLink !== 'neobox://auto' || appState !== 'on') return;
+  try {
+    const res = await window.api.getAutoSelectedNode();
+    if (res && res.running && res.node) {
+      activeServerDetails.textContent = `Auto • via ${res.node}`;
+    }
+  } catch (e) {
+    // silent fallback
+  }
+}
+
+function startAutoNodePolling(): void {
+  stopAutoNodePolling();
+  if (activeServerLink === 'neobox://auto') {
+    void refreshAutoNode();
+    autoNodePollTimer = setInterval(() => {
+      if (appState !== 'on' || activeServerLink !== 'neobox://auto') {
+        stopAutoNodePolling();
+        return;
+      }
+      void refreshAutoNode();
+    }, 5000);
+  }
+}
+
+function stopAutoNodePolling(): void {
+  if (autoNodePollTimer !== null) {
+    clearInterval(autoNodePollTimer);
+    autoNodePollTimer = null;
+  }
+}
+
 // The backend signals this once the core is actually up. Previously the UI
 // watched the log stream for "sing-box started", which meant the connected
 // state silently depended on the core's log level being verbose enough.
@@ -655,10 +712,14 @@ window.api.onStarted(() => {
   // отложенных правил больше нет. Снимается именно здесь, а не по клику на
   // «Применить сейчас»: до этого момента правило ещё не действует.
   clearRulesPending();
+  if (activeServerLink === 'neobox://auto') {
+    startAutoNodePolling();
+  }
 });
 
 
 window.api.onStopped(() => {
+  stopAutoNodePolling();
   if (!isRestarting) {
     void finishSessionHistory(); // сохраняем сессию если VPN упал сам
     updateAppInterface('off');
@@ -681,30 +742,39 @@ window.api.onTrayRestart(() => restartBtn.click());
 
 window.api.onTrayServerSelected((link: string) => {
   activeServerLink = link;
-  const info = parseBasicInfo(link);
-  activeServerName.textContent = info.name;
-  activeServerDetails.textContent = `${info.type} • ${info.address}`;
+  updateActiveServerInfo(link);
   updateCards();
   collectAndSaveSettings();
+  if (link === 'neobox://auto' && appState === 'on') {
+    startAutoNodePolling();
+  } else {
+    stopAutoNodePolling();
+  }
 });
 
 window.api.onServerSwitched((data) => {
   if (data && data.link) {
     activeServerLink = data.link;
-    const info = parseBasicInfo(data.link);
-    activeServerName.textContent = info.name || data.name;
-    activeServerDetails.textContent = `${info.type} • ${info.address}`;
+    updateActiveServerInfo(data.link);
     updateCards();
+    if (data.link === 'neobox://auto' && appState === 'on') {
+      startAutoNodePolling();
+    } else {
+      stopAutoNodePolling();
+    }
   }
 });
 
 window.api.onTrayStartReconnect((data) => {
   activeServerLink = data.link;
-  const info = parseBasicInfo(data.link);
-  activeServerName.textContent = info.name;
-  activeServerDetails.textContent = `${info.type} • ${info.address}`;
+  updateActiveServerInfo(data.link);
   updateCards();
   collectAndSaveSettings();
+  if (data.link === 'neobox://auto' && appState === 'on') {
+    startAutoNodePolling();
+  } else {
+    stopAutoNodePolling();
+  }
 
   if (appState === 'on') {
     (async () => {
@@ -1074,8 +1144,12 @@ async function selectAndConnectServer(link: string) {
   if (!info) return;
 
   activeServerLink = link;
-  activeServerName.textContent = info.name;
-  activeServerDetails.textContent = `${info.type} • ${info.address}`;
+  updateActiveServerInfo(link);
+  if (link === 'neobox://auto' && appState === 'on') {
+    startAutoNodePolling();
+  } else {
+    stopAutoNodePolling();
+  }
 
   updateCards();
   collectAndSaveSettings();
@@ -1185,9 +1259,7 @@ async function init() {
     getActiveServerLink: () => activeServerLink ?? '',
     onSelectServer: (link) => {
       activeServerLink = link;
-      const info = parseBasicInfo(link);
-      activeServerName.textContent = info.name || info.address || translations[currentLanguage].proxyFallbackName;
-      activeServerDetails.textContent = `${info.type.toUpperCase()} • ${info.address}`;
+      updateActiveServerInfo(link);
       updateCards();
     },
     onRefreshKillSwitch: () => {
@@ -1221,10 +1293,14 @@ async function init() {
   initServersView({
     getCurrentLanguage: () => currentLanguage,
     getActiveServerLink: () => activeServerLink,
-    setActiveServer: (link, name, type, address) => {
+    setActiveServer: (link, _name, _type, _address) => {
       activeServerLink = link;
-      activeServerName.textContent = name;
-      activeServerDetails.textContent = `${type} • ${address}`;
+      updateActiveServerInfo(link);
+      if (link === 'neobox://auto' && appState === 'on') {
+        startAutoNodePolling();
+      } else {
+        stopAutoNodePolling();
+      }
     },
     getAppState: () => appState,
     restartCore: () => restartCore(),
@@ -1283,9 +1359,7 @@ async function init() {
     const rememberServer = settings.rememberServer !== undefined ? !!settings.rememberServer : true;
     if (rememberServer && settings.lastSelectedServer) {
        activeServerLink = settings.lastSelectedServer;
-       const info = parseBasicInfo(activeServerLink);
-       activeServerName.textContent = info.name;
-       activeServerDetails.textContent = `${info.type.toUpperCase()} • ${info.address}`;
+       updateActiveServerInfo(activeServerLink);
     }
     
     el<HTMLInputElement>('bypassRuCheckbox').checked = !!settings.bypassRu;
@@ -1439,8 +1513,7 @@ if (window.api.onWatchdogSwitched) {
     activeServerLink = link;
     const info = parseBasicInfo(link);
     const name = info.name || info.address || t.proxyFallbackName;
-    activeServerName.textContent = name;
-    activeServerDetails.textContent = `${info.type.toUpperCase()} • ${info.address}`;
+    updateActiveServerInfo(link);
     updateCards();
     collectAndSaveSettings();
 

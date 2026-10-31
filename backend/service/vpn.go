@@ -107,15 +107,34 @@ func (s *AppService) startCore(link string, _ string, useSystemProxy bool, newSe
 	// take the port. sing-box binds it directly and the bind error is handled
 	// below, which makes the check and the acquisition atomic.
 
-	// 2. Parse proxy URL
-	outbound, err := core.ParseProxyLink(link)
-	if err != nil {
-		response["error"] = i18n.T(i18n.ErrParseLink, err)
-		return response
-	}
+	// 2. Parse proxy URL and build candidate list for Clash API selector
+	var outbound map[string]interface{}
+	var candidates []map[string]interface{}
+	var linkToTag map[string]string
 
-	// 2b. Build candidate list and link-to-tag mapping for Clash API selector
-	candidates, linkToTag := s.buildCandidates(link, outbound)
+	if link == core.AutoServerLink {
+		candidates, linkToTag = s.buildCandidates(link, nil)
+		if len(candidates) < 2 {
+			response["error"] = i18n.T(i18n.ErrNoAutoNodes)
+			return response
+		}
+		// Use the first candidate as the primary template for DNS/direct routing, but instruct
+		// GenerateConfigWithCandidates to set selector default to OutboundAutoTag
+		outbound = make(map[string]interface{}, len(candidates[0]))
+		for k, v := range candidates[0] {
+			outbound[k] = v
+		}
+		outbound["_selector_default"] = core.OutboundAutoTag
+	} else {
+		var err error
+		outbound, err = core.ParseProxyLink(link)
+		if err != nil {
+			response["error"] = i18n.T(i18n.ErrParseLink, err)
+			return response
+		}
+		// 2b. Build candidate list and link-to-tag mapping for Clash API selector
+		candidates, linkToTag = s.buildCandidates(link, outbound)
+	}
 
 	// 3. Generate configuration
 	// Generate a fresh per-session Clash API secret to prevent other local
@@ -568,23 +587,28 @@ func (s *AppService) FlushDNS() (bool, error) {
 
 // buildCandidates collects valid non-wireguard proxy candidates from subscriptions,
 // assigns unique outbound tags, and builds the link-to-tag mapping for the Clash API selector.
+// When activeOutbound is nil (e.g. for Auto mode), all valid subscription proxies are collected.
 func (s *AppService) buildCandidates(activeLink string, activeOutbound map[string]interface{}) ([]map[string]interface{}, map[string]string) {
 	linkToTag := make(map[string]string)
-	activeType, _ := activeOutbound["type"].(string)
-	activeTag, _ := activeOutbound["tag"].(string)
-	if activeTag == "" {
-		activeTag = parseServerNameFromLink(activeLink)
+	var activeTag string
+	var activeType string
+	if activeOutbound != nil {
+		activeType, _ = activeOutbound["type"].(string)
+		activeTag, _ = activeOutbound["tag"].(string)
 		if activeTag == "" {
-			activeTag = "proxy"
+			activeTag = parseServerNameFromLink(activeLink)
+			if activeTag == "" {
+				activeTag = "proxy"
+			}
+			activeOutbound["tag"] = activeTag
 		}
-		activeOutbound["tag"] = activeTag
-	}
-	linkToTag[activeLink] = activeTag
+		linkToTag[activeLink] = activeTag
 
-	// WireGuard is defined as an endpoint in sing-box, not an outbound.
-	// Endpoints cannot be placed inside a selector outbound group.
-	if activeType == "wireguard" {
-		return []map[string]interface{}{activeOutbound}, linkToTag
+		// WireGuard is defined as an endpoint in sing-box, not an outbound.
+		// Endpoints cannot be placed inside a selector outbound group.
+		if activeType == "wireguard" {
+			return []map[string]interface{}{activeOutbound}, linkToTag
+		}
 	}
 
 	s.fileMu.Lock()
@@ -598,14 +622,20 @@ func (s *AppService) buildCandidates(activeLink string, activeOutbound map[strin
 		}
 	}
 
-	usedTags := map[string]bool{activeTag: true}
-	seenLinks := map[string]bool{activeLink: true}
-	candidates := []map[string]interface{}{activeOutbound}
+	usedTags := make(map[string]bool)
+	seenLinks := make(map[string]bool)
+	var candidates []map[string]interface{}
+
+	if activeOutbound != nil {
+		usedTags[activeTag] = true
+		seenLinks[activeLink] = true
+		candidates = append(candidates, activeOutbound)
+	}
 
 	for _, sub := range subs {
 		for _, rawLink := range sub.Links {
 			lnk := strings.TrimSpace(rawLink)
-			if lnk == "" || seenLinks[lnk] {
+			if lnk == "" || seenLinks[lnk] || lnk == core.AutoServerLink {
 				continue
 			}
 			seenLinks[lnk] = true
@@ -637,6 +667,10 @@ func (s *AppService) buildCandidates(activeLink string, activeOutbound map[strin
 			linkToTag[lnk] = uniqueTag
 			candidates = append(candidates, candOut)
 		}
+	}
+
+	if len(candidates) >= 2 {
+		linkToTag[core.AutoServerLink] = core.OutboundAutoTag
 	}
 
 	return candidates, linkToTag
@@ -727,22 +761,24 @@ func (s *AppService) SwitchServer(link string) map[string]interface{} {
 	// Update Windows Firewall Kill Switch if active (after core outbound switch succeeds)
 	var settings core.Settings
 	if err := json.Unmarshal([]byte(s.GetSettings()), &settings); err == nil && settings.KillSwitch {
-		targetOutbound, err := core.ParseProxyLink(trimmedLink)
-		if err != nil {
-			return map[string]interface{}{
-				"success":          false,
-				"hotSwitched":      false,
-				"fallbackRequired": true,
-				"error":            fmt.Sprintf("failed to parse target link for killswitch: %v", err),
+		if trimmedLink != core.AutoServerLink {
+			targetOutbound, err := core.ParseProxyLink(trimmedLink)
+			if err != nil {
+				return map[string]interface{}{
+					"success":          false,
+					"hotSwitched":      false,
+					"fallbackRequired": true,
+					"error":            fmt.Sprintf("failed to parse target link for killswitch: %v", err),
+				}
 			}
-		}
-		newServerHost, _ := core.ServerEndpoint(targetOutbound)
-		if err := s.enableKillSwitch(newServerHost); err != nil {
-			return map[string]interface{}{
-				"success":          false,
-				"hotSwitched":      false,
-				"fallbackRequired": true,
-				"error":            fmt.Sprintf("failed to update killswitch firewall rule: %v", err),
+			newServerHost, _ := core.ServerEndpoint(targetOutbound)
+			if err := s.enableKillSwitch(newServerHost); err != nil {
+				return map[string]interface{}{
+					"success":          false,
+					"hotSwitched":      false,
+					"fallbackRequired": true,
+					"error":            fmt.Sprintf("failed to update killswitch firewall rule: %v", err),
+				}
 			}
 		}
 	}
@@ -782,5 +818,59 @@ func (s *AppService) SwitchServer(link string) map[string]interface{} {
 	return map[string]interface{}{
 		"success":     true,
 		"hotSwitched": true,
+	}
+}
+
+// GetAutoSelectedNode queries Clash API GET /proxies/auto-out to report which proxy node
+// sing-box's urltest group has currently selected based on lowest latency.
+func (s *AppService) GetAutoSelectedNode() map[string]interface{} {
+	if s.GetVPNState() != VPNStateConnected {
+		return map[string]interface{}{
+			"node":    "",
+			"running": false,
+			"isAuto":  false,
+		}
+	}
+
+	s.stateMu.Lock()
+	clashAddr := core.ClashAPIAddr
+	if s.clashAddr != "" {
+		clashAddr = s.clashAddr
+	}
+	secret := s.clashSecret
+	activeLink := s.activeServerLink
+	s.stateMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), clashRequestTimeout)
+	defer cancel()
+
+	respBytes, err := fetchClash(ctx, http.MethodGet, clashAddr, "/proxies/"+core.OutboundAutoTag, secret)
+	if err != nil {
+		return map[string]interface{}{
+			"node":    "",
+			"running": true,
+			"isAuto":  activeLink == core.AutoServerLink,
+			"error":   err.Error(),
+		}
+	}
+
+	var data struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+		Now  string `json:"now"`
+	}
+	if err := json.Unmarshal(respBytes, &data); err != nil {
+		return map[string]interface{}{
+			"node":    "",
+			"running": true,
+			"isAuto":  activeLink == core.AutoServerLink,
+			"error":   err.Error(),
+		}
+	}
+
+	return map[string]interface{}{
+		"node":    data.Now,
+		"running": true,
+		"isAuto":  activeLink == core.AutoServerLink,
 	}
 }

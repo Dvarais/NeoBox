@@ -78,6 +78,8 @@ function getCountryFlag(name: string, address: string): string {
   return '🌐';
 }
 
+export const AUTO_SERVER_LINK = 'neobox://auto';
+
 export function parseBasicInfo(link: string): ServerInfo {
   try {
     let protocol = '';
@@ -100,6 +102,14 @@ export function parseBasicInfo(link: string): ServerInfo {
       } catch (e) {
         name = hashParts[1] || '';
       }
+    }
+
+    if (protocol === 'neobox' && (rest === 'auto' || rest.startsWith('auto'))) {
+      return {
+        type: 'Auto',
+        name: name || '⚡ Auto (Best Ping)',
+        address: 'Automatic Selection',
+      };
     }
 
     if (protocol === 'vmess') {
@@ -267,6 +277,78 @@ export function renderCards(
         (info.type || '').toLowerCase().includes(q)
       );
     });
+  }
+
+  // Prepend Auto (Best Ping) virtual card if at least 2 servers are available
+  const autoTitle = (t.autoBestServerName || 'auto авто').toLowerCase();
+  const autoDesc = (t.autoBestServerDesc || '').toLowerCase();
+  const matchesSearch = !q || autoTitle.includes(q) || autoDesc.includes(q) || q.includes('auto') || q.includes('авто');
+  if (uniqueServers.length >= 2 && matchesSearch) {
+    const isAutoSelected = activeServerLink === AUTO_SERVER_LINK;
+    const autoCard = document.createElement('div');
+    autoCard.className = `server-card auto-card ${isAutoSelected ? 'selected' : ''}`;
+    autoCard.setAttribute('role', 'listitem');
+
+    const autoBtn = document.createElement('button');
+    autoBtn.type = 'button';
+    autoBtn.className = 'server-card-main';
+    if (isAutoSelected) autoBtn.setAttribute('aria-current', 'true');
+
+    const detailsDiv = document.createElement('div');
+    detailsDiv.className = 'details';
+
+    const iconDiv = document.createElement('div');
+    iconDiv.className = 'server-icon';
+    iconDiv.textContent = '⚡';
+    iconDiv.setAttribute('aria-hidden', 'true');
+
+    const infoDiv = document.createElement('div');
+    const titleH4 = document.createElement('h4');
+    titleH4.style.cssText = 'font-size:var(--fs-body); display:flex; align-items:center; gap:8px; margin:0;';
+
+    const protoTag = document.createElement('span');
+    protoTag.className = 'protocol-tag';
+    protoTag.dataset.proto = 'auto';
+    protoTag.style.flexShrink = '0';
+    protoTag.textContent = 'AUTO';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'server-name-text';
+    nameSpan.textContent = t.autoBestServerName || '⚡ Auto (Best Ping)';
+
+    titleH4.appendChild(protoTag);
+    titleH4.appendChild(nameSpan);
+
+    const addressP = document.createElement('p');
+    addressP.style.cssText = 'font-size:var(--fs-micro); color:var(--text-dim); margin:2px 0 0; font-family:var(--font-mono);';
+    addressP.textContent = t.autoBestServerDesc || 'Automatic lowest-latency node failover';
+
+    infoDiv.appendChild(titleH4);
+    infoDiv.appendChild(addressP);
+
+    detailsDiv.appendChild(iconDiv);
+    detailsDiv.appendChild(infoDiv);
+
+    const pingDiv = document.createElement('div');
+    pingDiv.className = 'ping';
+    pingDiv.style.color = 'var(--accent-color, #10b981)';
+    pingDiv.textContent = '⚡ URLTest';
+    if (t.pingLabel) pingDiv.setAttribute('aria-label', `${t.pingLabel}: Auto`);
+
+    autoBtn.appendChild(detailsDiv);
+    autoBtn.appendChild(pingDiv);
+
+    autoBtn.addEventListener('click', () => {
+      onServerSelect(
+        AUTO_SERVER_LINK,
+        t.autoBestServerName || '⚡ Auto (Best Ping)',
+        'AUTO',
+        'Automatic Selection',
+      );
+    });
+
+    autoCard.appendChild(autoBtn);
+    container.appendChild(autoCard);
   }
 
   displayServers.forEach((link) => {

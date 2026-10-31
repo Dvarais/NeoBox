@@ -222,3 +222,137 @@ func TestSwitchServer_EndToEndHotSwitch(t *testing.T) {
 		t.Errorf("lastSelectedServer = %v, want %s", secrets["lastSelectedServer"], link2)
 	}
 }
+
+func TestBuildCandidates_AutoLinkMapping(t *testing.T) {
+	link1 := "vless://00000000-0000-0000-0000-000000000001@1.1.1.1:443?type=tcp#Node-1"
+	link2 := "vless://00000000-0000-0000-0000-000000000002@2.2.2.2:443?type=tcp#Node-2"
+
+	s := serviceWithSubs(t, link1, link2)
+
+	// Case 1: active server is link1, 2 candidates in total -> AutoServerLink is mapped to OutboundAutoTag
+	activeOutbound, err := core.ParseProxyLink(link1)
+	if err != nil {
+		t.Fatalf("ParseProxyLink failed: %v", err)
+	}
+	candidates, linkToTag := s.buildCandidates(link1, activeOutbound)
+	if len(candidates) != 2 {
+		t.Fatalf("expected 2 candidates, got %d", len(candidates))
+	}
+	if linkToTag[core.AutoServerLink] != core.OutboundAutoTag {
+		t.Errorf("linkToTag[AutoServerLink] = %q, want %q", linkToTag[core.AutoServerLink], core.OutboundAutoTag)
+	}
+
+	// Case 2: active server is AutoServerLink with nil outbound
+	autoCandidates, autoLinkToTag := s.buildCandidates(core.AutoServerLink, nil)
+	if len(autoCandidates) != 2 {
+		t.Fatalf("expected 2 autoCandidates, got %d", len(autoCandidates))
+	}
+	if autoLinkToTag[core.AutoServerLink] != core.OutboundAutoTag {
+		t.Errorf("autoLinkToTag[AutoServerLink] = %q, want %q", autoLinkToTag[core.AutoServerLink], core.OutboundAutoTag)
+	}
+	if autoLinkToTag[link1] != "Node-1" {
+		t.Errorf("autoLinkToTag[link1] = %q, want Node-1", autoLinkToTag[link1])
+	}
+}
+
+func TestSwitchServer_AutoServerLink(t *testing.T) {
+	link1 := "vless://00000000-0000-0000-0000-000000000001@1.1.1.1:443?type=tcp#Node-1"
+	link2 := "vless://00000000-0000-0000-0000-000000000002@2.2.2.2:443?type=tcp#Node-2"
+
+	var receivedPath string
+	var receivedBody map[string]string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &receivedBody)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	addr := strings.TrimPrefix(srv.URL, "http://")
+	s := serviceWithSubs(t, link1, link2)
+
+	s.setVPNState(VPNStateConnected)
+	s.stateMu.Lock()
+	s.clashSecret = "secret-123"
+	s.clashAddr = addr
+	s.serverLinkToTag = map[string]string{
+		link1:               "Node-1",
+		link2:               "Node-2",
+		core.AutoServerLink: core.OutboundAutoTag,
+	}
+	s.activeServerLink = link1
+	s.stateMu.Unlock()
+
+	// Hot-switch to AutoServerLink
+	res := s.SwitchServer(core.AutoServerLink)
+	if res["success"] != true || res["hotSwitched"] != true {
+		t.Fatalf("SwitchServer(AutoServerLink) failed: %v", res)
+	}
+
+	if receivedPath != "/proxies/"+core.OutboundSelectorTag {
+		t.Errorf("receivedPath = %s, want /proxies/%s", receivedPath, core.OutboundSelectorTag)
+	}
+	if receivedBody["name"] != core.OutboundAutoTag {
+		t.Errorf("receivedBody name = %s, want %s", receivedBody["name"], core.OutboundAutoTag)
+	}
+
+	s.stateMu.Lock()
+	active := s.activeServerLink
+	s.stateMu.Unlock()
+	if active != core.AutoServerLink {
+		t.Errorf("activeServerLink = %s, want %s", active, core.AutoServerLink)
+	}
+
+	s.watchdogMu.Lock()
+	wdLink := s.watchdogLink
+	s.watchdogMu.Unlock()
+	if wdLink != core.AutoServerLink {
+		t.Errorf("watchdogLink = %s, want %s", wdLink, core.AutoServerLink)
+	}
+}
+
+func TestGetAutoSelectedNode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/proxies/"+core.OutboundAutoTag {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer test-secret" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"name":"auto-out","type":"URLTest","now":"Node-2"}`))
+	}))
+	defer srv.Close()
+
+	addr := strings.TrimPrefix(srv.URL, "http://")
+	s := &AppService{}
+
+	// When disconnected
+	res := s.GetAutoSelectedNode()
+	if res["running"] != false {
+		t.Errorf("GetAutoSelectedNode while disconnected should have running: false, got %v", res)
+	}
+
+	// When connected
+	s.setVPNState(VPNStateConnected)
+	s.stateMu.Lock()
+	s.clashSecret = "test-secret"
+	s.clashAddr = addr
+	s.activeServerLink = core.AutoServerLink
+	s.stateMu.Unlock()
+
+	res = s.GetAutoSelectedNode()
+	if res["running"] != true {
+		t.Errorf("expected running: true, got %v", res["running"])
+	}
+	if res["node"] != "Node-2" {
+		t.Errorf("expected node: Node-2, got %v", res["node"])
+	}
+	if res["isAuto"] != true {
+		t.Errorf("expected isAuto: true, got %v", res["isAuto"])
+	}
+}

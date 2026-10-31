@@ -46,6 +46,10 @@ export function GetAppVersion() {
   return window['go']['service']['AppService']['GetAppVersion']();
 }
 
+export function GetAutoSelectedNode() {
+  return window['go']['service']['AppService']['GetAutoSelectedNode']();
+}
+
 export function GetConnections() {
   return window['go']['service']['AppService']['GetConnections']();
 }

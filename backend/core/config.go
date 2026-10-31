@@ -1244,6 +1244,12 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 // OutboundSelectorTag is the well-known tag for the main proxy selector outbound.
 const OutboundSelectorTag = "proxy-out"
 
+// OutboundAutoTag is the well-known tag for the automatic urltest failover group.
+const OutboundAutoTag = "auto-out"
+
+// AutoServerLink is the virtual pseudo-link representing automatic urltest failover mode.
+const AutoServerLink = "neobox://auto"
+
 // GenerateConfig generates a sing-box configuration for a single proxy outbound.
 // Preserved for backward compatibility.
 func GenerateConfig(outbound map[string]interface{}, settings Settings, useSystemProxy bool, cacheDBPath string, clashSecret string) (map[string]interface{}, error) {
@@ -1271,6 +1277,8 @@ func GenerateConfigWithCandidates(candidates []map[string]interface{}, outbound 
 	for k, v := range outbound {
 		workOutbound[k] = v
 	}
+	selectorDefaultOverride, _ := workOutbound["_selector_default"].(string)
+	delete(workOutbound, "_selector_default")
 
 	activeType, _ := workOutbound["type"].(string)
 	useSelector := len(candidates) > 1 && activeType != "wireguard"
@@ -1732,14 +1740,35 @@ func GenerateConfigWithCandidates(candidates []map[string]interface{}, outbound 
 
 	var outboundsList []interface{}
 	if useSelector {
+		selectorOutbounds := make([]string, 0, len(candidateTags)+1)
+		selectorOutbounds = append(selectorOutbounds, OutboundAutoTag)
+		selectorOutbounds = append(selectorOutbounds, candidateTags...)
+
+		selectorDefault := outboundTag
+		if selectorDefaultOverride != "" {
+			selectorDefault = selectorDefaultOverride
+		}
+
 		selectorOutbound := map[string]interface{}{
 			"type":                        "selector",
 			"tag":                         OutboundSelectorTag,
-			"outbounds":                   candidateTags,
-			"default":                     outboundTag,
+			"outbounds":                   selectorOutbounds,
+			"default":                     selectorDefault,
 			"interrupt_exist_connections": false,
 		}
-		outboundsList = append(outboundsList, selectorOutbound)
+
+		autoOutbound := map[string]interface{}{
+			"type":                        "urltest",
+			"tag":                         OutboundAutoTag,
+			"outbounds":                   candidateTags,
+			"url":                         "https://www.gstatic.com/generate_204",
+			"interval":                    "3m",
+			"tolerance":                   50,
+			"idle_timeout":                "30m",
+			"interrupt_exist_connections": false,
+		}
+
+		outboundsList = append(outboundsList, selectorOutbound, autoOutbound)
 		for _, cand := range preparedCandidates {
 			outboundsList = append(outboundsList, cand)
 		}

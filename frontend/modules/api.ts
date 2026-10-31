@@ -196,6 +196,14 @@ export interface SwitchServerResult {
   error?: string;
 }
 
+/** Информация о текущем автоматически выбранном узле из Clash API urltest группы. */
+export interface AutoSelectedNodeResult {
+  node: string;
+  running: boolean;
+  isAuto?: boolean;
+  error?: string;
+}
+
 /** Данные события tray-start-reconnect. */
 export interface TrayReconnectRequest {
   link: string;
@@ -302,6 +310,7 @@ export interface NeoBoxApi {
   startXray(link: string, useSystemProxy: boolean): Promise<XrayResult>;
   restartXray(link: string, useSystemProxy: boolean): Promise<XrayResult>;
   switchServer(link: string): Promise<SwitchServerResult>;
+  getAutoSelectedNode(): Promise<AutoSelectedNodeResult>;
   stopXray(): Promise<XrayResult>;
   checkTunStatus(): Promise<boolean>;
   getKillSwitchState(): Promise<KillSwitchState>;
