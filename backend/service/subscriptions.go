@@ -48,6 +48,8 @@ type Subscription struct {
 
 	// UserInfo holds quota and expiration metadata from the Subscription-Userinfo header.
 	UserInfo *core.SubscriptionUserInfo `json:"userInfo,omitempty"`
+	// IsCached indicates that the node list is being served from the fallback cache.
+	IsCached bool `json:"isCached,omitempty"`
 }
 
 // Периоды автообновления.
@@ -107,20 +109,62 @@ func (s *AppService) subscriptionsPath() string {
 	return filepath.Join(s.userDataDir, "subscriptions.json")
 }
 
+// subscriptionsCachePath returns the location of the fallback encrypted subscriptions cache snapshot.
+func (s *AppService) subscriptionsCachePath() string {
+	return filepath.Join(s.userDataDir, "subscriptions.cache.json")
+}
+
+// hasValidSubscriptionLinks reports whether the JSON data holds at least one subscription with non-empty links.
+func hasValidSubscriptionLinks(data []byte) bool {
+	var subs []Subscription
+	if err := json.Unmarshal(data, &subs); err != nil {
+		return false
+	}
+	for _, sub := range subs {
+		if len(sub.Links) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// getCachedLinksForSubLocked finds previously cached valid proxy links for a given subscription ID.
+// Callers must already hold fileMu.
+func (s *AppService) getCachedLinksForSubLocked(subID string) []string {
+	cacheData, found, err := storage.ReadSecret(s.subscriptionsCachePath())
+	if err != nil || !found || !json.Valid(cacheData) {
+		return nil
+	}
+	var cachedSubs []Subscription
+	if err := json.Unmarshal(cacheData, &cachedSubs); err != nil {
+		return nil
+	}
+	for _, cs := range cachedSubs {
+		if cs.ID == subID && len(cs.Links) > 0 {
+			return cs.Links
+		}
+	}
+	return nil
+}
+
 // readSubscriptionsLocked returns the decrypted subscriptions JSON, or nil when
 // the file is absent, unreadable, or does not contain valid JSON.
+// If the primary subscriptions file is missing or corrupted, it automatically
+// falls back to the resilient snapshot cache and restores the primary file.
 // Callers must already hold fileMu.
 func (s *AppService) readSubscriptionsLocked() []byte {
 	data, found, err := storage.ReadSecret(s.subscriptionsPath())
-	if err != nil {
-		fmt.Printf("[subscriptions] read error: %v\n", err)
-		return nil
-	}
-	if !found {
-		return nil
-	}
-	if !json.Valid(data) {
-		fmt.Println("[subscriptions] file contains invalid JSON — treating as empty")
+	if err != nil || !found || !json.Valid(data) || len(data) == 0 {
+		if err != nil {
+			fmt.Printf("[subscriptions] primary read error: %v — attempting fallback cache\n", err)
+		}
+		// Attempt fallback cache recovery
+		cacheData, cacheFound, cacheErr := storage.ReadSecret(s.subscriptionsCachePath())
+		if cacheErr == nil && cacheFound && json.Valid(cacheData) && len(cacheData) > 0 {
+			fmt.Println("[subscriptions] recovered valid subscriptions from fallback cache snapshot")
+			_ = storage.WriteSecret(s.subscriptionsPath(), cacheData)
+			return cacheData
+		}
 		return nil
 	}
 	return data
@@ -189,6 +233,9 @@ func (s *AppService) SaveSubscriptions(subsJSON string) bool {
 
 	s.fileMu.Lock()
 	err := storage.WriteSecret(s.subscriptionsPath(), out)
+	if err == nil && hasValidSubscriptionLinks(out) {
+		_ = storage.WriteSecret(s.subscriptionsCachePath(), out)
+	}
 	s.fileMu.Unlock()
 	if err != nil {
 		fmt.Printf("[SaveSubscriptions] write failed: %v\n", err)
@@ -455,12 +502,21 @@ func (s *AppService) mergeFetchedSubscriptions(results map[string]subFetch) bool
 			// серверов: вчерашние узлы, скорее всего, ещё работают, и стирать
 			// их значило бы оставить человека без связи из-за чужого сбоя.
 			subs[i].LastError = result.Err
+			if len(subs[i].Links) == 0 {
+				if cached := s.getCachedLinksForSubLocked(subs[i].ID); len(cached) > 0 {
+					subs[i].Links = cached
+					subs[i].IsCached = true
+				}
+			} else {
+				subs[i].IsCached = true
+			}
 		} else {
 			subs[i].Links = result.Links
 			if result.UserInfo != nil {
 				subs[i].UserInfo = result.UserInfo
 			}
 			subs[i].LastError = ""
+			subs[i].IsCached = false
 			subs[i].UpdatedAt = time.Now().UnixMilli()
 		}
 		changed = true
@@ -476,6 +532,9 @@ func (s *AppService) mergeFetchedSubscriptions(results map[string]subFetch) bool
 		return false
 	}
 	err = storage.WriteSecret(s.subscriptionsPath(), out)
+	if err == nil && hasValidSubscriptionLinks(out) {
+		_ = storage.WriteSecret(s.subscriptionsCachePath(), out)
+	}
 	s.fileMu.Unlock()
 	if err != nil {
 		fmt.Printf("[subscriptions] write failed: %v\n", err)

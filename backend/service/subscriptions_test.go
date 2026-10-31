@@ -328,3 +328,97 @@ func TestMergeFetchedSubscriptions_UpdatesUserInfo(t *testing.T) {
 		t.Errorf("unexpected UserInfo: %+v", got[0].UserInfo)
 	}
 }
+
+func TestFallbackCacheSnapshotAndRecovery(t *testing.T) {
+	s := newSubService(t)
+
+	initialJSON := `[
+		{
+			"id": "sub-test",
+			"name": "Reliable Sub",
+			"url": "https://example.com/sub",
+			"links": ["vless://node1", "vless://node2"]
+		}
+	]`
+
+	if !s.SaveSubscriptions(initialJSON) {
+		t.Fatal("SaveSubscriptions failed")
+	}
+
+	// Verify fallback cache file exists and is encrypted
+	cacheData, found, err := storage.ReadSecret(s.subscriptionsCachePath())
+	if err != nil || !found {
+		t.Fatalf("expected fallback cache file to exist: found=%v, err=%v", found, err)
+	}
+	var cached []Subscription
+	if err := json.Unmarshal(cacheData, &cached); err != nil || len(cached) != 1 {
+		t.Fatalf("fallback cache unmarshal failed or empty: %v", err)
+	}
+	if len(cached[0].Links) != 2 {
+		t.Errorf("expected 2 cached links, got %d", len(cached[0].Links))
+	}
+
+	// Corrupt primary subscriptions.json with invalid bytes
+	if err := storage.WriteFile(s.subscriptionsPath(), []byte("CORRUPTED-JUNK-DATA")); err != nil {
+		t.Fatalf("failed to write corrupted data: %v", err)
+	}
+
+	// GetSubscriptions must detect the corrupt primary and recover from fallback cache
+	recoveredJSON := s.GetSubscriptions()
+	var recovered []Subscription
+	if err := json.Unmarshal([]byte(recoveredJSON), &recovered); err != nil {
+		t.Fatalf("failed to parse recovered subscriptions: %v", err)
+	}
+	if len(recovered) != 1 || len(recovered[0].Links) != 2 {
+		t.Fatalf("recovery failed: got %+v", recovered)
+	}
+
+	// Verify primary file was healed on disk
+	primaryData, pFound, pErr := storage.ReadSecret(s.subscriptionsPath())
+	if pErr != nil || !pFound || !json.Valid(primaryData) {
+		t.Fatalf("expected primary file to be healed: %v", pErr)
+	}
+}
+
+func TestMergeFetchedSubscriptionsMarksCachedWhenFailed(t *testing.T) {
+	s := newSubService(t)
+
+	initialJSON := `[
+		{
+			"id": "sub-1",
+			"name": "Sub 1",
+			"url": "https://example.com/sub1",
+			"links": ["vless://existing-node"]
+		}
+	]`
+
+	if !s.SaveSubscriptions(initialJSON) {
+		t.Fatal("SaveSubscriptions failed")
+	}
+
+	// Simulate a failed fetch
+	if !s.mergeFetchedSubscriptions(map[string]subFetch{
+		"sub-1": {
+			Err: "502 Bad Gateway",
+		},
+	}) {
+		t.Fatal("mergeFetchedSubscriptions failed")
+	}
+
+	var got []Subscription
+	if err := json.Unmarshal([]byte(s.GetSubscriptions()), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 sub, got %d", len(got))
+	}
+	if !got[0].IsCached {
+		t.Errorf("expected IsCached to be true on failed update")
+	}
+	if len(got[0].Links) != 1 || got[0].Links[0] != "vless://existing-node" {
+		t.Errorf("expected existing nodes to be preserved: %+v", got[0].Links)
+	}
+	if got[0].LastError != "502 Bad Gateway" {
+		t.Errorf("expected LastError to be recorded: %q", got[0].LastError)
+	}
+}

@@ -5557,6 +5557,30 @@ input.color-hex {
   color: var(--danger);
 }
 
+.sub-status-line--warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sub-error-text {
+  color: var(--danger);
+  font-size: var(--fs-micro);
+}
+
+.sub-cache-badge {
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--accent-tint);
+  border: 1px solid rgb(var(--accent-rgb) / 0.3);
+  color: var(--accent-color);
+  display: inline-flex;
+  align-items: center;
+}
+
 /* Пара полей для сочетаний клавиш. Подпись — поле — подпись — поле в одну
    строку, чтобы было видно, что это две настройки одной галки, а не четыре
    отдельных. */

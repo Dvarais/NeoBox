@@ -44,6 +44,8 @@ export interface Subscription {
   intervalHours?: number;
   /** Метаданные квоты трафика и срока действия из Subscription-Userinfo. */
   userInfo?: SubscriptionUserInfo;
+  /** Указывает, что узлы взяты из fallback-кэша из-за временной недоступности подписки. */
+  isCached?: boolean;
 }
 
 /** Пользовательское правило маршрутизации. Зеркалит core.CustomRule. */

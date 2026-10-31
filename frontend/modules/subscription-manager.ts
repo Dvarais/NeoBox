@@ -259,6 +259,21 @@ export function renderSubStatus(
   const every = t.subEvery.replace('{n}', String(sub.intervalHours || DEFAULT_INTERVAL_HOURS));
 
   if (sub.lastError) {
+    if (sub.links && sub.links.length > 0) {
+      const errSpan = document.createElement('span');
+      errSpan.className = 'sub-error-text';
+      errSpan.textContent = t.subUpdateFailed.replace('{reason}', sub.lastError);
+
+      const cacheBadge = document.createElement('span');
+      cacheBadge.className = 'sub-cache-badge';
+      cacheBadge.textContent = t.subUsingCache.replace('{n}', String(sub.links.length));
+
+      element.appendChild(errSpan);
+      element.appendChild(cacheBadge);
+      element.classList.add('sub-status-line--warning');
+      return;
+    }
+
     // Ошибка вытесняет всё остальное: рядом с ней «обновлено вчера» только
     // отвлекает от того, что обновиться не удалось.
     element.textContent = t.subUpdateFailed.replace('{reason}', sub.lastError);
