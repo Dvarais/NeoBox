@@ -46,7 +46,7 @@ export function setTitle(id: string, value: string): void {
 }
 
 export function setPlaceholder(id: string, value: string): void {
-  const node = optionalEl<HTMLInputElement>(id);
+  const node = optionalEl<HTMLInputElement | HTMLTextAreaElement>(id);
   if (node) node.placeholder = value;
 }
 
@@ -65,5 +65,28 @@ export function escapeHtml(str: unknown): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+/**
+ * Синхронизирует подпись кастомного дропдауна с текущим выбранным <option>.
+ */
+export function syncCustomSelectLabels(selectId: string): boolean {
+  const select = optionalEl<HTMLSelectElement>(selectId);
+  if (!select) return false;
+
+  const wrapper = select.nextElementSibling;
+  if (!wrapper || !wrapper.classList.contains('custom-select-wrapper')) return false;
+
+  const trigger = wrapper.querySelector('.custom-select-trigger');
+  const selectedOption = select.options[select.selectedIndex];
+  if (trigger && selectedOption) {
+    trigger.textContent = selectedOption.textContent;
+  }
+
+  wrapper.querySelectorAll('.custom-select-option').forEach((optDiv, idx) => {
+    const opt = select.options[idx];
+    if (opt) optDiv.textContent = opt.textContent;
+  });
+  return true;
 }
 

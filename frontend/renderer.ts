@@ -1,5 +1,5 @@
 import { el, optionalEl, query, setText, setTitle, setPlaceholder, setAria, escapeHtml } from './modules/dom';
-import { translations } from './modules/translations';
+import { translations, translate } from './modules/translations';
 import type { Language, Translations } from './modules/translations';
 import type {
   AppSettings,
@@ -38,13 +38,39 @@ import type { ConnectionGroup, GroupSort } from './modules/grouping';
 import { iconSvg } from './modules/icons';
 import {
   DEFAULT_THEME,
-  PRESETS,
   applyTheme,
-  describeTheme,
-  deriveTokens,
   parseTheme,
 } from './modules/theme';
-import type { BackgroundMode, Scheme, ThemeSpec } from './modules/theme';
+import type { ThemeSpec } from './modules/theme';
+import {
+  initRoutingView,
+  applyRoutingLanguage,
+  getCustomRules,
+  setCustomRules,
+  upsertCustomRule,
+  markRulesPending,
+  clearRulesPending,
+  renderRulesPending,
+  getProcessMode,
+  setProcessMode,
+  getProcessListBlacklist,
+  setProcessListBlacklist,
+  getProcessListWhitelist,
+  setProcessListWhitelist,
+} from './views/routing.view';
+import {
+  initSettingsView,
+  applySettingsLanguage,
+  setTheme,
+  getCurrentTheme,
+  renderThemeControls,
+  renderThemeReport,
+  currentDnsSetting,
+  setDnsSetting,
+  getAppliedDns,
+  setAppliedDns,
+  readMirroredTheme,
+} from './views/settings.view';
 import { initLogsView, onLogsTabActivated, applyLogsLanguage } from './views/logs.view';
 import {
   initConnectionsView,
@@ -64,18 +90,6 @@ import {
 // Зеркало в localStorage — только ради этой синхронности. Источник истины
 // остаётся в settings.json: он переживает очистку данных WebView2 и уезжает с
 // экспортом настроек, чего про localStorage сказать нельзя.
-const THEME_STORAGE_KEY = 'neobox-theme';
-
-function readMirroredTheme(): ThemeSpec | null {
-  try {
-    const raw = localStorage.getItem(THEME_STORAGE_KEY);
-    if (!raw) return null;
-    return parseTheme(JSON.parse(raw));
-  } catch {
-    return null;
-  }
-}
-
 let currentTheme: ThemeSpec = readMirroredTheme() ?? DEFAULT_THEME;
 applyTheme(currentTheme);
 
@@ -89,8 +103,6 @@ const activeServerName = el('activeServerName');
 const activeServerDetails = el('activeServerDetails');
 const serversGrid = el('serversGrid');
 const subTabsContainer = el('subscription-tabs');
-const processListBlacklistEl = el<HTMLTextAreaElement>('processListBlacklist');
-const processListWhitelistEl = el<HTMLTextAreaElement>('processListWhitelist');
 
 /** Состояние соединения, каким его показывает интерфейс. */
 type AppState = 'off' | 'connecting' | 'on';
@@ -168,7 +180,6 @@ let killSwitchStuckReported = false;
 
 // Favorites
 let favoriteLinks = new Set<string>();
-let customRules: CustomRule[] = [];
 
 // Search query for server filter
 let serverSearchQuery = '';
@@ -527,15 +538,6 @@ async function loadSubscriptions() {
     });
 }
 
-// translate достаёт подпись по ключу, который собирается на лету из
-// data-атрибута разметки (sortName, logWarn и подобные). Проверить такой ключ на
-// этапе компиляции нельзя, поэтому послабление типов признаётся здесь один раз,
-// а не приведением к any в каждой точке вызова. Неизвестный ключ возвращается
-// как есть — это заметно на экране и не роняет отрисовку.
-function translate(t: Translations, key: string): string {
-  return (t as unknown as Record<string, string>)[key] ?? key;
-}
-
 // applyLanguage touches a lot of nodes; these guarded helpers keep it readable and
 // tolerate elements that only exist in some states of the UI.
 // DOM helpers (setText, setTitle, setPlaceholder, setAria, escapeHtml) imported from ./modules/dom
@@ -675,59 +677,7 @@ function applyLanguage() {
     if (label) label.textContent = translate(t, `sort${mode.charAt(0).toUpperCase() + mode.slice(1)}`);
   });
 
-  el('routeSettingsTitle').textContent = t.routeSettings;
-  el('bypassRuLabel').textContent = t.bypassRuLabel;
-  el('splitTunnelingTitle').textContent = t.splitTunnelingTitle;
-  el('splitTunnelingDesc').innerHTML = t.splitTunnelingDesc.replace('chrome.exe', '<b>chrome.exe</b>');
-  
-  document.querySelectorAll<HTMLElement>('.process-tab').forEach(tab => {
-    const mode = tab.dataset.mode;
-    tab.textContent = mode === 'blacklist' ? t.blacklistTab : t.whitelistTab;
-  });
-  el<HTMLTextAreaElement>('processListBlacklist').placeholder = t.blacklistPlaceholder;
-  el<HTMLTextAreaElement>('processListWhitelist').placeholder = t.whitelistPlaceholder;
-  // Плейсхолдер у этих полей — пример формата, а не название, поэтому имя
-  // задаётся отдельной строкой.
-  setAria('processListBlacklist', t.blacklistAreaLabel);
-  setAria('processListWhitelist', t.whitelistAreaLabel);
-  setAria('newRuleAction', t.ruleActionLabel);
-  setAria('newRuleType', t.ruleTypeLabel);
-  setAria('customDnsInput', t.customDnsLabel);
-  // Плейсхолдер был зашит в разметку и мимо таблицы переводов: ключ для него
-  // существовал, но никто его не читал.
-  setPlaceholder('customDnsInput', t.dnsCustomPlaceholder);
-  setText('customDnsHint', t.dnsCustomHint);
-
-  const customRoutesTitle = optionalEl('customRoutesTitle');
-  if (customRoutesTitle) customRoutesTitle.textContent = t.customRoutesTitle;
-  const customRoutesDesc = optionalEl('customRoutesDesc');
-  if (customRoutesDesc) customRoutesDesc.textContent = t.customRoutesDesc;
-  const addCustomRuleBtn = optionalEl('addCustomRuleBtn');
-  if (addCustomRuleBtn) addCustomRuleBtn.textContent = t.addCustomRuleBtn;
-
-  const optActionDirect = optionalEl('optActionDirect');
-  if (optActionDirect) optActionDirect.textContent = t.actionDirectOption;
-  const optActionProxy = optionalEl('optActionProxy');
-  if (optActionProxy) optActionProxy.textContent = t.actionProxyOption;
-  const optActionBlock = optionalEl('optActionBlock');
-  if (optActionBlock) optActionBlock.textContent = t.actionBlockOption;
-  
-  const optTypeSuffix = optionalEl('optTypeSuffix');
-  if (optTypeSuffix) optTypeSuffix.textContent = t.typeSuffixOption;
-  const optTypeDomain = optionalEl('optTypeDomain');
-  if (optTypeDomain) optTypeDomain.textContent = t.typeDomainOption;
-  const optTypeKeyword = optionalEl('optTypeKeyword');
-  if (optTypeKeyword) optTypeKeyword.textContent = t.typeKeywordOption;
-  const optTypeIp = optionalEl('optTypeIp');
-  if (optTypeIp) optTypeIp.textContent = t.typeIpOption;
-  const optTypeProcess = optionalEl('optTypeProcess');
-  if (optTypeProcess) optTypeProcess.textContent = t.typeProcessOption;
-
-
-  const newRuleValue = optionalEl<HTMLInputElement>('newRuleValue');
-  if (newRuleValue) setFieldLabel('newRuleValue', t.ruleValuePlaceholder);
-
-  renderCustomRules();
+  applyRoutingLanguage(t);
 
   applyConnectionsLanguage(t);
   applyLogsLanguage(t);
@@ -738,86 +688,22 @@ function applyLanguage() {
   setText('trafficRowSession', t.trafficRowSession);
   setText('trafficCardTitle', t.speedMeterLabel);
 
-  setText('appearanceTitle', t.appearanceTitle);
-  setText('appearanceDesc', t.appearanceDesc);
-  setText('themeSchemeLabel', t.themeSchemeLabel);
-  setText('themeSchemeDark', t.themeSchemeDark);
-  setText('themeSchemeLight', t.themeSchemeLight);
-  setText('themeAccentLabel', t.themeAccentLabel);
-  setAria('themeAccentHex', t.themeAccentHexAria);
-  setText('themeBgLabel', t.themeBgLabel);
-  setText('themeStopsLabel', t.themeStopsLabel);
-  setText('themeAngleLabel', t.themeAngleLabel);
-  setText('themeModeSolid', t.themeModeSolid);
-  setText('themeModeLinear', t.themeModeLinear);
-  setText('themeModeRadial', t.themeModeRadial);
-  setText('themeStopAdd', t.themeStopAdd);
-  setText('themeStopRemove', t.themeStopRemove);
-  setText('themeResetBtnText', t.themeReset);
-  // Плитки и отчёт несут переведённый текст внутри, поэтому пересобираются
-  // целиком, а не подписываются по одному узлу.
-  renderThemePresets();
-  renderThemeControls();
-  renderThemeReport();
-
-  setText('transferTitle', t.transferTitle);
-  setText('transferDesc', t.transferDesc);
-  setText('exportSettingsBtnText', t.exportSettingsBtn);
-  setText('importSettingsBtnText', t.importSettingsBtn);
+  applySettingsLanguage(t);
 
   // Плашка Kill Switch: подпись зависит и от языка, и от состояния, поэтому
   // перечитываем состояние, а не подставляем строку вслепую.
   void refreshKillSwitchBadge();
   renderRulesPending();
 
-  el('appSettingsTitle').textContent = t.appSettingsTitle;
-  setText('networkSectionTitle', t.networkSectionTitle);
-  setText('networkSectionDesc', t.networkSectionDesc);
-  el('dnsServerLabel').textContent = t.dnsServerLabel;
-  query('#dnsSelect option[value="custom"]').textContent = t.placeholderDns;
-  el('tunModeLabel').textContent = t.tunModeLabel;
-  el('tunModeDesc').textContent = t.tunModeDesc;
-  el('systemProxyLabel').textContent = t.systemProxyLabel;
-  setText('systemIntegrationTitle', t.systemIntegrationTitle);
-  setText('systemIntegrationDesc', t.systemIntegrationDesc);
-  el('autoConnectLabel').textContent = t.autoConnectLabel;
-  el('autoUpdateSubsLabel').textContent = t.autoUpdateSubsLabel;
-  el('rememberServerLabel').textContent = t.rememberServerLabel;
-  el('openAtLoginLabel').textContent = t.openAtLoginLabel;
-  el('startMinimizedLabel').textContent = t.startMinimizedLabel;
-  el('globalHotkeysLabel').textContent = t.globalHotkeysLabel;
+  // System integration, network, hotkeys, security, and appearance labels handled by applySettingsLanguage(t)
   el('profilesTitle').textContent = t.profilesTitle;
   el('profilesDesc').textContent = t.profilesDesc;
   el('profilesEmpty').textContent = t.profilesEmpty;
   el('saveProfileBtnText').textContent = t.saveProfileBtn;
   el('profileIncludeServerLabel').textContent = t.profileIncludeServerLabel;
-  // Список профилей рисуется строками с подписями — перевести атрибуты по
-  // месту нельзя, проще перерисовать.
   renderProfiles();
-  el('globalHotkeysDesc').textContent = t.globalHotkeysDesc;
-  el('hotkeyToggleLabel').textContent = t.hotkeyToggleLabel;
-  el('hotkeyShowLabel').textContent = t.hotkeyShowLabel;
-  el('hotkeyHint').textContent = t.hotkeyHint;
-  el('securityTitle').textContent = t.securityTitle;
-  setText('securityDesc', t.securityDesc);
-  el('killSwitchLabel').textContent = t.killSwitchLabel;
-  el('killSwitchDesc').textContent = t.killSwitchDesc;
-  setText('killSwitchFailsafeNotice', t.killSwitchFailsafeNotice);
-  setText('transferSafeNotice', t.transferSafeNotice);
   updateInterceptionGuidance();
   void refreshKillSwitchStatus();
-  el('dnsLeakLabel').textContent = t.dnsLeakLabel;
-  el('ipv6LeakLabel').textContent = t.ipv6LeakLabel;
-  el('fakeDnsLabel').textContent = t.fakeDnsLabel;
-  el('fakeDnsDesc').textContent = t.fakeDnsDesc;
-  setText('verboseLoggingLabel', t.verboseLoggingLabel);
-  setText('verboseLoggingDesc', t.verboseLoggingDesc);
-  setText('tlsFragmentLabel', t.tlsFragmentLabel);
-  setText('tlsFragmentDesc', t.tlsFragmentDesc);
-  el('saveAppsBtn').textContent = t.saveAppsBtn;
-  el('appsStatus').textContent = t.statusDone;
-  const autoSaveText = optionalEl('settingsAutoSaveText');
-  if (autoSaveText) autoSaveText.textContent = t.statusSaved;
 
   // History tab. The cards themselves are rebuilt by renderHistoryTab() below,
   // which picks up the language on its own.
@@ -961,36 +847,7 @@ sortItems.forEach((item, index) => {
   });
 });
 
-// Split Tunneling
-const processTabs = document.querySelectorAll<HTMLElement>('.process-tab');
-const processModeHidden = el<HTMLInputElement>('processModeHidden');
-
-processTabs.forEach(tab => {
-  tab.addEventListener('click', (e) => {
-    processTabs.forEach(t => {
-      t.classList.remove('active');
-      t.setAttribute('aria-pressed', 'false');
-      t.style.background = 'transparent';
-      t.style.color = 'var(--text-main)';
-      t.style.fontWeight = 'normal';
-    });
-    const target = e.currentTarget as HTMLElement;
-    target.classList.add('active');
-    target.setAttribute('aria-pressed', 'true');
-    target.style.background = 'var(--accent-color)';
-    target.style.color = 'var(--on-accent)';
-    target.style.fontWeight = 'bold';
-    processModeHidden.value = target.getAttribute('data-mode') ?? 'blacklist';
-
-    if (processModeHidden.value === 'blacklist') {
-      processListBlacklistEl.style.display = 'block';
-      processListWhitelistEl.style.display = 'none';
-    } else {
-      processListBlacklistEl.style.display = 'none';
-      processListWhitelistEl.style.display = 'block';
-    }
-  });
-});
+// Split tunneling process tabs extracted to views/routing.view.ts
 
 // updateAppInterface перерисовывает интерфейс под состояние соединения.
 //
@@ -1241,14 +1098,11 @@ window.api.onStarted(() => {
   if (appState !== 'on') updateAppInterface('on');
   // Ядро собрало конфиг из текущих настроек — значит выбранный DNS теперь и
   // есть действующий.
-  appliedDns = currentDnsSetting();
+  setAppliedDns(currentDnsSetting());
   // Ядро поднялось с конфигом, собранным из текущих settings.json, — значит
   // отложенных правил больше нет. Снимается именно здесь, а не по клику на
   // «Применить сейчас»: до этого момента правило ещё не действует.
-  if (rulesPending) {
-    rulesPending = false;
-    renderRulesPending();
-  }
+  clearRulesPending();
 });
 
 
@@ -1909,7 +1763,7 @@ async function runDnsLeakTest() {
 
     // Сверять надо с тем DNS, который ядро использует сейчас, а не с тем, что
     // выбран в списке: настройка вступает в силу только при перезапуске ядра.
-    const expectedOwner = resolverOwners[appliedDns || currentDnsSetting()];
+    const expectedOwner = resolverOwners[getAppliedDns() || currentDnsSetting()];
     const seen = `${resolverGeo} ${resolverIp}`.toLowerCase();
 
     // Отображаем результат
@@ -2018,7 +1872,7 @@ function collectAndSaveSettings(showFeedback = true) {
   if (showFeedback) flashSettingsSaved();
   const settings: AppSettings = {
     language: currentLanguage,
-    dns: el<HTMLSelectElement>('dnsSelect').value === 'custom' ? el<HTMLInputElement>('customDnsInput').value : el<HTMLSelectElement>('dnsSelect').value,
+    dns: currentDnsSetting(),
     bypassRu: el<HTMLInputElement>('bypassRuCheckbox').checked,
     tunMode: el<HTMLInputElement>('tunModeCheckbox').checked,
     // Обязательно сохранять: на это поле рассчитывают и подключение из трея
@@ -2041,14 +1895,14 @@ function collectAndSaveSettings(showFeedback = true) {
     verboseLogging: el<HTMLInputElement>('verboseLoggingCheckbox').checked,
     tlsFragment: el<HTMLInputElement>('tlsFragmentCheckbox').checked,
     lastSelectedServer: activeServerLink,
-    processMode: processModeHidden.value as AppSettings['processMode'],
-    processListBlacklist: processListBlacklistEl.value.split('\n').map(s => s.trim()).filter(s => s.length > 0),
-    processListWhitelist: processListWhitelistEl.value.split('\n').map(s => s.trim()).filter(s => s.length > 0),
+    processMode: getProcessMode(),
+    processListBlacklist: getProcessListBlacklist(),
+    processListWhitelist: getProcessListWhitelist(),
     favoriteLinks: Array.from(favoriteLinks),
     profiles: profiles,
-    customRules: customRules,
+    customRules: getCustomRules(),
     connectionsView: getConnectionsView(),
-    theme: currentTheme
+    theme: getCurrentTheme()
   };
   return window.api.saveSettings(settings);
 }
@@ -2072,12 +1926,12 @@ function currentProfileSettings(): ProfileSettings {
     bypassRu: el<HTMLInputElement>('bypassRuCheckbox').checked,
     tunMode: el<HTMLInputElement>('tunModeCheckbox').checked,
     systemProxy: el<HTMLInputElement>('systemProxyCheckbox').checked,
-    processMode: processModeHidden.value as AppSettings['processMode'],
-    processListBlacklist: processListBlacklistEl.value.split('\n').map(s => s.trim()).filter(s => s.length > 0),
-    processListWhitelist: processListWhitelistEl.value.split('\n').map(s => s.trim()).filter(s => s.length > 0),
+    processMode: getProcessMode(),
+    processListBlacklist: getProcessListBlacklist(),
+    processListWhitelist: getProcessListWhitelist(),
     // Копия, а не ссылка: customRules правится на месте кнопкой «удалить», и
     // сохранённый профиль менялся бы вместе с текущими настройками.
-    customRules: customRules.map(r => ({ ...r })),
+    customRules: getCustomRules().map(r => ({ ...r })),
     killSwitch: el<HTMLInputElement>('killSwitchCheckbox').checked,
     dnsLeak: el<HTMLInputElement>('dnsLeakCheckbox').checked,
     ipv6Leak: el<HTMLInputElement>('ipv6LeakCheckbox').checked,
@@ -2098,13 +1952,10 @@ function applyProfileSettings(p: ProfileSettings): void {
   el<HTMLInputElement>('bypassRuCheckbox').checked = p.bypassRu;
   el<HTMLInputElement>('tunModeCheckbox').checked = p.tunMode;
   el<HTMLInputElement>('systemProxyCheckbox').checked = p.systemProxy;
-  processListBlacklistEl.value = p.processListBlacklist.join('\n');
-  processListWhitelistEl.value = p.processListWhitelist.join('\n');
-  processModeHidden.value = p.processMode;
-  const modeTab = document.querySelector<HTMLElement>(`.process-tab[data-mode="${p.processMode}"]`);
-  modeTab?.click();
-  customRules = p.customRules.map(r => ({ ...r }));
-  renderCustomRules();
+  setProcessListBlacklist(p.processListBlacklist);
+  setProcessListWhitelist(p.processListWhitelist);
+  setProcessMode(p.processMode);
+  setCustomRules(p.customRules.map(r => ({ ...r })));
   el<HTMLInputElement>('killSwitchCheckbox').checked = p.killSwitch;
   el<HTMLInputElement>('dnsLeakCheckbox').checked = p.dnsLeak;
   el<HTMLInputElement>('ipv6LeakCheckbox').checked = p.ipv6Leak;
@@ -2257,61 +2108,8 @@ el('saveAppsBtn').onclick = async () => {
 // поэтому смена сервера на подключённом VPN не меняет ничего до перезапуска.
 // Без этого сравнения пользователь выбирает другой DNS, жмёт «Сохранить», ждёт
 // — и видит прежний, ничем не отличимо от настройки, которая не работает.
-let appliedDns = '';
 
-/** Значение из настроек DNS в том виде, в каком его сохраняет collectAndSaveSettings. */
-function currentDnsSetting(): string {
-  const select = el<HTMLSelectElement>('dnsSelect');
-  if (select.value !== 'custom') return select.value;
-  return el<HTMLInputElement>('customDnsInput').value.trim();
-}
-
-/**
- * Обратная currentDnsSetting: раскладывает сохранённое значение по списку и
- * полю «свой сервер».
- *
- * Была частью загрузки настроек и понадобилась вторым местом — переключением
- * профиля. Скопировать её туда значило бы завести второе описание того, как
- * значение DNS ложится на интерфейс; при первом же изменении списка серверов
- * эти два описания разошлись бы.
- */
-/**
- * Показывает или прячет поле «свой DNS» вместе с его подсказкой.
- *
- * Владелец видимости обязан быть один. Раньше поле показывали два места —
- * обработчик выбора и setDnsSetting, — а подсказку разворачивал только первый.
- * У человека с уже сохранённым своим DNS поле было видно, а сообщение о
- * непригодном значении не появлялось никогда: ошибка всплывала при
- * «Подключиться», ровно так, как было до появления этой проверки.
- */
-function showCustomDnsField(custom: boolean): void {
-  const input = optionalEl<HTMLInputElement>('customDnsInput');
-  const hint = optionalEl('customDnsHint');
-  if (input) input.style.display = custom ? 'block' : 'none';
-  if (hint) hint.style.display = custom ? 'block' : 'none';
-}
-
-function setDnsSetting(value: string): void {
-  const select = optionalEl<HTMLSelectElement>('dnsSelect');
-  if (!select || value === '') return;
-
-  const known = Array.from(select.options).some(opt => opt.value === value);
-  const customInput = optionalEl<HTMLInputElement>('customDnsInput');
-
-  if (known) {
-    select.value = value;
-    showCustomDnsField(false);
-  } else {
-    select.value = 'custom';
-    if (customInput) customInput.value = value;
-    showCustomDnsField(true);
-    void checkCustomDns();
-  }
-  // Нативный список скрыт, на экране — своя стеклянная копия, и присваивание
-  // .value события change не порождает. Без этой строки подпись на кнопке
-  // осталась бы от прежнего выбора.
-  syncCustomSelectLabels('dnsSelect');
-}
+// DNS settings functions extracted to views/settings.view.ts
 
 
 // Управление окном
@@ -2580,6 +2378,29 @@ async function init() {
     initialView: 'grouped',
   });
 
+  initRoutingView({
+    getCurrentLanguage: () => currentLanguage,
+    isCoreActive: () => appState === 'on',
+    restartCore: () => restartCore(),
+    onSaveSettings: () => {
+      collectAndSaveSettings();
+    },
+  });
+
+  initSettingsView({
+    getCurrentLanguage: () => currentLanguage,
+    isCoreActive: () => appState === 'on',
+    onSaveSettings: () => collectAndSaveSettings(),
+    onMarkRulesPending: () => markRulesPending(),
+    onRefreshKillSwitch: () => {
+      void refreshKillSwitchStatus();
+      void refreshKillSwitchBadge();
+    },
+    onUpdateInterceptionGuidance: () => updateInterceptionGuidance(),
+    showAlert,
+    showConfirm,
+  });
+
   const settings = await window.api.getSettings();
   if (settings) {
     if (settings.language) currentLanguage = settings.language;
@@ -2611,7 +2432,7 @@ async function init() {
     if (settings.dns) setDnsSetting(settings.dns);
     // Снимок того, что уже действует: без него первое же «Сохранить» без
     // единого изменения DNS показало бы плашку об отложенных изменениях.
-    appliedDns = currentDnsSetting();
+    setAppliedDns(currentDnsSetting());
 
     el<HTMLInputElement>('tunModeCheckbox').checked = !!settings.tunMode;
     // По умолчанию включён — так же, как атрибут checked в index.html.
@@ -2640,14 +2461,9 @@ async function init() {
     updateInterceptionGuidance();
     void refreshKillSwitchStatus();
     
-    if (settings.processListBlacklist) processListBlacklistEl.value = settings.processListBlacklist.join('\n');
-    if (settings.processListWhitelist) processListWhitelistEl.value = settings.processListWhitelist.join('\n');
-    
-    if (settings.processMode) {
-      processModeHidden.value = settings.processMode;
-      const targetTab = document.querySelector<HTMLElement>(`.process-tab[data-mode="${settings.processMode}"]`);
-      if (targetTab) targetTab.click();
-    }
+    if (settings.processListBlacklist) setProcessListBlacklist(settings.processListBlacklist);
+    if (settings.processListWhitelist) setProcessListWhitelist(settings.processListWhitelist);
+    if (settings.processMode) setProcessMode(settings.processMode);
     
     // Не powerBtn.click(): автоподключение не должно вести к запросу UAC —
     // см. handleConnectFailure.
@@ -2666,9 +2482,8 @@ async function init() {
     setConnectionsView(settings.connectionsView === 'flat' ? 'flat' : 'grouped', false);
 
     if (settings.customRules) {
-      customRules = settings.customRules;
+      setCustomRules(settings.customRules);
     }
-    renderCustomRules();
   } else {
     applyLanguage();
   }
@@ -2727,155 +2542,7 @@ async function init() {
   void checkForUpdates();
 }
 
-// ── CUSTOM ROUTING RULES UI ──────────────────────────────────────────────────
-function renderCustomRules() {
-  const container = optionalEl('customRulesList');
-  if (!container) return;
-  container.innerHTML = '';
-  
-  if (customRules.length === 0) {
-    const emptyDiv = document.createElement('div');
-    emptyDiv.className = 'custom-rules-empty';
-    emptyDiv.textContent = translations[currentLanguage].customRulesEmpty;
-    container.appendChild(emptyDiv);
-    return;
-  }
-  
-  customRules.forEach((rule, idx) => {
-    const row = document.createElement('div');
-    row.className = 'custom-rule-row';
-    
-    const infoSpan = document.createElement('span');
-    infoSpan.className = 'custom-rule-info';
-    
-    const t = translations[currentLanguage];
-
-    let actionBadge = '';
-    if (rule.action === 'direct') actionBadge = `<span class="rule-action rule-action--direct">${iconSvg('arrowRight', 12)}<span>${escapeHtml(t.connActionDirect)}</span></span>`;
-    else if (rule.action === 'proxy') actionBadge = `<span class="rule-action rule-action--proxy">${iconSvg('shield', 12)}<span>${escapeHtml(t.connActionProxy)}</span></span>`;
-    else if (rule.action === 'block') actionBadge = `<span class="rule-action rule-action--block">${iconSvg('slash', 12)}<span>${escapeHtml(t.connActionBlock)}</span></span>`;
-
-    let typeName: string = rule.type;
-    if (rule.type === 'domain_suffix') typeName = t.ruleBadgeSuffix;
-    else if (rule.type === 'domain') typeName = t.ruleBadgeDomain;
-    else if (rule.type === 'domain_keyword') typeName = t.ruleBadgeKeyword;
-    else if (rule.type === 'ip_cidr') typeName = t.ruleBadgeIp;
-    else if (rule.type === 'process') typeName = t.ruleBadgeProcess;
-    
-    infoSpan.innerHTML = `${actionBadge} <span class="rule-type-badge">${escapeHtml(typeName)}</span> <code class="rule-value-mono">${escapeHtml(rule.value)}</code>`;
-    
-    const delBtn = document.createElement('button');
-    delBtn.type = 'button';
-    delBtn.className = 'btn-glass btn-icon-only rule-delete-btn';
-    delBtn.title = translations[currentLanguage].deleteBtn;
-    delBtn.setAttribute('aria-label', translations[currentLanguage].deleteBtn);
-    delBtn.innerHTML = iconSvg('trash', 14);
-    
-    delBtn.onclick = () => {
-      customRules.splice(idx, 1);
-      renderCustomRules();
-      collectAndSaveSettings();
-      markRulesPending();
-    };
-    
-    row.appendChild(infoSpan);
-    row.appendChild(delBtn);
-    container.appendChild(row);
-  });
-}
-
-const addCustomRuleBtn = optionalEl('addCustomRuleBtn');
-if (addCustomRuleBtn) {
-  addCustomRuleBtn.onclick = () => {
-    const action = el<HTMLSelectElement>('newRuleAction').value as CustomRule['action'];
-    const type = el<HTMLSelectElement>('newRuleType').value as CustomRule['type'];
-    const valInput = el<HTMLInputElement>('newRuleValue');
-    const value = valInput.value.trim();
-
-    if (!value) return;
-
-    upsertCustomRule({ action, type, value });
-    valInput.value = '';
-  };
-}
-
-// upsertCustomRule добавляет правило или переписывает действие у уже
-// существующего с тем же типом и значением.
-//
-// Дописывать вторым правилом нельзя: GenerateConfig выдаёт правила в порядке
-// массива, а sing-box берёт первое совпадение — два противоречащих правила на
-// один хост молча оставили бы работать старое. В таблице «Маршруты» это ещё
-// видно глазами, а при клике из списка соединений пользователь получил бы
-// кнопку, которая визуально ничего не делает.
-//
-// Возвращает то, что произошло, чтобы вызывающая сторона могла это показать.
-function upsertCustomRule(rule: CustomRule): 'added' | 'replaced' | 'unchanged' {
-  const idx = customRules.findIndex(r => r.type === rule.type && r.value === rule.value);
-  let outcome: 'added' | 'replaced' | 'unchanged';
-
-  if (idx >= 0 && customRules[idx].action === rule.action) {
-    outcome = 'unchanged';
-  } else if (idx >= 0) {
-    customRules[idx].action = rule.action;
-    outcome = 'replaced';
-  } else {
-    customRules.push(rule);
-    outcome = 'added';
-  }
-
-  if (outcome !== 'unchanged') {
-    renderCustomRules();
-    collectAndSaveSettings();
-    markRulesPending();
-  }
-  return outcome;
-}
-
-// ── Отложенное применение правил ─────────────────────────────────────────────
-//
-// Правило записывается в settings.json сразу, а действовать начинает только
-// после перезапуска ядра: конфиг sing-box генерируется один раз при старте.
-// Раньше об этом не сообщалось никак — правило добавлялось, ничего не менялось,
-// и выглядело это как сломанный интерфейс. Плашка объясняет разрыв и даёт
-// кнопку его закрыть.
-//
-// Флаг живёт только в рамках сессии интерфейса и намеренно не сохраняется: на
-// диске правило уже лежит, и после перезапуска приложения оно действует для
-// любого нового соединения — «отложенного» не остаётся.
-let rulesPending = false;
-
-function markRulesPending() {
-  rulesPending = true;
-  renderRulesPending();
-}
-
-function renderRulesPending() {
-  const t = translations[currentLanguage];
-  const connected = appState === 'on';
-
-  document.querySelectorAll<HTMLElement>('.rules-pending-bar').forEach(bar => {
-    bar.style.display = rulesPending ? 'flex' : 'none';
-    if (!rulesPending) return;
-
-    const text = bar.querySelector<HTMLElement>('.rules-pending-text');
-    if (text) text.textContent = connected ? t.rulesPendingText : t.rulesPendingOnNextConnect;
-
-    // Перезапускать нечего, пока ядро не запущено: правило и так подхватится
-    // при следующем подключении.
-    const apply = bar.querySelector<HTMLButtonElement>('.rules-pending-apply');
-    if (apply) {
-      apply.textContent = t.rulesApplyNow;
-      apply.style.display = connected ? 'inline-flex' : 'none';
-    }
-  });
-}
-
-document.querySelectorAll<HTMLButtonElement>('.rules-pending-apply').forEach(btn => {
-  // Флаг снимается не здесь, а в onStarted: пока ядро не поднялось с новым
-  // конфигом, правило по-прежнему не действует, и упавший перезапуск не должен
-  // выглядеть как применённый.
-  btn.onclick = () => restartCore();
-});
+// Custom routing rules and pending notification extracted to views/routing.view.ts
 
 // ── Экран «Соединения» ───────────────────────────────────────────────────────
 
@@ -3078,340 +2745,7 @@ function setSpeedMeterVisible(visible: boolean): void {
   }
 }
 
-// ── ВНЕШНИЙ ВИД ──────────────────────────────────────────────────────────────
-//
-// Выбор человека — акцент и фон; всё остальное выводит modules/theme.ts. Здесь
-// только связь этого выбора с полями и с сохранением.
-//
-// Предпросмотра как отдельного элемента нет намеренно: тема применяется к
-// живому приложению, и образец размером с ноготь показал бы меньше, чем экран,
-// на который человек и так смотрит.
-
-/** Тема, из которой собран текущий вид. Пишется только через setTheme. */
-function applyPendingTheme(spec: ThemeSpec): void {
-  currentTheme = spec;
-  applyTheme(spec);
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(spec));
-  } catch {
-    // Приватный режим или переполненное хранилище: тема применилась, а
-    // без вспышки при следующем запуске переживём — settings.json на месте.
-  }
-}
-
-// Цвет тянут за ползунком системного диалога, то есть событие input приходит
-// десятками в секунду. Применение стоит перерисовки всего окна, а запись в
-// settings.json — обращения к диску: первое привязано к кадру, второе ждёт
-// паузы.
-let themeFrame = 0;
-let themeSaveTimer: ReturnType<typeof setTimeout> | null = null;
-
-function setTheme(spec: ThemeSpec, options: { persist?: boolean; syncControls?: boolean } = {}): void {
-  const { persist = true, syncControls = true } = options;
-
-  currentTheme = spec;
-  cancelAnimationFrame(themeFrame);
-  themeFrame = requestAnimationFrame(() => applyPendingTheme(spec));
-
-  if (syncControls) renderThemeControls();
-  renderThemeReport();
-  markActivePreset();
-
-  if (!persist) return;
-  if (themeSaveTimer) clearTimeout(themeSaveTimer);
-  themeSaveTimer = setTimeout(() => {
-    themeSaveTimer = null;
-    void collectAndSaveSettings();
-  }, 500);
-}
-
-/** Крошечный градиент для плитки пресета — тот же, что уйдёт на фон. */
-function presetPreview(spec: ThemeSpec): { background: string; accent: string } {
-  const tokens = deriveTokens(spec);
-  return {
-    background: tokens['--bg-image'] === 'none' ? tokens['--bg-color'] : tokens['--bg-image'],
-    accent: `rgb(${tokens['--accent-rgb']})`,
-  };
-}
-
-function renderThemePresets(): void {
-  const host = optionalEl('themePresets');
-  if (!host) return;
-  const t = translations[currentLanguage];
-
-  host.textContent = '';
-  for (const preset of PRESETS) {
-    const preview = presetPreview(preset.spec);
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'theme-swatch';
-    button.dataset.preset = preset.id;
-    button.setAttribute('role', 'radio');
-    button.setAttribute('aria-checked', 'false');
-    button.style.background = preview.background;
-
-    const accent = document.createElement('span');
-    accent.className = 'theme-swatch-accent';
-    accent.style.background = preview.accent;
-    button.appendChild(accent);
-
-    const name = document.createElement('span');
-    name.className = 'theme-swatch-name';
-    name.textContent = translate(t, preset.labelKey as keyof Translations);
-    button.appendChild(name);
-
-    button.onclick = () => setTheme(structuredClone(preset.spec));
-    host.appendChild(button);
-  }
-
-  markActivePreset();
-}
-
-/**
- * Совпадают ли две темы.
- *
- * Сравнение по полям, а не по JSON.stringify: тема возвращается с диска через
- * Go, где она лежит в map[string]interface{}, а тот выкладывает ключи по
- * алфавиту. Строки не совпали бы никогда после первого же перезапуска, и
- * выбранный пресет переставал бы подсвечиваться.
- */
-function sameTheme(a: ThemeSpec, b: ThemeSpec): boolean {
-  const hex = (v: string) => v.trim().toLowerCase();
-  return (
-    a.scheme === b.scheme &&
-    hex(a.accent) === hex(b.accent) &&
-    a.bg.mode === b.bg.mode &&
-    a.bg.angle === b.bg.angle &&
-    a.bg.stops.length === b.bg.stops.length &&
-    a.bg.stops.every((stop, i) => hex(stop) === hex(b.bg.stops[i]))
-  );
-}
-
-/** Одна из плиток отмечена, только если тема совпадает с ней целиком. */
-function markActivePreset(): void {
-  const host = optionalEl('themePresets');
-  if (!host) return;
-  for (const button of Array.from(host.querySelectorAll<HTMLButtonElement>('.theme-swatch'))) {
-    const preset = PRESETS.find((p) => p.id === button.dataset.preset);
-    button.setAttribute('aria-checked', preset && sameTheme(preset.spec, currentTheme) ? 'true' : 'false');
-  }
-}
-
-/** Приводит поля в соответствие с текущей темой. */
-function renderThemeControls(): void {
-  const accentInput = optionalEl<HTMLInputElement>('themeAccentInput');
-  const accentHex = optionalEl<HTMLInputElement>('themeAccentHex');
-  if (accentInput) accentInput.value = currentTheme.accent;
-  if (accentHex && accentHex !== document.activeElement) accentHex.value = currentTheme.accent.toUpperCase();
-
-  // Селекторы по data-атрибуту, а не по классу .theme-mode: класс носят оба
-  // переключателя — и режим, и форма фона, — и общий селектор снимал бы
-  // отметку с одного, синхронизируя другой.
-  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('[data-scheme]'))) {
-    button.setAttribute('aria-checked', button.dataset.scheme === currentTheme.scheme ? 'true' : 'false');
-  }
-  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('[data-mode]'))) {
-    button.setAttribute('aria-checked', button.dataset.mode === currentTheme.bg.mode ? 'true' : 'false');
-  }
-
-  // Угол есть только у линейного градиента: у сплошного его нет вовсе, а у
-  // радиального направление задаёт не он.
-  const angleField = optionalEl('themeAngleField');
-  if (angleField) angleField.style.display = currentTheme.bg.mode === 'linear' ? 'flex' : 'none';
-  const angle = optionalEl<HTMLInputElement>('themeAngle');
-  if (angle) angle.value = String(currentTheme.bg.angle);
-  setText('themeAngleValue', `${currentTheme.bg.angle}°`);
-
-  renderThemeStops();
-
-  const add = optionalEl<HTMLButtonElement>('themeStopAdd');
-  const remove = optionalEl<HTMLButtonElement>('themeStopRemove');
-  // Один стоп — это уже сплошная заливка, три — предел: четвёртый цвет на
-  // ширине окна перестаёт читаться как переход и начинает читаться как полосы.
-  if (add) add.disabled = currentTheme.bg.stops.length >= 3 || currentTheme.bg.mode === 'solid';
-  if (remove) remove.disabled = currentTheme.bg.stops.length <= 1;
-}
-
-function renderThemeStops(): void {
-  const host = optionalEl('themeStops');
-  if (!host) return;
-  const t = translations[currentLanguage];
-
-  // Сплошной фон рисуется первым стопом; остальные поля прячутся, но из темы
-  // не пропадают — вернувшись к градиенту, человек находит свои цвета на месте.
-  const shown = currentTheme.bg.mode === 'solid' ? 1 : currentTheme.bg.stops.length;
-
-  host.textContent = '';
-  for (let i = 0; i < shown; i++) {
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.className = 'color-well';
-    input.value = currentTheme.bg.stops[i];
-    input.setAttribute('aria-label', translate(t, 'themeStopAria').replace('{n}', String(i + 1)));
-    input.oninput = () => {
-      const stops = [...currentTheme.bg.stops];
-      stops[i] = input.value;
-      // syncControls: false — перерисовка поля во время перетаскивания
-      // отобрала бы у него фокус и остановила бы сам жест.
-      setTheme({ ...currentTheme, bg: { ...currentTheme.bg, stops } }, { syncControls: false });
-    };
-    host.appendChild(input);
-  }
-}
-
-function renderThemeReport(): void {
-  const line = optionalEl('themeContrast');
-  if (!line) return;
-  const t = translations[currentLanguage];
-  const report = describeTheme(currentTheme);
-  const round = (v: number) => v.toFixed(2);
-
-  const parts = [
-    translate(t, report.passesAA ? 'themeContrastOk' : 'themeContrastLow')
-      .replace('{text}', round(report.textContrast))
-      .replace('{accent}', round(report.accentContrast))
-      .replace('{signal}', round(report.signalContrast)),
-  ];
-  if (report.backgroundAdjusted) {
-    parts.push(translate(t, report.scheme === 'dark' ? 'themeAdjustedBgDark' : 'themeAdjustedBgLight'));
-  }
-  if (report.accentAdjusted) {
-    parts.push(translate(t, 'themeAdjustedAccent').replace('{hex}', report.accentApplied.toUpperCase()));
-  }
-
-  line.textContent = parts.join(' ');
-  line.classList.toggle(
-    'theme-contrast--adjusted',
-    !report.passesAA || report.backgroundAdjusted || report.accentAdjusted,
-  );
-}
-
-{
-  const accentInput = optionalEl<HTMLInputElement>('themeAccentInput');
-  if (accentInput) {
-    accentInput.oninput = () => {
-      setTheme({ ...currentTheme, accent: accentInput.value }, { syncControls: false });
-      const hex = optionalEl<HTMLInputElement>('themeAccentHex');
-      if (hex) hex.value = accentInput.value.toUpperCase();
-    };
-  }
-
-  const accentHex = optionalEl<HTMLInputElement>('themeAccentHex');
-  if (accentHex) {
-    accentHex.oninput = () => {
-      const value = accentHex.value.trim();
-      // Пока набирают «#3», это ещё не цвет. Молчим до полного кода вместо
-      // того, чтобы мигать палитрой на каждом символе.
-      if (!/^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value)) return;
-      setTheme({ ...currentTheme, accent: value.startsWith('#') ? value : `#${value}` }, { syncControls: false });
-      const well = optionalEl<HTMLInputElement>('themeAccentInput');
-      if (well) well.value = currentTheme.accent;
-    };
-    // Ушли из поля с недописанным кодом — возвращаем в него то, что реально
-    // применено, а не оставляем обрывок.
-    accentHex.onblur = () => renderThemeControls();
-  }
-
-  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('[data-scheme]'))) {
-    button.onclick = () => {
-      setTheme({ ...currentTheme, scheme: button.dataset.scheme as Scheme });
-    };
-  }
-
-  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('[data-mode]'))) {
-    button.onclick = () => {
-      const mode = button.dataset.mode as BackgroundMode;
-      setTheme({ ...currentTheme, bg: { ...currentTheme.bg, mode } });
-    };
-  }
-
-  const angle = optionalEl<HTMLInputElement>('themeAngle');
-  if (angle) {
-    angle.oninput = () => {
-      setTheme(
-        { ...currentTheme, bg: { ...currentTheme.bg, angle: Number(angle.value) } },
-        { syncControls: false },
-      );
-      setText('themeAngleValue', `${angle.value}°`);
-    };
-  }
-
-  const add = optionalEl<HTMLButtonElement>('themeStopAdd');
-  if (add) {
-    add.onclick = () => {
-      const stops = [...currentTheme.bg.stops];
-      if (stops.length >= 3) return;
-      // Новый стоп — копия последнего: переход из цвета в самого себя не
-      // меняет картинку, поэтому человек видит ровно тот фон, что и до нажатия,
-      // и правит новый цвет осознанно, а не разгребает случайный.
-      stops.push(stops[stops.length - 1]);
-      setTheme({ ...currentTheme, bg: { ...currentTheme.bg, stops } });
-    };
-  }
-
-  const remove = optionalEl<HTMLButtonElement>('themeStopRemove');
-  if (remove) {
-    remove.onclick = () => {
-      const stops = currentTheme.bg.stops.slice(0, -1);
-      if (stops.length < 1) return;
-      setTheme({ ...currentTheme, bg: { ...currentTheme.bg, stops } });
-    };
-  }
-
-  const reset = optionalEl<HTMLButtonElement>('themeResetBtn');
-  if (reset) reset.onclick = () => setTheme(structuredClone(DEFAULT_THEME));
-}
-
-// ── ПЕРЕНОС НАСТРОЕК ─────────────────────────────────────────────────────────
-//
-// Экспортируется только открытая половина настроек: подписки и избранное — это
-// ссылки с учётными данными, они шифруются и привязаны к машине через DPAPI.
-// Отбор делает бэкенд, здесь только диалоги и уведомления.
-
-el('exportSettingsBtn').onclick = async () => {
-  const t = translations[currentLanguage];
-  try {
-    // Сначала сохраняем то, что человек мог наменять и не нажать «Сохранить
-    // всё»: иначе в файл уехало бы прошлое состояние, а на экране было бы
-    // текущее.
-    collectAndSaveSettings();
-    const path = await window.api.exportSettings();
-    if (!path) return; // диалог закрыли — это не ошибка
-    showAlert(t.alertDialogTitle, t.exportSettingsDone.replace('{path}', path), false, t);
-  } catch (e) {
-    console.error('exportSettings failed:', e);
-    showAlert(t.errorDialogTitle, `${t.exportSettingsFailed}: ${e}`, true, t);
-  }
-};
-
-el('importSettingsBtn').onclick = async () => {
-  const t = translations[currentLanguage];
-  if (!(await showConfirm(t.importSettingsConfirm))) return;
-  const btn = optionalEl<HTMLButtonElement>('importSettingsBtn');
-  const btnText = optionalEl('importSettingsBtnText');
-  const prevText = btnText ? btnText.textContent : '';
-  try {
-    if (btn) btn.disabled = true;
-    if (btnText) btnText.textContent = t.statusConnecting || '...';
-    const path = await window.api.importSettings();
-    if (!path) {
-      if (btn) btn.disabled = false;
-      if (btnText && prevText) btnText.textContent = prevText;
-      return;
-    }
-    await showAlert(t.alertDialogTitle, t.importSettingsDone, false, t);
-    // Перезагрузка окна вместо расстановки два десятка контролов вручную:
-    // разбор настроек в элементы интерфейса живёт в пути инициализации, и
-    // повторять его здесь значило бы завести вторую копию, которая разойдётся
-    // с первой. Ядро при этом не перезапускается — оно в Go.
-    window.location.reload();
-  } catch (e) {
-    if (btn) btn.disabled = false;
-    if (btnText && prevText) btnText.textContent = prevText;
-    console.error('importSettings failed:', e);
-    showAlert(t.errorDialogTitle, `${t.importSettingsFailed}: ${e}`, true, t);
-  }
-};
+// Theme editor, presets, and settings transfer extracted to views/settings.view.ts
 
 // ── KILL SWITCH: ВИДИМОСТЬ СОСТОЯНИЯ И ТЕЛЕМЕТРИЯ ────────────────────────────
 //
@@ -3832,88 +3166,7 @@ el('pingAllBtn').onclick = () => {
   updateCards();
 };
 
-el<HTMLSelectElement>('dnsSelect').onchange = (e) => {
-    const custom = (e.target as HTMLSelectElement).value === 'custom';
-    showCustomDnsField(custom);
-    if (custom) {
-      void checkCustomDns();
-    } else {
-      collectAndSaveSettings();
-      if (currentDnsSetting() !== appliedDns) markRulesPending();
-    }
-};
-
-// Проверка «своего DNS» на месте ввода.
-//
-// Раньше непригодное значение вскрывалось только при нажатии «Подключиться»,
-// ошибкой сборки конфига — пользователь успевал закрыть настройки и не понимал,
-// при чём тут DNS. Проверяет бэкенд тем же кодом, что собирает конфиг, поэтому
-// поле не может принять то, на чём подключение потом упадёт.
-//
-// Поле при этом не блокируется: настройку можно сохранить и починить позже.
-const DNS_CHECK_DEBOUNCE_MS = 400;
-let dnsCheckTimer: ReturnType<typeof setTimeout> | null = null;
-
-async function checkCustomDns(): Promise<void> {
-  const input = optionalEl<HTMLInputElement>('customDnsInput');
-  const hint = optionalEl('customDnsHint');
-  if (!input || !hint) return;
-
-  const t = translations[currentLanguage];
-  const value = input.value.trim();
-
-  // Пустое поле — ещё не ошибка, человек только начал печатать.
-  if (value === '') {
-    hint.textContent = t.dnsCustomHint;
-    hint.classList.remove('field-hint--invalid');
-    return;
-  }
-
-  let problem = '';
-  try {
-    problem = await window.api.validateDns(value);
-  } catch (e) {
-    console.error('validateDns failed:', e);
-    return;
-  }
-
-  hint.textContent = problem || t.dnsCustomHint;
-  hint.classList.toggle('field-hint--invalid', problem !== '');
-  if (!problem && value) {
-    collectAndSaveSettings();
-    if (currentDnsSetting() !== appliedDns) markRulesPending();
-  }
-}
-
-const customDnsInput = optionalEl<HTMLInputElement>('customDnsInput');
-if (customDnsInput) {
-  customDnsInput.addEventListener('input', () => {
-    if (dnsCheckTimer !== null) clearTimeout(dnsCheckTimer);
-    dnsCheckTimer = setTimeout(() => {
-      dnsCheckTimer = null;
-      void checkCustomDns();
-    }, DNS_CHECK_DEBOUNCE_MS);
-  });
-}
-
-el<HTMLInputElement>('tunModeCheckbox').onchange = async (e) => {
-  updateInterceptionGuidance();
-  if ((e.target as HTMLInputElement).checked) {
-    const isAdmin = await window.api.checkAdmin();
-    if (!isAdmin) {
-      // Save settings with tunMode: true first, so the elevated instance loads it checked
-      await collectAndSaveSettings();
-      window.api.requestAdmin();
-    } else {
-      // Auto-save on checking if we are already admin
-      collectAndSaveSettings();
-    }
-  } else {
-    // Auto-save on unchecking
-    collectAndSaveSettings();
-  }
-};
-
+// DNS controls and TUN checkbox handled by views/settings.view.ts
 // Wails rejects a bound call with the text of the Go error, sometimes wrapped
 // in an Error and sometimes as a bare string. The backend already translates
 // the message, so it goes straight to the user.
@@ -4023,81 +3276,7 @@ el('updateSubBtn').onclick = async () => {
   el('updateSubBtn').textContent = originalText;
 };
 
-// --- Вспомогательная функция дебаунса для автосохранения ---
-function debounce<A extends unknown[]>(func: (...args: A) => void, wait: number) {
-  let timeout: ReturnType<typeof setTimeout>;
-  return function executedFunction(...args: A) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}
-
-// --- Автосохранение при вводе в текстовые поля на лету ---
-el<HTMLInputElement>('bypassRuCheckbox').onchange = () => {
-  collectAndSaveSettings();
-  // Галка попадает в конфиг только при запуске ядра, ровно как кастомные
-  // правила. Раньше об этом говорила кнопка «Сохранить маршруты» — теперь
-  // говорит та же плашка, что и у правил, на этой же вкладке.
-  markRulesPending();
-};
-
-el<HTMLInputElement>('systemProxyCheckbox').onchange = () => {
-  updateInterceptionGuidance();
-  collectAndSaveSettings();
-};
-
-processListBlacklistEl.oninput = debounce(() => {
-  collectAndSaveSettings();
-}, 500);
-
-processListWhitelistEl.oninput = debounce(() => {
-  collectAndSaveSettings();
-}, 500);
-
-// --- Автосохранение настроек приложения на лету ---
-const autoSaveGeneralCheckboxes = [
-  'autoConnectCheckbox',
-  'autoUpdateSubsCheckbox',
-  'rememberServerCheckbox',
-  'openAtLoginCheckbox',
-  'startMinimizedCheckbox',
-];
-
-autoSaveGeneralCheckboxes.forEach((id) => {
-  const checkbox = optionalEl<HTMLInputElement>(id);
-  if (checkbox) {
-    checkbox.onchange = () => {
-      collectAndSaveSettings();
-    };
-  }
-});
-
-const autoSaveSecurityCheckboxes = [
-  'killSwitchCheckbox',
-  'dnsLeakCheckbox',
-  'ipv6LeakCheckbox',
-  'fakeDnsCheckbox',
-  'verboseLoggingCheckbox',
-  'tlsFragmentCheckbox',
-];
-
-autoSaveSecurityCheckboxes.forEach((id) => {
-  const checkbox = optionalEl<HTMLInputElement>(id);
-  if (checkbox) {
-    checkbox.onchange = () => {
-      collectAndSaveSettings();
-      if (id === 'killSwitchCheckbox') {
-        void refreshKillSwitchStatus();
-        void refreshKillSwitchBadge();
-      }
-      if (appState === 'on') markRulesPending();
-    };
-  }
-});
+// Auto-save settings and checkbox listeners extracted to views/settings.view.ts
 
 // --- Специальный интерактивный виджет прокрутки ---
 let isDraggingScroll = false;
