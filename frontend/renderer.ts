@@ -30,6 +30,10 @@ import {
   loadSubscriptions,
 } from './views/subscriptions.view';
 import { initScrollWidget, updateCustomScroll } from './modules/scroll-widget';
+import { initTrafficView, setSpeedMeterVisible, applyTrafficLanguage } from './views/traffic.view';
+import { checkForUpdates } from './modules/updater';
+import { initHotkeys, syncHotkeysDisabled, applyGlobalHotkeys } from './modules/hotkeys';
+
 import { makeSelectCustom, syncCustomSelectLabels } from './modules/dom';
 import {
   DEFAULT_THEME,
@@ -237,164 +241,7 @@ navTabs.forEach((item, index) => {
   });
 });
 
-// ── Горячие клавиши приложения ───────────────────────────────────────────────
-//
-// Приложение живёт в трее и открывается ради одного действия, поэтому путь
-// «мышь до иконки в рейле» — самая частая трата движений, которая тут вообще
-// бывает. Ctrl+1..7 повторяют порядок иконок сверху вниз, тот же, что в
-// PRODUCT.md: Главная, Серверы, История, Маршруты, Соединения, Настройки, Логи.
-//
-// Ctrl, а не Alt: Alt в Windows принадлежит меню окна, а голые цифры отобрали
-// бы ввод у полей — в «Маршрутах» и «Настройках» их достаточно.
-//
-// Сочетания намеренно не перехватываются, когда:
-//   • открыт модальный диалог — он и есть весь интерфейс, пока висит;
-//   • фокус в поле ввода и нажато Ctrl+K — иначе из поиска нельзя было бы
-//     выделить всё; впрочем, Ctrl+K в полях Windows ничего не значит, поэтому
-//     ограничение снято, а вот Ctrl+Enter в textarea осмысленно и сохранён за
-//     полем;
-//   • нажат repeat — удержание не должно листать вкладки.
-function handleAppShortcut(e: KeyboardEvent): void {
-  if (!e.ctrlKey || e.altKey || e.metaKey || e.repeat) return;
-  if (isDialogOpen()) return;
-
-  // Ctrl+1..7 — вкладки в порядке рейла.
-  if (e.key >= '1' && e.key <= '7') {
-    const target = navTabs[Number(e.key) - 1];
-    if (!target) return;
-    e.preventDefault();
-    selectTab(target);
-    return;
-  }
-
-  const key = e.key.toLowerCase();
-
-  // Ctrl+K — поиск по серверам. Вкладка переключается заодно: искать сервер,
-  // находясь на «Логах», — это всё равно намерение уйти на «Серверы».
-  if (key === 'k') {
-    e.preventDefault();
-    const serversTab = navTabs.find(t => t.getAttribute('data-target') === 'view-servers');
-    if (serversTab) selectTab(serversTab);
-    const search = optionalEl<HTMLInputElement>('serverSearchInput');
-    search?.focus();
-    search?.select();
-    return;
-  }
-
-  // Ctrl+Enter — подключиться или отключиться. Через click(), а не вызовом
-  // startConnection: у кнопки на обработчике висит вся логика состояний, и
-  // второй вход в неё разошёлся бы с ней при первой же правке.
-  if (e.key === 'Enter') {
-    const active = document.activeElement;
-    // В многострочном поле Ctrl+Enter — привычный «применить», и отбирать его
-    // у «Маршрутов» ради подключения было бы обменом не в пользу пользователя.
-    if (active instanceof HTMLTextAreaElement) return;
-    e.preventDefault();
-    powerBtn.click();
-  }
-}
-
-document.addEventListener('keydown', handleAppShortcut);
-
-// ── Системные горячие клавиши ────────────────────────────────────────────────
-//
-// В отличие от сочетаний выше эти работают, когда окно закрыто и фокус в чужом
-// приложении, — ради того и заведены: приложение живёт в трее, и путь «найти
-// иконку и попасть по ней мышью» дороже самого подключения.
-//
-// Регистрирует их Windows, а не страница, поэтому включение может не удаться:
-// сочетание — общесистемный ресурс, и второму желающему отказывают. Отказ
-// показывается и галка снимается обратно. Стоящая, но не работающая галка —
-// худший из возможных исходов: человек будет уверен, что клавиши есть.
-function syncHotkeysDisabled(): void {
-  const checkbox = optionalEl<HTMLInputElement>('globalHotkeysCheckbox');
-  if (!checkbox) return;
-  const isEnabled = checkbox.checked;
-  const row = query('.hotkey-row');
-  const toggleInput = optionalEl<HTMLInputElement>('hotkeyToggleInput');
-  const showInput = optionalEl<HTMLInputElement>('hotkeyShowInput');
-  if (row) row.classList.toggle('hotkey-row--disabled', !isEnabled);
-  if (toggleInput) toggleInput.disabled = !isEnabled;
-  if (showInput) showInput.disabled = !isEnabled;
-}
-
-async function applyGlobalHotkeys(enable: boolean, announce: boolean): Promise<void> {
-  const failure = await window.api.setGlobalHotkeys(
-    enable,
-    el<HTMLInputElement>('hotkeyToggleInput').value,
-    el<HTMLInputElement>('hotkeyShowInput').value,
-  );
-  if (!failure) {
-    syncHotkeysDisabled();
-    return;
-  }
-
-  const t = translations[currentLanguage];
-  el<HTMLInputElement>('globalHotkeysCheckbox').checked = false;
-  syncHotkeysDisabled();
-  // При восстановлении настройки на старте показывать диалог поверх ещё не
-  // собранного интерфейса незачем — там достаточно снятой галки.
-  if (announce) {
-    showAlert(t.errorDialogTitle, t.globalHotkeysFailed.replace('{reason}', failure), false, t);
-  }
-  collectAndSaveSettings();
-}
-
-el<HTMLInputElement>('globalHotkeysCheckbox').addEventListener('change', (e) => {
-  syncHotkeysDisabled();
-  collectAndSaveSettings();
-  void applyGlobalHotkeys((e.target as HTMLInputElement).checked, true);
-});
-
-// Сочетание не печатают, его нажимают: поле ловит keydown и записывает то, что
-// было нажато. Голые модификаторы пропускаются — Ctrl сам по себе сочетанием не
-// является, а без них его не примет уже бэкенд.
-//
-// Проверять состав здесь второй раз незачем: parseHotkey в
-// backend/service/hotkey.go — та же проверка, и именно её ответ решает, будет
-// работать клавиша или нет. Своя копия правил разошлась бы с ней при первой же
-// правке.
-const modifierKeys = new Set(['Control', 'Shift', 'Alt', 'Meta']);
-
-function bindHotkeyInput(id: string) {
-  const input = el<HTMLInputElement>(id);
-  input.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (modifierKeys.has(e.key)) return;
-
-    const parts: string[] = [];
-    if (e.ctrlKey) parts.push('Ctrl');
-    if (e.shiftKey) parts.push('Shift');
-    if (e.altKey) parts.push('Alt');
-    if (e.metaKey) parts.push('Win');
-    // e.code, а не e.key: на кириллической раскладке e.key для той же клавиши
-    // придёт как «В», а RegisterHotKey адресуется физической клавишей.
-    const key = /^Key[A-Z]$/.test(e.code) ? e.code.slice(3)
-      : /^Digit[0-9]$/.test(e.code) ? e.code.slice(5)
-      : /^F([1-9]|1[0-2])$/.test(e.code) ? e.code
-      : '';
-    // preventDefault только здесь, когда сочетание принято. Раньше он стоял
-    // первой строкой обработчика, до разбора, и гасил в том числе Tab и
-    // Escape: клавиатурный пользователь входил в поле и не мог из него выйти
-    // ничем, кроме мыши. Это ловушка по WCAG 2.1.2, а продукт обязался
-    // держать AA.
-    if (!key) return;
-    e.preventDefault();
-
-    parts.push(key);
-    input.value = parts.join('+');
-    input.blur();
-    collectAndSaveSettings();
-    // Перерегистрация нужна сразу же — иначе останется работать прежнее
-    // сочетание, а в поле будет написано новое.
-    void applyGlobalHotkeys(el<HTMLInputElement>('globalHotkeysCheckbox').checked, true);
-  });
-}
-
-bindHotkeyInput('hotkeyToggleInput');
-bindHotkeyInput('hotkeyShowInput');
-
-window.api.onHotkeyToggleConnection(() => powerBtn.click());
-window.api.onHotkeyShowWindow(() => void window.api.bringToFront());
+// Keyboard shortcuts and global hotkeys extracted to modules/hotkeys.ts
 
 // Subscription panel and card rendering extracted to views/subscriptions.view.ts and views/servers.view.ts
 
@@ -482,11 +329,7 @@ function applyLanguage() {
   applyConnectionsLanguage(t);
   applyLogsLanguage(t);
 
-  setText('trafficColDown', t.speedDownLabel);
-  setText('trafficColUp', t.speedUpLabel);
-  setText('trafficRowNow', t.trafficRowNow);
-  setText('trafficRowSession', t.trafficRowSession);
-  setText('trafficCardTitle', t.speedMeterLabel);
+    applyTrafficLanguage(t);
 
   applySettingsLanguage(t);
 
@@ -1178,150 +1021,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') onWindowBackOnScreen();
 });
 
-function showUpdateModal(update: UpdateInfo): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
-    const overlay = el('updateModalOverlay');
-    const versionEl = el('updateModalVersion');
-    const changelogEl = el('updateModalChangelog');
-    const cancelBtn = el<HTMLButtonElement>('updateModalCancel');
-    const confirmBtn = el<HTMLButtonElement>('updateModalConfirm');
-    const progressSection = el('updateProgressSection');
-    const progressStatus = el('updateProgressStatus');
-    const progressPercent = el('updateProgressPercent');
-    const progressBar = el('updateProgressBar');
-    const actions = el('updateModalActions');
-    const t = translations[currentLanguage];
-
-    // Set text contents
-    versionEl.textContent = `v${update.version}`;
-    changelogEl.textContent = update.body || t.updateNoChangelog;
-
-    // Reset styles
-    progressSection.style.display = 'none';
-    // Заполнение задаётся масштабом, а не шириной: прогресс приходит частыми
-    // тиками, и каждая правка width пересчитывала бы раскладку.
-    progressBar.style.transform = 'scaleX(0)';
-    progressPercent.textContent = '0%';
-    overlay.querySelector('.update-modal-content')?.classList.remove('downloading');
-    progressStatus.textContent = t.updateProgressStatusDownloading;
-    progressStatus.style.color = 'var(--text-dim)';
-    
-    // Reset buttons visibility and states
-    actions.style.display = 'flex';
-    cancelBtn.style.display = 'block';
-    cancelBtn.disabled = false;
-    confirmBtn.style.display = 'block';
-    confirmBtn.disabled = false;
-    confirmBtn.textContent = t.updateModalConfirm;
-
-    overlay.style.display = 'flex';
-    // «Позже» — безопасный выбор, поэтому фокус приходит на него, а не на
-    // «Обновить сейчас»: случайный Enter не должен запускать установку.
-    const release = trapFocus(overlay, cancelBtn, () => cancelBtn.click());
-
-    cancelBtn.onclick = () => {
-      overlay.style.display = 'none';
-      release();
-      resolve(false);
-    };
-
-    confirmBtn.onclick = async () => {
-      // If we don't have downloadUrl for some reason (e.g. GitHub API didn't return a build), fall back to opening webpage
-      if (!update.downloadUrl) {
-        // Страницу релиза открываем, только если она вообще пришла в ответе:
-        // без downloadUrl и без url открывать нечего, но модалку всё равно надо
-        // закрыть, иначе она останется висеть на нерабочей кнопке.
-        if (update.url) window.api.openUpdateLink(update.url);
-        overlay.style.display = 'none';
-        release();
-        resolve(true);
-        return;
-      }
-
-      // Transition UI to download state
-      cancelBtn.style.display = 'none';
-      confirmBtn.disabled = true;
-      confirmBtn.textContent = t.updateDownloading;
-      progressSection.style.display = 'block';
-      // Иконка окна вращается только пока идёт загрузка — раньше она крутилась
-      // всё время, что окно открыто, в том числе пока оно просто спрашивает.
-      overlay.querySelector('.update-modal-content')?.classList.add('downloading');
-
-      const cleanupEvents: Array<() => void> = [];
-
-      const onProgress = (percent: number) => {
-        progressBar.style.transform = `scaleX(${percent / 100})`;
-        progressPercent.textContent = `${percent}%`;
-        // Ширина полосы — чисто визуальная величина; долю нужно сообщить и
-        // вспомогательной технологии.
-        progressBar.parentElement?.setAttribute('aria-valuenow', String(percent));
-      };
-
-      const onComplete = () => {
-        progressBar.style.transform = 'scaleX(1)';
-        progressPercent.textContent = '100%';
-        progressStatus.textContent = t.updateProgressStatusComplete;
-        progressStatus.style.color = 'var(--success)';
-
-        // Загрузка кончилась — вращение иконки больше ничего не означает.
-        overlay.querySelector('.update-modal-content')?.classList.remove('downloading');
-        progressBar.parentElement?.setAttribute('aria-valuenow', '100');
-        cleanupEvents.forEach(dereg => dereg());
-        setTimeout(() => {
-          overlay.style.display = 'none';
-          release();
-          resolve(true);
-        }, 1500);
-      };
-
-      const onError = (errMsg: string) => {
-        progressStatus.textContent = `${t.updateProgressStatusError}: ${errMsg}`;
-        progressStatus.style.color = 'var(--danger)';
-
-        // Загрузка оборвалась: крутящаяся иконка утверждала бы обратное.
-        overlay.querySelector('.update-modal-content')?.classList.remove('downloading');
-
-        // Show cancel button again to allow closing or retrying
-        cancelBtn.style.display = 'block';
-        cancelBtn.disabled = false;
-        confirmBtn.style.display = 'none';
-        
-        cleanupEvents.forEach(dereg => dereg());
-      };
-
-      // Subscribe to Wails events via our bridge api
-      const unsubProgress = window.api.onUpdateProgress(onProgress);
-      const unsubComplete = window.api.onUpdateComplete(onComplete);
-      const unsubError = window.api.onUpdateError(onError);
-      cleanupEvents.push(unsubProgress, unsubComplete, unsubError);
-
-      try {
-        // Trigger download process in background Go service
-        await window.api.downloadAndInstallUpdate(update.downloadUrl, update.signatureHex || "");
-      } catch (err) {
-        onError(errorText(err));
-      }
-    };
-  });
-}
-
-// checkForUpdates спрашивает бэкенд о новой версии и, если она есть, показывает
-// модальное окно.
-//
-// Запускается в фоне и намеренно НЕ ожидается инициализацией. Раньше init()
-// ждал и сам запрос (до ~10 секунд сетевых таймаутов: GitHub API плюс загрузка
-// подписи релиза), и закрытия модалки пользователем — а всё остальное, язык,
-// настройки, список серверов, история, автоподключение, стояло за ней в
-// очереди. Пользователь видел интерфейс на языке по умолчанию с пустым списком
-// серверов, пока не закроет окно обновления.
-async function checkForUpdates() {
-  try {
-    const update = await window.api.checkUpdates();
-    if (update && update.available) {
-      await showUpdateModal(update);
-    }
-  } catch (e) { console.error('Update check failed:', e); }
-}
+// Application updater extracted to modules/updater.ts
 
 // Поиск ссылки сервера в подписках по метаданным (для обратной совместимости)
 function findServerLink(_name: string, address: string, protocol: string) {
@@ -1493,6 +1193,25 @@ async function init() {
     showConfirm,
   });
 
+  initTrafficView();
+  initHotkeys({
+    getCurrentLanguage: () => currentLanguage,
+    onSelectTab: (index) => {
+      const target = navTabs[index];
+      if (target) selectTab(target);
+    },
+    onOpenServerSearch: () => {
+      const serversTab = navTabs.find((t) => t.getAttribute('data-target') === 'view-servers');
+      if (serversTab) selectTab(serversTab);
+      const search = optionalEl<HTMLInputElement>('serverSearchInput');
+      search?.focus();
+      search?.select();
+    },
+    onToggleConnection: () => powerBtn.click(),
+    onSaveSettings: () => collectAndSaveSettings(),
+    showAlert,
+  });
+
   initSubscriptionsView({
     getCurrentLanguage: () => currentLanguage,
     onUpdateCards: () => updateCards(),
@@ -1596,7 +1315,7 @@ async function init() {
 
   // Последним и без await: интерфейс уже полностью собран и переведён, а окно
   // обновления появится, когда придёт ответ от GitHub, ничего не задерживая.
-  void checkForUpdates();
+  void checkForUpdates(translations[currentLanguage]);
 }
 
 // Custom routing rules and pending notification extracted to views/routing.view.ts
@@ -1613,91 +1332,7 @@ let connectionsViewActive = false;
 // узлы и писал в них цифры. Данные приходят раз в секунду, пока ядро запущено
 // и окно видно; в трее событий нет вовсе — смотреть на них некому.
 
-/**
- * Разделяет скорость на число и единицу.
- *
- * Отдельно потому, что в разметке это два разных по кеглю элемента: единица
- * подчинена числу. Знак после запятой пропадает выше сотни — «128.4 MB/s»
- * длиннее полезного, а лишний разряд двигает строку.
- */
-function formatSpeedParts(bytesPerSec: number): { value: string; unit: string } {
-  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-  if (!bytesPerSec || bytesPerSec <= 0) return { value: '0', unit: units[1] };
-
-  const k = 1024;
-  const i = Math.min(Math.floor(Math.log(bytesPerSec) / Math.log(k)), units.length - 1);
-  const scaled = bytesPerSec / Math.pow(k, i);
-  return {
-    value: scaled >= 100 ? String(Math.round(scaled)) : scaled.toFixed(1),
-    unit: units[i],
-  };
-}
-
-/**
- * Разделяет объём на число и единицу — теми же правилами, что и скорость,
- * чтобы обе строки таблицы выглядели одинаково набранными.
- */
-function formatBytesParts(bytes: number): { value: string; unit: string } {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  if (!bytes || bytes <= 0) return { value: '0', unit: units[0] };
-
-  const k = 1024;
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), units.length - 1);
-  const scaled = bytes / Math.pow(k, i);
-  return {
-    value: scaled >= 100 || i === 0 ? String(Math.round(scaled)) : scaled.toFixed(1),
-    unit: units[i],
-  };
-}
-
-// Последнее записанное значение по каждой ячейке: цифры обновляются раз в
-// секунду, и переписывать узел, в котором ничего не изменилось, незачем — та же
-// бережность, что у таблицы соединений и журнала.
-const trafficLast: Record<string, string> = {};
-
-function writeTrafficCell(idBase: string, parts: { value: string; unit: string }): void {
-  if (trafficLast[idBase + 'v'] !== parts.value) {
-    trafficLast[idBase + 'v'] = parts.value;
-    setText(idBase + 'Value', parts.value);
-  }
-  if (trafficLast[idBase + 'u'] !== parts.unit) {
-    trafficLast[idBase + 'u'] = parts.unit;
-    setText(idBase + 'Unit', parts.unit);
-  }
-}
-
-window.api.onTraffic((stats) => {
-  writeTrafficCell('speedDown', formatSpeedParts(stats.down));
-  writeTrafficCell('speedUp', formatSpeedParts(stats.up));
-  // Итоги считает Go: пока окно в трее, события сюда не приходят, и сумма,
-  // накопленная на этой стороне, потеряла бы весь трафик за это время.
-  writeTrafficCell('totalDown', formatBytesParts(stats.totalDown));
-  writeTrafficCell('totalUp', formatBytesParts(stats.totalUp));
-});
-
-/**
- * Показывает индикатор только на подключённом туннеле.
- *
- * Видимостью управляет состояние, а не приход событий: в трее события не
- * приходят вовсе, и привязка к ним прятала бы индикатор у свёрнутого окна,
- * которое затем разворачивают.
- */
-function setSpeedMeterVisible(visible: boolean): void {
-  // Показывается и прячется карточка целиком, а не таблица внутри неё: иначе
-  // на отключённом туннеле в столбце оставалась бы пустая рамка с заголовком.
-  const card = optionalEl('trafficCard');
-  if (!card) return;
-  card.style.display = visible ? 'flex' : 'none';
-  if (!visible) {
-    // Следующее подключение должно начинаться с нулей, а не с цифр прошлой
-    // сессии, мелькнувших до первой выборки.
-    for (const key of Object.keys(trafficLast)) delete trafficLast[key];
-    writeTrafficCell('speedDown', formatSpeedParts(0));
-    writeTrafficCell('speedUp', formatSpeedParts(0));
-    writeTrafficCell('totalDown', formatBytesParts(0));
-    writeTrafficCell('totalUp', formatBytesParts(0));
-  }
-}
+// Speed and traffic meter extracted to views/traffic.view.ts
 
 // Theme editor, presets, and settings transfer extracted to views/settings.view.ts
 
