@@ -27,11 +27,11 @@ import (
 // currentVersion is the application version. Update this before each release.
 // It lives here rather than inline in CheckUpdates so preparing a release does
 // not depend on remembering to edit a string buried in a function body.
-const currentVersion = "1.9.2"
+const currentVersion = "1.9.3"
 
-// currentCodename is the official build/release code for v1.9.2: "NBX-192-SEC",
+// currentCodename is the official build/release code for v1.9.3: "NBX-193-FLOW",
 // representing architectural security hardening, zero-leak routing, and Win32/Linux security parity.
-const currentCodename = "NBX-192-SEC"
+const currentCodename = "NBX-193-FLOW"
 
 // maxUpdateSize caps an installer download. The real installer is a few tens of
 // megabytes; the limit only exists so a hostile or broken server cannot stream

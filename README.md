@@ -1,6 +1,6 @@
 # NeoBox
 
-> **Release:** v1.9.2 | **Build Code:** `NBX-192-SEC`  
+> **Release:** v1.9.3 | **Build Code:** `NBX-193-FLOW`  
 > Technical VPN and proxy client on sing-box core. Written in Go and Wails v2.
 
 [English](#english) | [Русский](#русский)
@@ -60,7 +60,7 @@ The `NBX-192-SEC` release hardens system security, process boundaries, and routi
 
 #### Windows (10 / 11, x64)
 
-* **Installer**: Download `NeoBox_Setup_v1.9.2.exe` from [GitHub Releases](https://github.com/Dvarais/NeoBox/releases) and execute.
+* **Installer**: Download `NeoBox_Setup_v1.9.3.exe` from [GitHub Releases](https://github.com/Dvarais/NeoBox/releases) and execute.
 * **Portable**: Download `NeoBox.exe`, place it in a writable directory, and run directly.
 * *Note*: TUN mode automatically triggers a standard UAC elevation prompt to load the bundled `wintun.dll` driver.
 
@@ -68,13 +68,13 @@ The `NBX-192-SEC` release hardens system security, process boundaries, and routi
 
 * **Arch Linux / Manjaro**:
   ```bash
-  sudo pacman -U neobox-1.9.2-1-x86_64.pkg.tar.zst
+  sudo pacman -U neobox-1.9.3-1-x86_64.pkg.tar.zst
   # or via AUR helper:
   yay -S neobox-bin
   ```
 * **Debian / Ubuntu**:
   ```bash
-  sudo dpkg -i neobox_1.9.2_amd64.deb
+  sudo dpkg -i neobox_1.9.3_amd64.deb
   sudo apt-get install -f
   ```
 
@@ -174,7 +174,7 @@ NeoBox: клиент прокси и VPN с открытым исходным к
 
 #### Windows (10 и 11, x64)
 
-* **Установщик**: скачайте файл `NeoBox_Setup_v1.9.2.exe` со страницы [GitHub Releases](https://github.com/Dvarais/NeoBox/releases) и запустите установку.
+* **Установщик**: скачайте файл `NeoBox_Setup_v1.9.3.exe` со страницы [GitHub Releases](https://github.com/Dvarais/NeoBox/releases) и запустите установку.
 * **Портативная версия**: скачайте `NeoBox.exe`, положите в отдельную папку и запускайте напрямую.
 * При включении TUN-режима появится стандартный запрос UAC Windows для загрузки драйвера `wintun.dll`.
 
@@ -182,13 +182,13 @@ NeoBox: клиент прокси и VPN с открытым исходным к
 
 * **Arch Linux / Manjaro**:
   ```bash
-  sudo pacman -U neobox-1.9.2-1-x86_64.pkg.tar.zst
+  sudo pacman -U neobox-1.9.3-1-x86_64.pkg.tar.zst
   # либо через AUR:
   yay -S neobox-bin
   ```
 * **Debian / Ubuntu**:
   ```bash
-  sudo dpkg -i neobox_1.9.2_amd64.deb
+  sudo dpkg -i neobox_1.9.3_amd64.deb
   sudo apt-get install -f
   ```
 
