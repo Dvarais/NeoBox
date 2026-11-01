@@ -133,11 +133,11 @@ func TestParseVersion(t *testing.T) {
 
 func TestAppVersionAndCodename(t *testing.T) {
 	s := &AppService{}
-	if got := s.GetAppVersion(); got != "1.9.3" {
-		t.Errorf("GetAppVersion() = %q, want %q", got, "1.9.3")
+	if got := s.GetAppVersion(); got != "1.9.4" {
+		t.Errorf("GetAppVersion() = %q, want %q", got, "1.9.4")
 	}
-	if got := s.GetAppCodename(); got != "NBX-193-FLOW" {
-		t.Errorf("GetAppCodename() = %q, want %q", got, "NBX-193-FLOW")
+	if got := s.GetAppCodename(); got != "NBX-194-GUARD" {
+		t.Errorf("GetAppCodename() = %q, want %q", got, "NBX-194-GUARD")
 	}
 }
 
