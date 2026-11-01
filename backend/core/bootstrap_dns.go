@@ -111,7 +111,7 @@ type resolveCacheEntry struct {
 }
 
 var (
-	resolveCacheMu sync.Mutex
+	resolveCacheMu sync.RWMutex
 	resolveCache   = map[string]resolveCacheEntry{}
 )
 
@@ -121,8 +121,8 @@ func normaliseHostKey(host string) string {
 
 func cachedHost(host string) []net.IP {
 	norm := normaliseHostKey(host)
-	resolveCacheMu.Lock()
-	defer resolveCacheMu.Unlock()
+	resolveCacheMu.RLock()
+	defer resolveCacheMu.RUnlock()
 	entry, ok := resolveCache[norm]
 	if !ok || time.Now().After(entry.expires) {
 		return nil
@@ -212,19 +212,30 @@ func dohRace(ctx context.Context, host string) []net.IP {
 	return nil
 }
 
-// dohLookup спрашивает у одного резолвера A и AAAA. Ошибки не возвращаются:
-// вызывающий на неудачу одного провайдера может только перейти к следующему, а
-// причина неудачи ни на что не влияет.
+// dohLookup queries both A and AAAA records from the given DoH provider in parallel.
+// Errors are discarded because a failure simply moves to the next provider or fallback.
 func dohLookup(ctx context.Context, provider int, host string) []net.IP {
+	qtypes := [2]string{"A", "AAAA"}
+	ch := make(chan []net.IP, len(qtypes))
+
+	for _, q := range qtypes {
+		go func(qtype string) {
+			attemptCtx, cancel := context.WithTimeout(ctx, dohAttemptTimeout)
+			defer cancel()
+			body, err := dohQuery(attemptCtx, provider, host, qtype)
+			if err != nil {
+				ch <- nil
+				return
+			}
+			ch <- parseDoHAnswer(body)
+		}(q)
+	}
+
 	var ips []net.IP
-	for _, qtype := range []string{"A", "AAAA"} {
-		attemptCtx, cancel := context.WithTimeout(ctx, dohAttemptTimeout)
-		body, err := dohQuery(attemptCtx, provider, host, qtype)
-		cancel()
-		if err != nil {
-			continue
+	for range qtypes {
+		if res := <-ch; len(res) > 0 {
+			ips = append(ips, res...)
 		}
-		ips = append(ips, parseDoHAnswer(body)...)
 	}
 	return ips
 }
@@ -253,25 +264,29 @@ func dohQuery(ctx context.Context, provider int, host, qtype string) ([]byte, er
 	return io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 }
 
+type dohAnswerItem struct {
+	Type int    `json:"type"`
+	Data string `json:"data"`
+}
+
+type dohResponse struct {
+	Status int             `json:"Status"`
+	Answer []dohAnswerItem `json:"Answer"`
+}
+
 // parseDoHAnswer достаёт адреса из JSON-ответа DoH.
 //
 // CNAME и прочие записи в Answer идут вперемешку с адресными, поэтому отбор
 // идёт по типу, а не по позиции: net.ParseIP на имени вернул бы nil, но полагаться
 // на это значило бы принимать за адрес всё, что на него похоже.
 func parseDoHAnswer(body []byte) []net.IP {
-	var parsed struct {
-		Status int `json:"Status"`
-		Answer []struct {
-			Type int    `json:"type"`
-			Data string `json:"data"`
-		} `json:"Answer"`
-	}
+	var parsed dohResponse
 	if err := json.Unmarshal(body, &parsed); err != nil || parsed.Status != 0 {
 		return nil
 	}
 	var ips []net.IP
 	for _, answer := range parsed.Answer {
-		if answer.Type != 1 && answer.Type != 28 { // A, AAAA
+		if answer.Type != 1 && answer.Type != 28 { // A (1), AAAA (28)
 			continue
 		}
 		if ip := net.ParseIP(answer.Data); ip != nil {

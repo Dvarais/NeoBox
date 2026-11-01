@@ -3,13 +3,12 @@ package core
 import (
 	"NeoBox/backend/i18n"
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
+	randv2 "math/rand/v2"
 	"net"
 	"net/http"
 	"net/netip"
@@ -19,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -45,12 +45,7 @@ const subscriptionClientUA = "v2rayN/6.45"
 
 // getRandomUserAgent returns a random browser User-Agent string from the pool.
 func getRandomUserAgent() string {
-	idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(realisticUserAgents))))
-	if err != nil {
-		// Fallback to first entry if crypto/rand fails (extremely unlikely)
-		return realisticUserAgents[0]
-	}
-	return realisticUserAgents[idx.Int64()]
+	return realisticUserAgents[randv2.IntN(len(realisticUserAgents))]
 }
 
 // GetRandomUserAgent returns a random browser User-Agent string from the pool.
@@ -137,7 +132,7 @@ func isDoHHostname(value string) bool {
 	if value == "" || strings.ContainsAny(value, " \t/\\?#@:[]") {
 		return false
 	}
-	if !strings.Contains(value, ".") {
+	if !strings.Contains(value, ".") || strings.Contains(value, "..") || strings.HasPrefix(value, ".") || strings.HasSuffix(value, ".") {
 		return false
 	}
 	if _, err := netip.ParseAddr(value); err == nil {
@@ -327,6 +322,12 @@ func resolveRemoteDNSHost(ctx context.Context, remote map[string]interface{}) {
 			return
 		}
 	}
+	// Fallback to IPv6 if no IPv4 is resolved
+	if len(ips) > 0 {
+		remote["server"] = ips[0].String()
+		delete(remote, "domain_resolver")
+		return
+	}
 }
 
 // Settings represents the NeoBox application settings.
@@ -379,20 +380,33 @@ func boolDefault(b *bool, def bool) bool {
 	return *b
 }
 
+var base64Encodings = []*base64.Encoding{
+	base64.StdEncoding,
+	base64.URLEncoding,
+	base64.RawStdEncoding,
+	base64.RawURLEncoding,
+}
+
 // decodeBase64Any decodes a base64 payload written in any of the four common
 // spellings: the standard or the URL-safe alphabet, padded or not. Clients
 // disagree on which they emit and a subscription is not worth losing over it.
 func decodeBase64Any(payload string) ([]byte, error) {
-	padded := strings.TrimSpace(payload)
-	if len(padded)%4 != 0 {
-		padded += strings.Repeat("=", 4-(len(padded)%4))
+	clean := strings.TrimSpace(payload)
+	for _, enc := range base64Encodings {
+		if decoded, err := enc.DecodeString(clean); err == nil {
+			return decoded, nil
+		}
 	}
-
-	decoded, err := base64.StdEncoding.DecodeString(padded)
-	if err == nil {
-		return decoded, nil
+	if rem := len(clean) % 4; rem != 0 {
+		padded := clean + strings.Repeat("=", 4-rem)
+		if decoded, err := base64.StdEncoding.DecodeString(padded); err == nil {
+			return decoded, nil
+		}
+		if decoded, err := base64.URLEncoding.DecodeString(padded); err == nil {
+			return decoded, nil
+		}
 	}
-	return base64.URLEncoding.DecodeString(padded)
+	return nil, errors.New("illegal base64 data")
 }
 
 // unescapeOrKeep percent-decodes a URL component, leaving it untouched when it
@@ -551,6 +565,12 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 
 	switch protocol {
 	case "vless", "trojan":
+		if u.Hostname() == "" {
+			return nil, fmt.Errorf("invalid %s link: missing server address", protocol)
+		}
+		if u.User == nil || u.User.Username() == "" {
+			return nil, fmt.Errorf("invalid %s link: missing user credentials", protocol)
+		}
 		portInt, _ := strconv.Atoi(u.Port())
 		if portInt == 0 {
 			portInt = 443
@@ -907,6 +927,12 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 		return outbound, nil
 
 	case "tuic":
+		if u.Hostname() == "" {
+			return nil, errors.New("invalid tuic link: missing server address")
+		}
+		if u.User == nil || u.User.Username() == "" {
+			return nil, errors.New("invalid tuic link: missing user credentials")
+		}
 		portInt, _ := strconv.Atoi(u.Port())
 		if portInt == 0 {
 			portInt = 443
@@ -914,11 +940,9 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 		outbound["server"] = u.Hostname()
 		outbound["server_port"] = portInt
 
-		if u.User != nil {
-			outbound["uuid"] = u.User.Username()
-			p, _ := u.User.Password()
-			outbound["password"] = p
-		}
+		outbound["uuid"] = u.User.Username()
+		p, _ := u.User.Password()
+		outbound["password"] = p
 
 		params := u.Query()
 		cc := params.Get("congestion_control")
@@ -947,6 +971,12 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 		return outbound, nil
 
 	case "hysteria2", "hy2":
+		if u.Hostname() == "" {
+			return nil, errors.New("invalid hysteria2 link: missing server address")
+		}
+		if u.User == nil || u.User.Username() == "" {
+			return nil, errors.New("invalid hysteria2 link: missing auth password")
+		}
 		portInt, _ := strconv.Atoi(u.Port())
 		if portInt == 0 {
 			portInt = 443
@@ -954,10 +984,7 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 		outbound["type"] = "hysteria2"
 		outbound["server"] = u.Hostname()
 		outbound["server_port"] = portInt
-
-		if u.User != nil {
-			outbound["password"] = u.User.Username()
-		}
+		outbound["password"] = u.User.Username()
 
 		params := u.Query()
 
@@ -1146,6 +1173,12 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 		return outbound, nil
 
 	case "wireguard":
+		if u.Hostname() == "" {
+			return nil, errors.New("invalid wireguard link: missing server address")
+		}
+		if u.User == nil || u.User.Username() == "" {
+			return nil, errors.New("invalid wireguard link: missing private key")
+		}
 		// wireguard://PRIVATE_KEY@host:port?publickey=…&address=172.16.0.2/32&…
 		// which is the shape v2rayN and NekoBox write. The private key is
 		// base64 and can contain "/", so it travels percent-escaped in the
@@ -1358,34 +1391,69 @@ func GenerateConfigWithCandidates(candidates []map[string]interface{}, outbound 
 		workOutbound["tls"] = workTLS
 	}
 	wgPeer := copyFirstWireGuardPeer(workOutbound)
-	if net.ParseIP(serverDomain) == nil && serverDomain != "" {
-		// Через ResolveHost, а не через системный резолвер: обычный DNS на пути к
-		// серверу перехватывается провайдером, и подменённый адрес выглядел бы
-		// потом как «сервер не отвечает». За ResolveHost теперь два DoH-резолвера
-		// разом и системный как откат, если молчат оба.
-		ips, err := ResolveHost(resolveCtx, serverDomain)
-		if err == nil && len(ips) > 0 {
-			resolved := false
-			for _, ip := range ips {
-				if ip4 := ip.To4(); ip4 != nil {
-					if wgPeer != nil {
-						wgPeer["address"] = ip4.String()
-					} else {
-						workOutbound["server"] = ip4.String()
-					}
-					resolved = true
-					break
-				}
+
+	// Collect all unique domains across active outbound and candidates to resolve concurrently
+	var domainsToResolve []string
+	seenDomains := make(map[string]bool)
+	if serverDomain != "" && net.ParseIP(serverDomain) == nil {
+		domainsToResolve = append(domainsToResolve, serverDomain)
+		seenDomains[serverDomain] = true
+	}
+	if useSelector {
+		for _, cand := range candidates {
+			if cand == nil {
+				continue
 			}
-			if !resolved {
-				for _, ip := range ips {
-					if wgPeer != nil {
-						wgPeer["address"] = ip.String()
-					} else {
-						workOutbound["server"] = ip.String()
-					}
-					break
+			d, _ := ServerEndpoint(cand)
+			d = strings.Trim(d, "[]")
+			if d != "" && net.ParseIP(d) == nil && !seenDomains[d] {
+				domainsToResolve = append(domainsToResolve, d)
+				seenDomains[d] = true
+			}
+		}
+	}
+
+	resolvedIPs := make(map[string][]net.IP, len(domainsToResolve))
+	if len(domainsToResolve) > 0 {
+		var resolveMu sync.Mutex
+		var wg sync.WaitGroup
+		for _, domain := range domainsToResolve {
+			wg.Add(1)
+			go func(dom string) {
+				defer wg.Done()
+				// Через ResolveHost, а не через системный резолвер: обычный DNS на пути к
+				// серверу перехватывается провайдером, и подменённый адрес выглядел бы
+				// потом как «сервер не отвечает». За ResolveHost теперь два DoH-резолвера
+				// разом и системный как откат, если молчат оба.
+				ips, err := ResolveHost(resolveCtx, dom)
+				if err == nil && len(ips) > 0 {
+					resolveMu.Lock()
+					resolvedIPs[dom] = ips
+					resolveMu.Unlock()
 				}
+			}(domain)
+		}
+		wg.Wait()
+	}
+
+	pickBestIP := func(ips []net.IP) string {
+		for _, ip := range ips {
+			if ip4 := ip.To4(); ip4 != nil {
+				return ip4.String()
+			}
+		}
+		if len(ips) > 0 {
+			return ips[0].String()
+		}
+		return ""
+	}
+
+	if ips, ok := resolvedIPs[serverDomain]; ok {
+		if best := pickBestIP(ips); best != "" {
+			if wgPeer != nil {
+				wgPeer["address"] = best
+			} else {
+				workOutbound["server"] = best
 			}
 		}
 	}
@@ -1452,12 +1520,9 @@ func GenerateConfigWithCandidates(candidates []map[string]interface{}, outbound 
 			cDomain = strings.Trim(cDomain, "[]")
 			if cDomain != "" && net.ParseIP(cDomain) == nil {
 				allServerDomains[cDomain] = true
-				if ips, err := ResolveHost(resolveCtx, cDomain); err == nil && len(ips) > 0 {
-					for _, ip := range ips {
-						if ip4 := ip.To4(); ip4 != nil {
-							wCand["server"] = ip4.String()
-							break
-						}
+				if ips, ok := resolvedIPs[cDomain]; ok {
+					if best := pickBestIP(ips); best != "" {
+						wCand["server"] = best
 					}
 				}
 			}
@@ -1674,25 +1739,18 @@ func GenerateConfigWithCandidates(candidates []map[string]interface{}, outbound 
 	}
 
 	// 4. Final Config Structure
+	domains := []string{"localhost", "wails.localhost"}
+	seenDNSEntry := map[string]bool{"localhost": true, "wails.localhost": true}
+	for _, d := range serverDomainList {
+		if !seenDNSEntry[d] {
+			seenDNSEntry[d] = true
+			domains = append(domains, d)
+		}
+	}
 	firstDNSRule := map[string]interface{}{
 		"domain_suffix": []string{".local", ".localhost"},
-		"domain":        []string{"localhost", "wails.localhost"},
+		"domain":        domains,
 		"server":        "dns-direct",
-	}
-	if domains, ok := firstDNSRule["domain"].([]string); ok {
-		for _, d := range serverDomainList {
-			found := false
-			for _, existing := range domains {
-				if existing == d {
-					found = true
-					break
-				}
-			}
-			if !found {
-				domains = append(domains, d)
-			}
-		}
-		firstDNSRule["domain"] = domains
 	}
 	dnsRules := []map[string]interface{}{firstDNSRule}
 	for _, ipStr := range directIPList {
@@ -1989,13 +2047,12 @@ var restrictedCIDRs = []string{
 	"2002::/16",          // 6to4 prefix (RFC 3056)
 }
 
-var restrictedIPNets []*net.IPNet
+var restrictedPrefixes []netip.Prefix
 
 func init() {
 	for _, cidr := range restrictedCIDRs {
-		_, ipNet, err := net.ParseCIDR(cidr)
-		if err == nil && ipNet != nil {
-			restrictedIPNets = append(restrictedIPNets, ipNet)
+		if prefix, err := netip.ParsePrefix(cidr); err == nil {
+			restrictedPrefixes = append(restrictedPrefixes, prefix)
 		}
 	}
 }
@@ -2007,14 +2064,20 @@ func IsPublicIP(ip net.IP) bool {
 	if ip == nil {
 		return false
 	}
-	// [INTERNET SEARCH PATTERN]
-	// Unmap IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1 -> 127.0.0.1)
-	// to prevent bypasses of IPv4 subnet restrictions.
-	if v4 := ip.To4(); v4 != nil {
-		ip = v4
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok || !addr.IsValid() {
+		return false
 	}
-	for _, subnet := range restrictedIPNets {
-		if subnet.Contains(ip) {
+	addr = addr.Unmap()
+
+	if addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() ||
+		addr.IsLinkLocalMulticast() || addr.IsInterfaceLocalMulticast() ||
+		addr.IsMulticast() || addr.IsUnspecified() {
+		return false
+	}
+
+	for _, prefix := range restrictedPrefixes {
+		if prefix.Contains(addr) {
 			return false
 		}
 	}
@@ -2251,7 +2314,7 @@ func FetchSubscriptionPayloadContext(ctx context.Context, subURL string) (*Subsc
 		Control: func(network, address string, c syscall.RawConn) error {
 			host, _, err := net.SplitHostPort(address)
 			if err != nil {
-				return fmt.Errorf("ssrf guard: invalid socket address %q: %w", address, err)
+				host = address
 			}
 			ip := net.ParseIP(host)
 			if ip == nil {
@@ -2291,6 +2354,13 @@ func FetchSubscriptionPayloadContext(ctx context.Context, subURL string) (*Subsc
 			TLSHandshakeTimeout: 10 * time.Second,
 		},
 	}})
+	defer func() {
+		for _, t := range transports {
+			if tr, ok := t.client.Transport.(*http.Transport); ok {
+				tr.CloseIdleConnections()
+			}
+		}
+	}()
 
 	// Each transport asks with a browser User-Agent first. Only when the host
 	// answers with an HTML page or nothing at all — the signature of a panel

@@ -49,10 +49,11 @@ func SuggestRuleTarget(host, destinationIP string) (ruleType, ruleValue string, 
 	if !isRoutableDestination(addr) {
 		return "", "", false
 	}
+	bits := 128
 	if addr.Is4() {
-		return "ip_cidr", addr.String() + "/32", true
+		bits = 32
 	}
-	return "ip_cidr", addr.String() + "/128", true
+	return "ip_cidr", netip.PrefixFrom(addr, bits).String(), true
 }
 
 // NormaliseProcessName cleans an executable name for use as the Value of a
@@ -85,6 +86,11 @@ func NormaliseProcessName(process string) (string, bool) {
 	if strings.ContainsAny(name, "*?\"<>|:") {
 		return "", false
 	}
+	for _, r := range name {
+		if r < 32 {
+			return "", false
+		}
+	}
 	return name, true
 }
 
@@ -108,7 +114,8 @@ func normaliseHost(host string) string {
 	}
 	// A single label is not a routable domain — "localhost", a NetBIOS name, a
 	// stray "*". Requiring a dot also throws out most malformed sniffs for free.
-	if !strings.Contains(h, ".") {
+	// Consecutive dots ".." are also invalid in DNS names.
+	if !strings.Contains(h, ".") || strings.Contains(h, "..") {
 		return ""
 	}
 	// A dotted string that parses as an address is an IP literal, not a domain,

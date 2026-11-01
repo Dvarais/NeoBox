@@ -2,8 +2,11 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	box "github.com/sagernet/sing-box"
@@ -30,6 +33,7 @@ type CoreManager struct {
 	instance     BoxInstance
 	cancel       context.CancelFunc
 	closeTimeout time.Duration
+	running      atomic.Bool
 }
 
 // NewCoreManager creates a new instance of CoreManager.
@@ -45,7 +49,6 @@ func (m *CoreManager) SetCloseTimeout(d time.Duration) {
 	defer m.mu.Unlock()
 	m.closeTimeout = d
 }
-
 
 // closeInstanceWithTimeout closes a BoxInstance asynchronously within a deadline.
 //
@@ -68,16 +71,23 @@ func closeInstanceWithTimeout(inst BoxInstance, timeout time.Duration) error {
 		done <- inst.Close()
 	}()
 
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
 	select {
 	case err := <-done:
 		return err
-	case <-time.After(timeout):
+	case <-timer.C:
 		return fmt.Errorf("sing-box Close() timed out after %v (driver or network teardown hung)", timeout)
 	}
 }
 
 // Start parses the provided JSON configuration and starts the sing-box instance.
 func (m *CoreManager) Start(configJSON string, logWriter sclog.PlatformWriter) error {
+	if strings.TrimSpace(configJSON) == "" {
+		return errors.New("empty configuration")
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -121,6 +131,7 @@ func (m *CoreManager) Start(configJSON string, logWriter sclog.PlatformWriter) e
 
 	m.instance = instance
 	m.cancel = cancel
+	m.running.Store(true)
 	return nil
 }
 
@@ -137,6 +148,7 @@ func (m *CoreManager) Stop() error {
 // and surfacing the error would make callers treat a completed teardown as a
 // failure and refuse to restart.
 func (m *CoreManager) stopRaw() error {
+	m.running.Store(false)
 	if m.cancel != nil {
 		m.cancel()
 		m.cancel = nil
@@ -161,8 +173,7 @@ func (m *CoreManager) stopRaw() error {
 }
 
 // IsRunning checks whether the sing-box instance is active.
+// Uses lock-free atomic load so callers (UI, watchdog) never block during teardown.
 func (m *CoreManager) IsRunning() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.instance != nil
+	return m.running.Load()
 }

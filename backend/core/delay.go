@@ -8,13 +8,13 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/option"
-	sjson "github.com/sagernet/sing/common/json"
 	"github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 )
@@ -52,51 +52,54 @@ func createTestDialer(ctx context.Context, link string) (func(), N.Dialer, error
 	outboundType, _ := workOutbound["type"].(string)
 	isWireGuard := outboundType == "wireguard"
 
-	config := map[string]interface{}{
-		"log": map[string]interface{}{
-			"level":  "panic",
-			"output": os.DevNull,
-		},
-		"dns": map[string]interface{}{
-			"servers": []map[string]interface{}{
-				{
-					"type": "local",
-					"tag":  "dns-direct",
-				},
-			},
-			"final": "dns-direct",
-		},
-	}
-
-	if isWireGuard {
-		config["endpoints"] = []interface{}{workOutbound}
-		config["outbounds"] = []interface{}{
-			map[string]interface{}{"type": "direct", "tag": "direct"},
-		}
-	} else {
-		config["outbounds"] = []interface{}{
-			workOutbound,
-			map[string]interface{}{"type": "direct", "tag": "direct"},
-		}
-	}
-
-	raw, err := json.Marshal(config)
+	rawOutbound, err := json.Marshal(workOutbound)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal delay test config: %w", err)
+		return nil, nil, fmt.Errorf("failed to marshal delay test outbound: %w", err)
 	}
 
 	boxCtx, cancelBox := context.WithCancel(ctx)
 	boxCtx = include.Context(boxCtx)
 
-	opt, err := sjson.UnmarshalExtendedContext[option.Options](boxCtx, raw)
-	if err != nil {
+	var dnsOpts option.DNSOptions
+	if err := dnsOpts.UnmarshalJSONContext(boxCtx, []byte(`{"servers":[{"type":"local","tag":"dns-direct"}],"final":"dns-direct"}`)); err != nil {
 		cancelBox()
-		return nil, nil, fmt.Errorf("failed to parse delay test config: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse delay test dns: %w", err)
+	}
+
+	var directOb option.Outbound
+	if err := directOb.UnmarshalJSONContext(boxCtx, []byte(`{"type":"direct","tag":"direct"}`)); err != nil {
+		cancelBox()
+		return nil, nil, fmt.Errorf("failed to parse delay test direct outbound: %w", err)
+	}
+
+	opts := option.Options{
+		Log: &option.LogOptions{
+			Level:  "panic",
+			Output: os.DevNull,
+		},
+		DNS: &dnsOpts,
+	}
+
+	if isWireGuard {
+		var ep option.Endpoint
+		if err := ep.UnmarshalJSONContext(boxCtx, rawOutbound); err != nil {
+			cancelBox()
+			return nil, nil, fmt.Errorf("failed to parse delay test endpoint: %w", err)
+		}
+		opts.Endpoints = []option.Endpoint{ep}
+		opts.Outbounds = []option.Outbound{directOb}
+	} else {
+		var ob option.Outbound
+		if err := ob.UnmarshalJSONContext(boxCtx, rawOutbound); err != nil {
+			cancelBox()
+			return nil, nil, fmt.Errorf("failed to parse delay test outbound: %w", err)
+		}
+		opts.Outbounds = []option.Outbound{ob, directOb}
 	}
 
 	b, err := box.New(box.Options{
 		Context: boxCtx,
-		Options: opt,
+		Options: opts,
 	})
 	if err != nil {
 		cancelBox()
@@ -126,9 +129,12 @@ func createTestDialer(ctx context.Context, link string) (func(), N.Dialer, error
 		return nil, nil, fmt.Errorf("test dialer %q not found", testTag)
 	}
 
+	var cleanupOnce sync.Once
 	cleanup := func() {
-		_ = b.Close()
-		cancelBox()
+		cleanupOnce.Do(func() {
+			_ = b.Close()
+			cancelBox()
+		})
 	}
 
 	return cleanup, dialer, nil
@@ -201,6 +207,8 @@ func MeasureProxySpeed(ctx context.Context, link string, testURL string, byteCou
 		},
 		DisableKeepAlives: true,
 	}
+	defer transport.CloseIdleConnections()
+
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   20 * time.Second,
@@ -223,27 +231,22 @@ func MeasureProxySpeed(ctx context.Context, link string, testURL string, byteCou
 		return 0, fmt.Errorf("speedtest endpoint returned HTTP %d", resp.StatusCode)
 	}
 
-	var totalRead int64
-	buf := make([]byte, 32*1024)
-	for {
-		n, rErr := resp.Body.Read(buf)
-		if n > 0 {
-			totalRead += int64(n)
-			if byteCount > 0 && totalRead >= byteCount {
-				break
-			}
-		}
-		if rErr != nil {
-			if rErr == io.EOF {
-				break
-			}
-			return 0, rErr
-		}
+	var reader io.Reader = resp.Body
+	if byteCount > 0 {
+		reader = io.LimitReader(resp.Body, byteCount)
+	}
+
+	totalRead, err := io.Copy(io.Discard, reader)
+	if err != nil {
+		return 0, err
 	}
 
 	elapsed := time.Since(start)
 	if totalRead == 0 || elapsed <= 0 {
 		return 0, fmt.Errorf("no bytes transferred during speedtest")
+	}
+	if elapsed < 1*time.Millisecond {
+		elapsed = 1 * time.Millisecond
 	}
 
 	mbps := (float64(totalRead) * 8.0) / (elapsed.Seconds() * 1_000_000.0)

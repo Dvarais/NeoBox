@@ -119,7 +119,7 @@ var linkSchemes = map[string]string{
 
 // link renders the node as a share link, or "" when the node is too incomplete
 // to connect to.
-func (n node) link() string {
+func (n *node) link() string {
 	scheme, known := linkSchemes[n.protocol]
 	if !known || n.server == "" || n.port <= 0 {
 		return ""
@@ -295,7 +295,7 @@ func (n node) link() string {
 }
 
 // vmessLink renders the base64-of-JSON form VMess links use.
-func (n node) vmessLink() string {
+func (n *node) vmessLink() string {
 	if n.uuid == "" {
 		return ""
 	}
@@ -372,7 +372,7 @@ func parseSingboxOutbounds(payload []byte) []string {
 		return nil
 	}
 
-	var links []string
+	links := make([]string, 0, len(outbounds))
 	for _, ob := range outbounds {
 		if link := singboxOutboundToLink(ob); link != "" {
 			links = append(links, link)
@@ -502,7 +502,7 @@ func parseClashYAML(payload []byte) []string {
 		return nil
 	}
 
-	var links []string
+	links := make([]string, 0, len(config.Proxies))
 	for _, proxy := range config.Proxies {
 		if link := clashProxyToLink(proxy); link != "" {
 			links = append(links, link)
@@ -700,8 +700,20 @@ func fieldString(m map[string]interface{}, key string) string {
 		return strconv.FormatBool(v)
 	case int:
 		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case int32:
+		return strconv.FormatInt(int64(v), 10)
+	case uint:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint32:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint64:
+		return strconv.FormatUint(v, 10)
 	case float64:
 		return strconv.FormatFloat(v, 'f', -1, 64)
+	case json.Number:
+		return v.String()
 	}
 	return ""
 }
@@ -710,10 +722,28 @@ func fieldInt(m map[string]interface{}, key string) int {
 	switch v := m[key].(type) {
 	case int:
 		return v
+	case int64:
+		return int(v)
+	case int32:
+		return int(v)
+	case uint:
+		return int(v)
+	case uint16:
+		return int(v)
+	case uint32:
+		return int(v)
+	case uint64:
+		return int(v)
 	case float64:
 		return int(v)
+	case float32:
+		return int(v)
+	case json.Number:
+		if n, err := v.Int64(); err == nil {
+			return int(n)
+		}
 	case string:
-		n, _ := strconv.Atoi(v)
+		n, _ := strconv.Atoi(strings.TrimSpace(v))
 		return n
 	}
 	return 0

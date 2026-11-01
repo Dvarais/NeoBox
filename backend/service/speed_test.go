@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPingServer_ClashAPIFastPath(t *testing.T) {
@@ -115,5 +116,37 @@ func TestTestServerSpeed_AutoModeDisconnected(t *testing.T) {
 	}
 	if res["error"] != "speed test in auto mode requires an active connection" {
 		t.Errorf("expected 'speed test in auto mode requires an active connection', got %v", res["error"])
+	}
+}
+
+func TestStreamTraffic_UsesClashAddr(t *testing.T) {
+	var receivedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		// Write one sample and flush
+		w.Write([]byte(`{"up": 100, "down": 200}` + "\n"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}))
+	defer srv.Close()
+
+	s := &AppService{}
+	s.stateMu.Lock()
+	s.clashAddr = strings.TrimPrefix(srv.URL, "http://")
+	s.stateMu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel after a short moment so streamTraffic finishes
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	_ = s.streamTraffic(ctx)
+
+	if receivedPath != "/traffic" {
+		t.Errorf("expected request to /traffic on s.clashAddr, got %q", receivedPath)
 	}
 }

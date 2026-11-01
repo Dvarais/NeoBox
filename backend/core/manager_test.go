@@ -50,6 +50,7 @@ func (m *CoreManager) setInstanceForTest(inst BoxInstance, cancel context.Cancel
 	defer m.mu.Unlock()
 	m.instance = inst
 	m.cancel = cancel
+	m.running.Store(inst != nil)
 }
 
 func TestCoreManager_Stop_Normal(t *testing.T) {
@@ -164,5 +165,13 @@ func TestCoreManager_Stop_CloseErrorIgnored(t *testing.T) {
 	}
 	if mgr.IsRunning() {
 		t.Fatal("expected manager to be marked stopped")
+	}
+}
+
+func TestCoreManager_Start_EmptyConfig(t *testing.T) {
+	mgr := NewCoreManager()
+	err := mgr.Start("   ", nil)
+	if err == nil {
+		t.Fatal("expected error for empty config")
 	}
 }

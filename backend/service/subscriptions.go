@@ -1,12 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"NeoBox/backend/core"
@@ -116,7 +118,9 @@ func (s *AppService) subscriptionsCachePath() string {
 
 // hasValidSubscriptionLinks reports whether the JSON data holds at least one subscription with non-empty links.
 func hasValidSubscriptionLinks(data []byte) bool {
-	var subs []Subscription
+	var subs []struct {
+		Links []string `json:"links"`
+	}
 	if err := json.Unmarshal(data, &subs); err != nil {
 		return false
 	}
@@ -183,6 +187,9 @@ func (s *AppService) GetSubscriptions() string {
 	if data == nil {
 		return "[]"
 	}
+	if !bytes.Contains(data, []byte("bootstrap-free-subs")) {
+		return string(data)
+	}
 	rawJSON := string(data)
 
 	// Filter out the NeoBox Free bootstrap subscription in-memory only.
@@ -215,20 +222,18 @@ func (s *AppService) SaveSubscriptions(subsJSON string) bool {
 	subsJSON = purgeBootstrapSub(subsJSON)
 
 	// Validate JSON before writing
-	if !json.Valid([]byte(subsJSON)) {
+	srcBytes := []byte(subsJSON)
+	if !json.Valid(srcBytes) {
 		fmt.Println("[SaveSubscriptions] refusing to write invalid JSON")
 		return false
 	}
 
 	// Indent the payload before sealing it. The file on disk is ciphertext, but
 	// the plaintext stays readable for anyone debugging via an export.
-	var pretty []interface{}
-	var out []byte
-	if err := json.Unmarshal([]byte(subsJSON), &pretty); err == nil {
-		out, _ = json.MarshalIndent(pretty, "", "  ")
-	}
-	if out == nil {
-		out = []byte(subsJSON)
+	var buf bytes.Buffer
+	out := srcBytes
+	if err := json.Indent(&buf, srcBytes, "", "  "); err == nil {
+		out = buf.Bytes()
 	}
 
 	s.fileMu.Lock()
@@ -252,6 +257,9 @@ func (s *AppService) SaveSubscriptions(subsJSON string) bool {
 
 // purgeBootstrapSub removes the "bootstrap-free-subs" entry from a JSON subscription list.
 func purgeBootstrapSub(subsJSON string) string {
+	if !strings.Contains(subsJSON, "bootstrap-free-subs") {
+		return subsJSON
+	}
 	var subs []Subscription
 	if err := json.Unmarshal([]byte(subsJSON), &subs); err != nil {
 		return subsJSON
@@ -309,8 +317,11 @@ func (s *AppService) FetchSubscriptionWithInfo(url string) (*SubscriptionFetchRe
 
 // ImportClipboard filters proxy links from raw clipboard string.
 func (s *AppService) ImportClipboard(text string) []string {
-	var links []string
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
 	lines := strings.Split(text, "\n")
+	links := make([]string, 0, len(lines))
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
@@ -355,24 +366,31 @@ func (s *AppService) StartAutoUpdateScheduler() {
 		}()
 
 		// Wait 5 seconds after startup to let the app initialize
+		initTimer := time.NewTimer(5 * time.Second)
 		select {
-		case <-time.After(5 * time.Second):
+		case <-initTimer.C:
 		case <-ctx.Done():
+			initTimer.Stop()
 			return
 		}
+
+		ticker := time.NewTicker(schedulerTick)
+		defer ticker.Stop()
 
 		for {
 			// Настройка читается на каждом обходе, а не один раз: галку
 			// автообновления могут снять, пока цикл спит.
-			var settings map[string]interface{}
-			_ = json.Unmarshal([]byte(s.GetSettings()), &settings)
+			var cfg struct {
+				AutoUpdateSubs bool `json:"autoUpdateSubs"`
+			}
+			_ = json.Unmarshal([]byte(s.GetSettings()), &cfg)
 
-			if autoUpdate, _ := settings["autoUpdateSubs"].(bool); autoUpdate {
+			if cfg.AutoUpdateSubs {
 				s.updateDueSubscriptions(ctx)
 			}
 
 			select {
-			case <-time.After(schedulerTick):
+			case <-ticker.C:
 			case <-ctx.Done():
 				return
 			}
@@ -404,7 +422,11 @@ func (s *AppService) StopAutoUpdateScheduler() {
 // действие человека над конкретной подпиской, и оно не должно ходить в сеть за
 // остальными.
 func (s *AppService) UpdateSubscriptionNow(id string) {
-	s.refreshSubscriptions(context.Background(), func(sub Subscription) bool {
+	ctx := s.context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.refreshSubscriptions(ctx, func(sub Subscription) bool {
 		return sub.ID == id
 	})
 }
@@ -423,37 +445,83 @@ func (s *AppService) UpdateSubscriptionNow(id string) {
 // mergeFetchedSubscriptions. Загрузка идёт без файлового замка, потому что
 // длится столько же, сколько чужие серверы отвечают.
 func (s *AppService) refreshSubscriptions(ctx context.Context, want func(Subscription) bool) {
+	if ctx.Err() != nil {
+		return // контекст уже отменен
+	}
+
 	var subs []Subscription
 	if err := json.Unmarshal([]byte(s.GetSubscriptions()), &subs); err != nil {
 		return
 	}
 
-	results := map[string]subFetch{}
+	var targets []Subscription
 	for _, sub := range subs {
-		select {
-		case <-ctx.Done():
-			return // приложение закрывается — недописанное состояние не сохраняем
-		default:
+		if sub.URL != "" && want(sub) {
+			targets = append(targets, sub)
 		}
+	}
+	if len(targets) == 0 {
+		return
+	}
 
-		if sub.URL == "" || !want(sub) {
-			continue
-		}
+	results := make(map[string]subFetch, len(targets))
 
+	fetchSingle := func(sub Subscription) subFetch {
 		payload, err := core.FetchSubscriptionPayloadContext(ctx, sub.URL)
 		switch {
 		case err != nil:
-			results[sub.ID] = subFetch{Err: err.Error()}
+			return subFetch{Err: err.Error()}
 		case len(payload.Links) == 0:
 			// Пустой ответ без ошибки: формально загрузка удалась, но серверов
 			// в ней нет. Для пользователя это неудача, и назвать её надо так же.
-			results[sub.ID] = subFetch{Err: i18n.T(i18n.ErrSubNoNodes)}
+			return subFetch{Err: i18n.T(i18n.ErrSubNoNodes)}
 		default:
-			results[sub.ID] = subFetch{
+			return subFetch{
 				Links:    payload.Links,
 				UserInfo: payload.UserInfo,
 			}
 		}
+	}
+
+	if len(targets) == 1 {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		results[targets[0].ID] = fetchSingle(targets[0])
+	} else {
+		// Bounded concurrent fetch for multiple subscriptions
+		const maxConcurrent = 3
+		sem := make(chan struct{}, maxConcurrent)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+
+		for _, sub := range targets {
+			select {
+			case <-ctx.Done():
+				break
+			case sem <- struct{}{}:
+			}
+
+			wg.Add(1)
+			go func(targetSub Subscription) {
+				defer func() {
+					<-sem
+					wg.Done()
+				}()
+
+				res := fetchSingle(targetSub)
+				mu.Lock()
+				results[targetSub.ID] = res
+				mu.Unlock()
+			}(sub)
+		}
+		wg.Wait()
+	}
+
+	if ctx.Err() != nil {
+		return // приложение закрывается — недописанное состояние не сохраняем
 	}
 
 	if len(results) == 0 || !s.mergeFetchedSubscriptions(results) {

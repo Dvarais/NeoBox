@@ -20,7 +20,6 @@ import (
 	"NeoBox/backend/i18n"
 
 	sclog "github.com/sagernet/sing-box/log"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // VPN session lifecycle: starting, stopping and monitoring the sing-box core.
@@ -50,21 +49,7 @@ func (s *AppService) StartXray(link string, settingsJSON string, useSystemProxy 
 		// Only transition to Connected if we were not cancelled/disconnected while startCore was running.
 		if !s.casVPNState(VPNStateConnecting, VPNStateConnected) {
 			// A disconnect was requested concurrently while startCore was finishing. Clean up all resources immediately.
-			s.stopWatchdog()
-			s.SetSystemProxy(false)
-			s.disableKillSwitch()
-			s.stateMu.Lock()
-			if s.cancelMonitor != nil {
-				s.cancelMonitor()
-				s.cancelMonitor = nil
-			}
-			s.stateMu.Unlock()
-			_ = s.coreManager.Stop()
-			s.stopLogStream()
-	_ = platform.Current().DNS().FlushCache()
-			s.setTrayConnected(false, "")
-			s.emitSafe("xray-stopped", nil)
-			releaseIdleMemory()
+			_ = s.teardownVpnCore(true, true)
 			return map[string]interface{}{
 				"success": false,
 				"error":   "connection aborted: disconnect requested during startup",
@@ -268,6 +253,36 @@ func (s *AppService) startCore(link string, _ string, useSystemProxy bool, newSe
 	return response
 }
 
+// teardownVpnCore stops the running core, monitoring goroutines, and log streams,
+// optionally clearing system proxy and kill switch settings.
+func (s *AppService) teardownVpnCore(clearSystemProxy, clearKillSwitch bool) error {
+	s.stopWatchdog()
+	if clearSystemProxy {
+		s.SetSystemProxy(false)
+	}
+	if clearKillSwitch {
+		s.disableKillSwitch()
+	}
+	s.stateMu.Lock()
+	s.serverLinkToTag = nil
+	s.activeServerLink = ""
+	if s.cancelMonitor != nil {
+		s.cancelMonitor()
+		s.cancelMonitor = nil
+	}
+	s.stateMu.Unlock()
+
+	err := s.coreManager.Stop()
+	s.stopLogStream()
+	_ = platform.Current().DNS().FlushCache()
+	if clearSystemProxy && clearKillSwitch {
+		s.setTrayConnected(false, "")
+	}
+	s.emitSafe("xray-stopped", nil)
+	releaseIdleMemory()
+	return err
+}
+
 // StopXray stops sing-box and disables system proxy settings.
 func (s *AppService) StopXray() map[string]interface{} {
 	response := map[string]interface{}{"success": false}
@@ -299,40 +314,13 @@ func (s *AppService) StopXray() map[string]interface{} {
 executeTeardown:
 	defer s.setVPNState(VPNStateDisconnected)
 
-	// Stop watchdog first so it doesn't try to restart while we're stopping
-	s.stopWatchdog()
-
-	s.SetSystemProxy(false)
-	s.disableKillSwitch() // Disable firewall rules when disconnecting
-
-	s.stateMu.Lock()
-	s.serverLinkToTag = nil
-	s.activeServerLink = ""
-	if s.cancelMonitor != nil {
-		s.cancelMonitor()
-		s.cancelMonitor = nil
-	}
-	s.stateMu.Unlock()
-
-	if err := s.coreManager.Stop(); err != nil {
+	if err := s.teardownVpnCore(true, true); err != nil {
 		response["error"] = err.Error()
 		return response
 	}
-	s.stopLogStream()
 
-	wCtxStop := s.context()
-	if wCtxStop != nil {
-		wailsruntime.EventsEmit(wCtxStop, "xray-stopped", nil)
-	}
-
-	s.setTrayConnected(false, "")
 	// Notify user via Windows toast on disconnect
 	go sendToast(i18n.T(i18n.ToastDisconnectedTitle), i18n.T(i18n.ToastDisconnectedBody))
-
-	// A session's buffers -- the gVisor stack's packets, the DNS tables, the
-	// routing rules -- all become garbage at once here. Hand them back rather
-	// than sitting on the peak until the scavenger gets round to it.
-	releaseIdleMemory()
 
 	response["success"] = true
 	return response
@@ -355,45 +343,15 @@ func (s *AppService) RestartXray(link string, settingsJSON string, useSystemProx
 		}
 	}
 
-	// Stop watchdog before restarting; startCore will re-launch it.
-	s.stopWatchdog()
-
-	// Stop the core and traffic monitor only — do NOT touch system proxy or kill switch.
-	s.stateMu.Lock()
-	s.serverLinkToTag = nil
-	s.activeServerLink = ""
-	if s.cancelMonitor != nil {
-		s.cancelMonitor()
-		s.cancelMonitor = nil
-	}
-	s.stateMu.Unlock()
-	_ = s.coreManager.Stop()
-	s.stopLogStream()
-
-	// Emit stopped event so UI knows the old session ended
-	wCtxRestart := s.context()
-	if wCtxRestart != nil {
-		wailsruntime.EventsEmit(wCtxRestart, "xray-stopped", nil)
-	}
+	// Stop watchdog, core and monitor without clearing system proxy or kill switch
+	_ = s.teardownVpnCore(false, false)
 
 	// Start fresh session directly while holding Reconnecting state
 	res := s.startCore(link, settingsJSON, useSystemProxy, true)
 	if ok, _ := res["success"].(bool); ok {
 		if !s.casVPNState(VPNStateReconnecting, VPNStateConnected) {
 			// Disconnect was requested during restart
-			s.SetSystemProxy(false)
-			s.disableKillSwitch()
-			s.stateMu.Lock()
-			if s.cancelMonitor != nil {
-				s.cancelMonitor()
-				s.cancelMonitor = nil
-			}
-			s.stateMu.Unlock()
-			_ = s.coreManager.Stop()
-			s.stopLogStream()
-			s.setTrayConnected(false, "")
-			s.emitSafe("xray-stopped", nil)
-			releaseIdleMemory()
+			_ = s.teardownVpnCore(true, true)
 			return map[string]interface{}{
 				"success": false,
 				"error":   "restart aborted: disconnect requested",
@@ -471,6 +429,8 @@ func (s *AppService) MeasureActiveConnectionSpeed(ctx context.Context, testURL s
 		Proxy:             http.ProxyURL(proxyURL),
 		DisableKeepAlives: true,
 	}
+	defer transport.CloseIdleConnections()
+
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   20 * time.Second,
@@ -493,27 +453,21 @@ func (s *AppService) MeasureActiveConnectionSpeed(ctx context.Context, testURL s
 		return 0, fmt.Errorf("speedtest endpoint returned HTTP %d", resp.StatusCode)
 	}
 
-	var totalRead int64
-	buf := make([]byte, 32*1024)
-	for {
-		n, rErr := resp.Body.Read(buf)
-		if n > 0 {
-			totalRead += int64(n)
-			if byteCount > 0 && totalRead >= byteCount {
-				break
-			}
-		}
-		if rErr != nil {
-			if rErr == io.EOF {
-				break
-			}
-			return 0, rErr
-		}
+	var src io.Reader = resp.Body
+	if byteCount > 0 {
+		src = io.LimitReader(resp.Body, byteCount)
+	}
+	totalRead, err := io.Copy(io.Discard, src)
+	if err != nil {
+		return 0, err
 	}
 
 	elapsed := time.Since(start)
-	if totalRead == 0 || elapsed <= 0 {
+	if totalRead == 0 {
 		return 0, fmt.Errorf("no bytes transferred during speedtest")
+	}
+	if elapsed < 10*time.Millisecond {
+		elapsed = 10 * time.Millisecond
 	}
 
 	mbps := (float64(totalRead) * 8.0) / (elapsed.Seconds() * 1_000_000.0)
@@ -624,12 +578,14 @@ func (s *AppService) startTrafficMonitor(ctx context.Context) {
 
 	delay := trafficRetryMin
 	attempts := 0
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(delay):
+		case <-timer.C:
 		}
 
 		attempts++
@@ -650,19 +606,24 @@ func (s *AppService) startTrafficMonitor(ctx context.Context) {
 		if delay > trafficRetryMax {
 			delay = trafficRetryMax
 		}
+		timer.Reset(delay)
 	}
 }
 
 // streamTraffic runs one connection to the /traffic endpoint and returns when
 // it ends — because the session was cancelled, or because it broke.
 func (s *AppService) streamTraffic(ctx context.Context) error {
-	// Snapshot the current session secret (protected by stateMu)
+	// Snapshot the current session secret and clash address (protected by stateMu)
 	s.stateMu.Lock()
+	clashAddr := core.ClashAPIAddr
+	if s.clashAddr != "" {
+		clashAddr = s.clashAddr
+	}
 	secret := s.clashSecret
 	s.stateMu.Unlock()
 
 	client := &http.Client{Timeout: 0} // infinite timeout for stream
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://"+core.ClashAPIAddr+"/traffic", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://"+clashAddr+"/traffic", nil)
 	if err != nil {
 		return err
 	}
@@ -725,15 +686,12 @@ func (s *AppService) streamTraffic(ctx context.Context) error {
 			}
 
 			// Emit stats to the Wails frontend
-			wCtx := s.context()
-			if wCtx != nil {
-				wailsruntime.EventsEmit(wCtx, "traffic-stats", map[string]interface{}{
-					"up":        stats.Up,
-					"down":      stats.Down,
-					"totalUp":   totalUp,
-					"totalDown": totalDown,
-				})
-			}
+			s.emitSafe("traffic-stats", map[string]interface{}{
+				"up":        stats.Up,
+				"down":      stats.Down,
+				"totalUp":   totalUp,
+				"totalDown": totalDown,
+			})
 		}
 	}
 }
@@ -751,19 +709,20 @@ func (s *AppService) FlushDNS() (bool, error) {
 // When activeOutbound is nil (e.g. for Auto mode), all valid subscription proxies are collected.
 func (s *AppService) buildCandidates(activeLink string, activeOutbound map[string]interface{}) ([]map[string]interface{}, map[string]string) {
 	linkToTag := make(map[string]string)
+	trimmedActive := strings.TrimSpace(activeLink)
 	var activeTag string
 	var activeType string
 	if activeOutbound != nil {
 		activeType, _ = activeOutbound["type"].(string)
 		activeTag, _ = activeOutbound["tag"].(string)
 		if activeTag == "" {
-			activeTag = parseServerNameFromLink(activeLink)
+			activeTag = parseServerNameFromLink(trimmedActive)
 			if activeTag == "" {
 				activeTag = "proxy"
 			}
 			activeOutbound["tag"] = activeTag
 		}
-		linkToTag[activeLink] = activeTag
+		linkToTag[trimmedActive] = activeTag
 
 		// WireGuard is defined as an endpoint in sing-box, not an outbound.
 		// Endpoints cannot be placed inside a selector outbound group.
@@ -783,13 +742,18 @@ func (s *AppService) buildCandidates(activeLink string, activeOutbound map[strin
 		}
 	}
 
-	usedTags := make(map[string]bool)
-	seenLinks := make(map[string]bool)
-	var candidates []map[string]interface{}
+	totalEstimated := 1
+	for _, sub := range subs {
+		totalEstimated += len(sub.Links)
+	}
+
+	usedTags := make(map[string]bool, totalEstimated)
+	seenLinks := make(map[string]bool, totalEstimated)
+	candidates := make([]map[string]interface{}, 0, totalEstimated)
 
 	if activeOutbound != nil {
 		usedTags[activeTag] = true
-		seenLinks[activeLink] = true
+		seenLinks[trimmedActive] = true
 		candidates = append(candidates, activeOutbound)
 	}
 
@@ -879,6 +843,7 @@ func (s *AppService) SwitchServer(link string) map[string]interface{} {
 	activeLink := s.activeServerLink
 	secret := s.clashSecret
 	targetTag, found := s.serverLinkToTag[trimmedLink]
+	oldTag := s.serverLinkToTag[activeLink]
 	s.stateMu.Unlock()
 
 	// Already active on this exact server
@@ -925,6 +890,10 @@ func (s *AppService) SwitchServer(link string) map[string]interface{} {
 		if trimmedLink != core.AutoServerLink {
 			targetOutbound, err := core.ParseProxyLink(trimmedLink)
 			if err != nil {
+				// Rollback selector if parsing fails
+				if oldTag != "" {
+					_ = s.switchSelectorTag(ctx, clashAddr, secret, oldTag)
+				}
 				return map[string]interface{}{
 					"success":          false,
 					"hotSwitched":      false,
@@ -934,6 +903,10 @@ func (s *AppService) SwitchServer(link string) map[string]interface{} {
 			}
 			newServerHost, _ := core.ServerEndpoint(targetOutbound)
 			if err := s.enableKillSwitch(newServerHost); err != nil {
+				// Rollback selector if firewall update fails
+				if oldTag != "" {
+					_ = s.switchSelectorTag(ctx, clashAddr, secret, oldTag)
+				}
 				return map[string]interface{}{
 					"success":          false,
 					"hotSwitched":      false,

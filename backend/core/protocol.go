@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-
 // maxLinkLength caps a proxy link or subscription URL. Anything longer is
 // rejected before parsing, so a malformed or hostile entry cannot turn into
 // unbounded work.
@@ -42,11 +41,19 @@ var proxySchemes = map[string]string{
 // does not use a scheme NeoBox supports. Matching is case-insensitive.
 func ProtocolOf(link string) string {
 	s := strings.TrimSpace(link)
+	if len(s) == 0 || len(s) > maxLinkLength {
+		return ""
+	}
 	i := strings.Index(s, "://")
 	if i <= 0 {
 		return ""
 	}
-	proto := proxySchemes[strings.ToLower(s[:i])]
+	scheme := s[:i]
+	// Fast path: direct lookup avoids allocation when the scheme is already lowercase (the 99% common case).
+	proto, ok := proxySchemes[scheme]
+	if !ok {
+		proto = proxySchemes[strings.ToLower(scheme)]
+	}
 	if proto == "http" && !isHTTPProxyLink(s[i+len("://"):]) {
 		return ""
 	}
@@ -123,11 +130,11 @@ func ServerEndpoint(outbound map[string]interface{}) (string, int) {
 			return "", 0
 		}
 		host, _ := peer["address"].(string)
-		return host, portOf(peer["port"])
+		return strings.Trim(strings.TrimSpace(host), "[]"), portOf(peer["port"])
 	}
 
 	host, _ := outbound["server"].(string)
-	return host, portOf(outbound["server_port"])
+	return strings.Trim(strings.TrimSpace(host), "[]"), portOf(outbound["server_port"])
 }
 
 // portOf reads a port out of a parsed outbound. ParseProxyLink always writes an
@@ -142,11 +149,19 @@ func portOf(value interface{}) int {
 		port = p
 	case int64:
 		port = int(p)
+	case int32:
+		port = int(p)
 	case uint:
 		port = int(p)
 	case uint16:
 		port = int(p)
+	case uint32:
+		port = int(p)
+	case uint64:
+		port = int(p)
 	case float64:
+		port = int(p)
+	case float32:
 		port = int(p)
 	case json.Number:
 		if i, err := p.Int64(); err == nil {
