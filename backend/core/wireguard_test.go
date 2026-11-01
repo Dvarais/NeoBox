@@ -170,7 +170,8 @@ func wireguardOutbound() map[string]interface{} {
 			map[string]interface{}{
 				"address":    testServerIP,
 				"port":       2408,
-				"public_key": "cHVibGljLWtleS1mb3ItdGhlLW5lb2JveC10ZXN0cw==",
+				"public_key":  "cHVibGljLWtleS1mb3ItdGhlLW5lb2JveC10ZXN0cw==",
+				"allowed_ips": []string{"0.0.0.0/0"},
 			},
 		},
 	}

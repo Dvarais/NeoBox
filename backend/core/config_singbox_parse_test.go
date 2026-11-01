@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/option"
 	sjson "github.com/sagernet/sing/common/json"
@@ -33,6 +34,14 @@ func TestGeneratedConfigParsesInSingbox(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s (tun=%v, bypassRu=%v): sing-box rejected the config: %v\n%s", name, tunMode, bypassRu, err, raw)
 				}
+				instance, err := box.New(box.Options{
+					Context: ctx,
+					Options: opts,
+				})
+				if err != nil {
+					t.Fatalf("%s (tun=%v, bypassRu=%v): box.New failed: %v", name, tunMode, bypassRu, err)
+				}
+				instance.Close()
 				if opts.DNS == nil || opts.DNS.Optimistic == nil {
 					t.Errorf("%s (tun=%v, bypassRu=%v): expected opts.DNS.Optimistic to be set", name, tunMode, bypassRu)
 				}
@@ -128,6 +137,14 @@ func TestGenerateConfig_SelectorWithCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sing-box rejected config with selector: %v\n%s", err, string(raw))
 	}
+	instance, err := box.New(box.Options{
+		Context: ctx,
+		Options: opts,
+	})
+	if err != nil {
+		t.Fatalf("sing-box box.New failed: %v", err)
+	}
+	instance.Close()
 
 	// Verify selector is present and configured
 	var foundSelector bool
@@ -186,6 +203,14 @@ func TestGenerateConfig_URLTestAutoGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sing-box rejected config with urltest: %v\n%s", err, string(raw))
 	}
+	instance, err := box.New(box.Options{
+		Context: ctx,
+		Options: opts,
+	})
+	if err != nil {
+		t.Fatalf("sing-box box.New failed: %v", err)
+	}
+	instance.Close()
 
 	var foundAuto, foundSelector bool
 	for _, ob := range opts.Outbounds {

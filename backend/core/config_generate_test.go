@@ -277,14 +277,49 @@ func TestServerIsExcludedFromTheTunnel(t *testing.T) {
 		t.Fatalf("no direct route for the VPN server %s — the tunnel would carry its own transport", testServerIP)
 	}
 
-	// It must also be exempt in DNS, and as an ip_cidr rather than a domain:
-	// an IP literal in the domain field never matches anything.
+	// DNS rules must not match literal IPs via ip_cidr without match_response,
+	// which sing-box rejects on initialization. Literal IPs are routed directly
+	// via routing rules, not DNS rules.
+	for i, r := range dnsRules(t, cfg) {
+		if _, ok := r["ip_cidr"]; ok {
+			t.Errorf("dns rule[%d] contains ip_cidr; DNS rules must not match IP literals", i)
+		}
+	}
+}
+
+// When the server endpoint is a domain name, it must be routed directly
+// and also resolved via dns-direct so the hostname can be resolved before
+// the tunnel is established.
+func TestServerDomainIsExcludedFromTunnelAndResolvedDirectly(t *testing.T) {
+	outbound := testOutbound()
+	outbound["server"] = "vpn.example.com"
+	cfg, err := GenerateConfig(outbound, Settings{}, false, "cache.db", "secret")
+	if err != nil {
+		t.Fatalf("GenerateConfig failed: %v", err)
+	}
+
+	routeIdx := indexOfRule(routeRules(t, cfg), func(r map[string]interface{}) bool {
+		return hasKeyValue(r, "domain", []string{"vpn.example.com"}) &&
+			hasKeyValue(r, "outbound", "direct")
+	})
+	if routeIdx < 0 {
+		t.Error("no direct route rule for domain server vpn.example.com")
+	}
+
 	dnsIdx := indexOfRule(dnsRules(t, cfg), func(r map[string]interface{}) bool {
-		return hasKeyValue(r, "ip_cidr", []string{testServerIP + "/32"}) &&
-			hasKeyValue(r, "server", "dns-direct")
+		domains, ok := r["domain"].([]string)
+		if !ok {
+			return false
+		}
+		for _, d := range domains {
+			if d == "vpn.example.com" {
+				return true
+			}
+		}
+		return false
 	})
 	if dnsIdx < 0 {
-		t.Error("the VPN server IP is not exempt in the DNS rules")
+		t.Error("server domain vpn.example.com was not added to DNS direct rules")
 	}
 }
 

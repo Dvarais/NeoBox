@@ -1753,22 +1753,6 @@ func GenerateConfigWithCandidates(candidates []map[string]interface{}, outbound 
 		"server":        "dns-direct",
 	}
 	dnsRules := []map[string]interface{}{firstDNSRule}
-	for _, ipStr := range directIPList {
-		ip := net.ParseIP(ipStr)
-		if ip == nil {
-			continue
-		}
-		cidr := ipStr + "/32"
-		if ip.To4() == nil {
-			cidr = ipStr + "/128"
-		} else {
-			cidr = ip.To4().String() + "/32"
-		}
-		dnsRules = append(dnsRules, map[string]interface{}{
-			"ip_cidr": []string{cidr},
-			"server":  "dns-direct",
-		})
-	}
 	if settings.BypassRu {
 		// RU names are resolved outside the tunnel, because their traffic leaves
 		// outside it: an address chosen by the remote resolver points at the
