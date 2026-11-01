@@ -53,15 +53,14 @@ func BuildNftablesRules(serverIPs []string) []string {
 		"add chain inet neobox_killswitch output { type filter hook output priority 0; policy drop; }",
 		"add rule inet neobox_killswitch output oifname \"lo\" accept",
 		"add rule inet neobox_killswitch output oifname \"tun*\" accept",
-		// Conntrack fast-path: established sessions bypass subsequent rule checks (O(1) in kernel)
-		"add rule inet neobox_killswitch output ct state established,related accept",
+		// Guard against invalid conntrack states; established traffic is restricted to tunnel and allowed destinations
 		"add rule inet neobox_killswitch output ct state invalid drop",
-		// Prevent PMTUD black-holing (RFC 1191) & IPv6 NDP breakage (RFC 4861)
+		// Prevent PMTUD black-holing (RFC 1191) & IPv6 NDP breakage (RFC 4861) - router-advert excluded on output
 		"add rule inet neobox_killswitch output icmp type { destination-unreachable, time-exceeded, echo-request, echo-reply } accept",
-		"add rule inet neobox_killswitch output icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, echo-request, echo-reply, nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept",
-		// LAN & local multicast/broadcast addresses
+		"add rule inet neobox_killswitch output icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, echo-request, echo-reply, nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert } accept",
+		// LAN & local multicast/broadcast addresses (RFC 4291: ff02::/16 link-local multicast only, not ff00::/8)
 		"add rule inet neobox_killswitch output ip daddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 224.0.0.0/4, 255.255.255.255 } accept",
-		"add rule inet neobox_killswitch output ip6 daddr { ::1, fe80::/10, fc00::/7, ff00::/8 } accept",
+		"add rule inet neobox_killswitch output ip6 daddr { ::1, fe80::/10, fc00::/7, ff02::/16 } accept",
 	}
 
 	for _, ipStr := range serverIPs {
@@ -121,7 +120,7 @@ func BuildIptablesCommands(serverIPs []string) (ipv4Commands [][]string, ipv6Com
 		{"ip6tables", "-w", "2", "-A", "NEOBOX_KILLSWITCH", "-d", "::1/128", "-j", "ACCEPT"},
 		{"ip6tables", "-w", "2", "-A", "NEOBOX_KILLSWITCH", "-d", "fe80::/10", "-j", "ACCEPT"},
 		{"ip6tables", "-w", "2", "-A", "NEOBOX_KILLSWITCH", "-d", "fc00::/7", "-j", "ACCEPT"},
-		{"ip6tables", "-w", "2", "-A", "NEOBOX_KILLSWITCH", "-d", "ff00::/8", "-j", "ACCEPT"},
+		{"ip6tables", "-w", "2", "-A", "NEOBOX_KILLSWITCH", "-d", "ff02::/16", "-j", "ACCEPT"},
 	}
 	for _, ip := range ipv6Servers {
 		ipv6Commands = append(ipv6Commands, []string{"ip6tables", "-w", "2", "-A", "NEOBOX_KILLSWITCH", "-d", ip, "-j", "ACCEPT"})
@@ -208,11 +207,48 @@ func (f *FirewallManager) RulesPresent() bool {
 	return false
 }
 
+// BuildIPv6LeakProtectionRules constructs netfilter rules to block all non-tunnel global IPv6 leaks (RFC 4291 2000::/3)
+// and unencrypted DNS leaks over IPv6 when the full Kill Switch is disarmed.
+func BuildIPv6LeakProtectionRules() []string {
+	return []string{
+		"add table inet neobox_ipv6_guard",
+		"delete table inet neobox_ipv6_guard",
+		"add table inet neobox_ipv6_guard",
+		"add chain inet neobox_ipv6_guard output { type filter hook output priority -10; policy accept; }",
+		"add rule inet neobox_ipv6_guard output oifname \"lo\" accept",
+		"add rule inet neobox_ipv6_guard output oifname \"tun*\" accept",
+		"add rule inet neobox_ipv6_guard output icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, echo-request, echo-reply, nd-router-solicit, nd-neighbor-solicit, nd-neighbor-advert } accept",
+		"add rule inet neobox_ipv6_guard output ip6 daddr { ::1, fe80::/10, fc00::/7, ff02::/16 } accept",
+		"add rule inet neobox_ipv6_guard output udp dport { 53, 853 } drop",
+		"add rule inet neobox_ipv6_guard output tcp dport { 53, 853 } drop",
+		"add rule inet neobox_ipv6_guard output ip6 daddr 2000::/3 drop",
+	}
+}
+
+func (f *FirewallManager) EnableIPv6LeakProtection() error {
+	if _, err := exec.LookPath("nft"); err == nil {
+		rules := BuildIPv6LeakProtectionRules()
+		script := strings.Join(rules, "\n") + "\n"
+		if out, err := runFirewallCmdInput([]byte(script), "nft", "-f", "-"); err != nil {
+			return fmt.Errorf("enable IPv6 leak guard failed: %w (output: %s)", err, string(out))
+		}
+	}
+	return nil
+}
+
+func (f *FirewallManager) DisableIPv6LeakProtection() error {
+	if _, err := exec.LookPath("nft"); err == nil {
+		const disarmScript = "add table inet neobox_ipv6_guard\ndelete table inet neobox_ipv6_guard\n"
+		_, _ = runFirewallCmdInput([]byte(disarmScript), "nft", "-f", "-")
+	}
+	return nil
+}
+
 func (f *FirewallManager) DisableKillSwitch() error {
 	if _, err := exec.LookPath("nft"); err == nil {
 		// Atomic idempotent disarm via stdin: create if missing, then delete.
 		// Guarantees returncode 0 without spewing "table does not exist" errors.
-		const disarmScript = "add table inet neobox_killswitch\ndelete table inet neobox_killswitch\n"
+		const disarmScript = "add table inet neobox_killswitch\ndelete table inet neobox_killswitch\nadd table inet neobox_ipv6_guard\ndelete table inet neobox_ipv6_guard\n"
 		_, _ = runFirewallCmdInput([]byte(disarmScript), "nft", "-f", "-")
 	}
 	// Only invoke legacy iptables cleanup if iptables is present AND rules are actually registered.

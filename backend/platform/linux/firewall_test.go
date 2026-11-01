@@ -92,10 +92,10 @@ func TestBuildNftablesRulesDualStack(t *testing.T) {
 		if r == "add rule inet neobox_killswitch output ip daddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 224.0.0.0/4, 255.255.255.255 } accept" {
 			hasIPv4LAN = true
 		}
-		if r == "add rule inet neobox_killswitch output ip6 daddr { ::1, fe80::/10, fc00::/7, ff00::/8 } accept" {
+		if r == "add rule inet neobox_killswitch output ip6 daddr { ::1, fe80::/10, fc00::/7, ff02::/16 } accept" {
 			hasIPv6LAN = true
 		}
-		if r == "add rule inet neobox_killswitch output ct state established,related accept" {
+		if r == "add rule inet neobox_killswitch output ct state invalid drop" {
 			hasConntrack = true
 		}
 		if r == "add rule inet neobox_killswitch output icmp type { destination-unreachable, time-exceeded, echo-request, echo-reply } accept" {
@@ -123,6 +123,39 @@ func TestBuildNftablesRulesDualStack(t *testing.T) {
 	}
 	if !hasPMTUD {
 		t.Errorf("missing PMTUD/ICMP accept rule in nftables: %v", rules)
+	}
+}
+
+func TestBuildIPv6LeakProtectionRules(t *testing.T) {
+	rules := linux.BuildIPv6LeakProtectionRules()
+	hasBlockGlobal := false
+	hasBlockDNSUDP := false
+	hasBlockDNSTCP := false
+	hasAllowLocal := false
+
+	for _, r := range rules {
+		if r == "add rule inet neobox_ipv6_guard output ip6 daddr 2000::/3 drop" {
+			hasBlockGlobal = true
+		}
+		if r == "add rule inet neobox_ipv6_guard output udp dport { 53, 853 } drop" {
+			hasBlockDNSUDP = true
+		}
+		if r == "add rule inet neobox_ipv6_guard output tcp dport { 53, 853 } drop" {
+			hasBlockDNSTCP = true
+		}
+		if r == "add rule inet neobox_ipv6_guard output ip6 daddr { ::1, fe80::/10, fc00::/7, ff02::/16 } accept" {
+			hasAllowLocal = true
+		}
+	}
+
+	if !hasBlockGlobal {
+		t.Errorf("missing RFC 4291 2000::/3 global IPv6 block rule: %v", rules)
+	}
+	if !hasBlockDNSUDP || !hasBlockDNSTCP {
+		t.Errorf("missing DNS leak block rules on ports 53/853: %v", rules)
+	}
+	if !hasAllowLocal {
+		t.Errorf("missing link-local/LAN IPv6 allow rule: %v", rules)
 	}
 }
 
