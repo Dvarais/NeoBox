@@ -42,6 +42,14 @@ export function FetchSubscriptionWithInfo(arg1) {
   return window['go']['service']['AppService']['FetchSubscriptionWithInfo'](arg1);
 }
 
+export function FlushDNS() {
+  return window['go']['service']['AppService']['FlushDNS']();
+}
+
+export function GenerateQRCodePNG(arg1) {
+  return window['go']['service']['AppService']['GenerateQRCodePNG'](arg1);
+}
+
 export function GetAppCodename() {
   return window['go']['service']['AppService']['GetAppCodename']();
 }
@@ -64,6 +72,14 @@ export function GetHistory() {
 
 export function GetKillSwitchState() {
   return window['go']['service']['AppService']['GetKillSwitchState']();
+}
+
+export function GetLanIPs() {
+  return window['go']['service']['AppService']['GetLanIPs']();
+}
+
+export function GetRunningProcesses() {
+  return window['go']['service']['AppService']['GetRunningProcesses']();
 }
 
 export function GetSettings() {
@@ -96,6 +112,10 @@ export function IsQuitting() {
 
 export function IsVPNConnected() {
   return window['go']['service']['AppService']['IsVPNConnected']();
+}
+
+export function MeasureActiveConnectionSpeed(arg1, arg2, arg3) {
+  return window['go']['service']['AppService']['MeasureActiveConnectionSpeed'](arg1, arg2, arg3);
 }
 
 export function MutexHandle() {
@@ -224,16 +244,4 @@ export function UpdateSubscriptionNow(arg1) {
 
 export function ValidateDNS(arg1) {
   return window['go']['service']['AppService']['ValidateDNS'](arg1);
-}
-
-export function GetRunningProcesses() {
-  return window['go']['service']['AppService']['GetRunningProcesses']();
-}
-
-export function GetLanIPs() {
-  return window['go']['service']['AppService']['GetLanIPs']();
-}
-
-export function GenerateQRCodePNG(arg1) {
-  return window['go']['service']['AppService']['GenerateQRCodePNG'](arg1);
 }
