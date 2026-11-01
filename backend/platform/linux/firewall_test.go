@@ -50,6 +50,8 @@ func TestParseServerIPs(t *testing.T) {
 		{"203.0.113.10", "203.0.113.10"},
 		{"2001:db8::1", "2001:db8::1"},
 		{"[2001:db8::1]", "2001:db8::1"},
+		{"203.0.113.10:443", "203.0.113.10"},
+		{"[2001:db8::1]:8443", "2001:db8::1"},
 		{"127.0.0.1", "127.0.0.1"},
 	}
 
@@ -73,8 +75,14 @@ func TestBuildNftablesRulesDualStack(t *testing.T) {
 	hasIPv6Server := false
 	hasIPv4LAN := false
 	hasIPv6LAN := false
+	hasConntrack := false
+	hasPMTUD := false
+	hasAtomicReset := false
 
-	for _, r := range rules {
+	for i, r := range rules {
+		if r == "delete table inet neobox_killswitch" && i > 0 && rules[i-1] == "add table inet neobox_killswitch" {
+			hasAtomicReset = true
+		}
 		if r == "add rule inet neobox_killswitch output ip daddr 203.0.113.10 accept" {
 			hasIPv4Server = true
 		}
@@ -87,8 +95,17 @@ func TestBuildNftablesRulesDualStack(t *testing.T) {
 		if r == "add rule inet neobox_killswitch output ip6 daddr { ::1, fe80::/10, fc00::/7, ff00::/8 } accept" {
 			hasIPv6LAN = true
 		}
+		if r == "add rule inet neobox_killswitch output ct state established,related accept" {
+			hasConntrack = true
+		}
+		if r == "add rule inet neobox_killswitch output icmp type { destination-unreachable, time-exceeded, echo-request, echo-reply } accept" {
+			hasPMTUD = true
+		}
 	}
 
+	if !hasAtomicReset {
+		t.Errorf("missing atomic reset (add then delete table) in nftables: %v", rules)
+	}
 	if !hasIPv4Server {
 		t.Errorf("missing IPv4 server accept rule in nftables: %v", rules)
 	}
@@ -100,6 +117,12 @@ func TestBuildNftablesRulesDualStack(t *testing.T) {
 	}
 	if !hasIPv6LAN {
 		t.Errorf("missing IPv6 LAN accept rule in nftables: %v", rules)
+	}
+	if !hasConntrack {
+		t.Errorf("missing Conntrack fast-path rule in nftables: %v", rules)
+	}
+	if !hasPMTUD {
+		t.Errorf("missing PMTUD/ICMP accept rule in nftables: %v", rules)
 	}
 }
 

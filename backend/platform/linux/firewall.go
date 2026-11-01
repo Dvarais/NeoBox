@@ -24,7 +24,11 @@ func (f *FirewallManager) markerPath(userDataDir string) string {
 
 // ParseServerIPs extracts IP addresses from serverHost (IPv4, IPv6, bracketed or FQDN).
 func ParseServerIPs(serverHost string) []string {
-	cleanHost := strings.Trim(serverHost, "[]")
+	trimmed := strings.TrimSpace(serverHost)
+	cleanHost := strings.Trim(trimmed, "[]")
+	if host, _, err := net.SplitHostPort(trimmed); err == nil {
+		cleanHost = strings.Trim(host, "[]")
+	}
 	var serverIPs []string
 	if ip := net.ParseIP(cleanHost); ip != nil {
 		serverIPs = append(serverIPs, ip.String())
@@ -41,11 +45,21 @@ func ParseServerIPs(serverHost string) []string {
 // BuildNftablesRules constructs the inet table rules allowing LAN, VPN tunnel and server IP(s).
 func BuildNftablesRules(serverIPs []string) []string {
 	rules := []string{
+		// Idempotent atomic reset: ensures table exists then deletes it completely,
+		// unhooking base chains from netfilter and preventing kernel -EBUSY collisions.
 		"add table inet neobox_killswitch",
-		"flush table inet neobox_killswitch",
+		"delete table inet neobox_killswitch",
+		"add table inet neobox_killswitch",
 		"add chain inet neobox_killswitch output { type filter hook output priority 0; policy drop; }",
 		"add rule inet neobox_killswitch output oifname \"lo\" accept",
 		"add rule inet neobox_killswitch output oifname \"tun*\" accept",
+		// Conntrack fast-path: established sessions bypass subsequent rule checks (O(1) in kernel)
+		"add rule inet neobox_killswitch output ct state established,related accept",
+		"add rule inet neobox_killswitch output ct state invalid drop",
+		// Prevent PMTUD black-holing (RFC 1191) & IPv6 NDP breakage (RFC 4861)
+		"add rule inet neobox_killswitch output icmp type { destination-unreachable, time-exceeded, echo-request, echo-reply } accept",
+		"add rule inet neobox_killswitch output icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, echo-request, echo-reply, nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept",
+		// LAN & local multicast/broadcast addresses
 		"add rule inet neobox_killswitch output ip daddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 224.0.0.0/4, 255.255.255.255 } accept",
 		"add rule inet neobox_killswitch output ip6 daddr { ::1, fe80::/10, fc00::/7, ff00::/8 } accept",
 	}
@@ -196,17 +210,25 @@ func (f *FirewallManager) RulesPresent() bool {
 
 func (f *FirewallManager) DisableKillSwitch() error {
 	if _, err := exec.LookPath("nft"); err == nil {
-		_, _ = runFirewallCmd("nft", "delete", "table", "inet", "neobox_killswitch")
+		// Atomic idempotent disarm via stdin: create if missing, then delete.
+		// Guarantees returncode 0 without spewing "table does not exist" errors.
+		const disarmScript = "add table inet neobox_killswitch\ndelete table inet neobox_killswitch\n"
+		_, _ = runFirewallCmdInput([]byte(disarmScript), "nft", "-f", "-")
 	}
+	// Only invoke legacy iptables cleanup if iptables is present AND rules are actually registered.
 	if _, err := exec.LookPath("iptables"); err == nil {
-		_, _ = runFirewallCmd("iptables", "-w", "2", "-D", "OUTPUT", "-j", "NEOBOX_KILLSWITCH")
-		_, _ = runFirewallCmd("iptables", "-w", "2", "-F", "NEOBOX_KILLSWITCH")
-		_, _ = runFirewallCmd("iptables", "-w", "2", "-X", "NEOBOX_KILLSWITCH")
+		if _, checkErr := runFirewallCmd("iptables", "-w", "2", "-C", "OUTPUT", "-j", "NEOBOX_KILLSWITCH"); checkErr == nil {
+			_, _ = runFirewallCmd("iptables", "-w", "2", "-D", "OUTPUT", "-j", "NEOBOX_KILLSWITCH")
+			_, _ = runFirewallCmd("iptables", "-w", "2", "-F", "NEOBOX_KILLSWITCH")
+			_, _ = runFirewallCmd("iptables", "-w", "2", "-X", "NEOBOX_KILLSWITCH")
+		}
 	}
 	if _, err := exec.LookPath("ip6tables"); err == nil {
-		_, _ = runFirewallCmd("ip6tables", "-w", "2", "-D", "OUTPUT", "-j", "NEOBOX_KILLSWITCH")
-		_, _ = runFirewallCmd("ip6tables", "-w", "2", "-F", "NEOBOX_KILLSWITCH")
-		_, _ = runFirewallCmd("ip6tables", "-w", "2", "-X", "NEOBOX_KILLSWITCH")
+		if _, checkErr := runFirewallCmd("ip6tables", "-w", "2", "-C", "OUTPUT", "-j", "NEOBOX_KILLSWITCH"); checkErr == nil {
+			_, _ = runFirewallCmd("ip6tables", "-w", "2", "-D", "OUTPUT", "-j", "NEOBOX_KILLSWITCH")
+			_, _ = runFirewallCmd("ip6tables", "-w", "2", "-F", "NEOBOX_KILLSWITCH")
+			_, _ = runFirewallCmd("ip6tables", "-w", "2", "-X", "NEOBOX_KILLSWITCH")
+		}
 	}
 	if f.userDataDir != "" {
 		_ = os.Remove(f.markerPath(f.userDataDir))
