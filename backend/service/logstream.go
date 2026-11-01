@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	sclog "github.com/sagernet/sing-box/log"
 )
 
 // Every Go -> JS message in Wails v2 is delivered as a separately compiled
@@ -36,24 +38,46 @@ type LogEntry struct {
 	Raw       string `json:"raw"`                 // Original raw line for exports
 }
 
+// stripANSI removes terminal ANSI color escape sequences without regex allocations.
+func stripANSI(s string) string {
+	if !strings.Contains(s, "\x1b[") {
+		return s
+	}
+	b := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			for i < len(s) && !(s[i] >= 0x40 && s[i] <= 0x7e) {
+				i++
+			}
+			continue
+		}
+		b = append(b, s[i])
+	}
+	return string(b)
+}
+
 // fastScanLog performs zero-regex, fast string extraction for sing-box lines.
 func fastScanLog(level uint8, raw string) LogEntry {
 	now := time.Now().UnixMilli()
-	lvlStr := "INFO"
-	switch level {
-	case 1:
-		lvlStr = "TRACE"
-	case 2:
-		lvlStr = "DEBUG"
-	case 3:
-		lvlStr = "INFO"
-	case 4:
-		lvlStr = "WARN"
-	case 5, 6, 7:
+	var lvlStr string
+	switch sclog.Level(level) {
+	case sclog.LevelPanic, sclog.LevelFatal, sclog.LevelError:
 		lvlStr = "ERROR"
+	case sclog.LevelWarn:
+		lvlStr = "WARN"
+	case sclog.LevelInfo:
+		lvlStr = "INFO"
+	case sclog.LevelDebug:
+		lvlStr = "DEBUG"
+	case sclog.LevelTrace:
+		lvlStr = "TRACE"
+	default:
+		lvlStr = "INFO"
 	}
 
-	trimmed := strings.TrimSpace(raw)
+	cleanRaw := stripANSI(raw)
+	trimmed := strings.TrimSpace(cleanRaw)
 	msg := trimmed
 
 	// Handle prefix like "INFO[0001] " or "WARN [NeoBox] "
@@ -92,6 +116,10 @@ func fastScanLog(level uint8, raw string) LogEntry {
 	case strings.HasPrefix(msg, "router:"):
 		category = "router"
 		component = "router"
+	case strings.HasPrefix(msg, "reference:"):
+		category = "router"
+		component = "reference"
+		msg = strings.TrimSpace(strings.TrimPrefix(msg, "reference:"))
 	case strings.HasPrefix(msg, "inbound/"):
 		category = "inbound"
 		if colon := strings.IndexByte(msg, ':'); colon > 0 {
@@ -187,6 +215,11 @@ func newLogStreamer(emit func(event string, data ...interface{}), visible func()
 
 // WriteMessage is called by sing-box from its own goroutines, once per log line.
 func (l *logStreamer) WriteMessage(level uint8, message string) {
+	// Discard TRACE messages (packet-level XTLS padding/inspection spam) completely.
+	if sclog.Level(level) == sclog.LevelTrace {
+		return
+	}
+
 	entry := fastScanLog(level, message)
 
 	l.mu.Lock()

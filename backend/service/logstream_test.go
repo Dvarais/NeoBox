@@ -163,19 +163,38 @@ func TestLogStreamerStopFlushesTail(t *testing.T) {
 }
 
 func TestFastScanLog(t *testing.T) {
-	e1 := fastScanLog(3, "inbound/tun[tun-in]: connection to example.com:443")
-	if e1.Category != "inbound" || e1.Component != "inbound/tun[tun-in]" {
+	// LevelInfo = 4
+	e1 := fastScanLog(4, "inbound/tun[tun-in]: connection to example.com:443")
+	if e1.Category != "inbound" || e1.Component != "inbound/tun[tun-in]" || e1.Level != "INFO" {
 		t.Errorf("e1 unexpected: %+v", e1)
 	}
 
-	e2 := fastScanLog(2, "dns: exchanged example.com A in 15ms")
-	if e2.Category != "dns" || e2.Level != "DEBUG" {
+	// LevelDebug = 5 (with ANSI escape codes and reference tag)
+	e2 := fastScanLog(5, "\x1b[37mDEBUG\x1b[0m[0001] reference: outbound/trojan[node-1] is unreferenced, closing idle connections")
+	if e2.Category != "router" || e2.Component != "reference" || e2.Level != "DEBUG" {
 		t.Errorf("e2 unexpected: %+v", e2)
 	}
+	if e2.Message != "outbound/trojan[node-1] is unreferenced, closing idle connections" {
+		t.Errorf("e2 clean message unexpected: %q", e2.Message)
+	}
 
-	e3 := fastScanLog(5, "router: match direct")
+	// LevelError = 2
+	e3 := fastScanLog(2, "router: match direct")
 	if e3.Category != "router" || e3.Level != "ERROR" {
 		t.Errorf("e3 unexpected: %+v", e3)
+	}
+}
+
+func TestStripANSI(t *testing.T) {
+	plain := "plain text without escapes"
+	if got := stripANSI(plain); got != plain {
+		t.Errorf("stripANSI(plain) = %q, want %q", got, plain)
+	}
+
+	colored := "\x1b[31;1mERROR\x1b[0m: connection failed"
+	want := "ERROR: connection failed"
+	if got := stripANSI(colored); got != want {
+		t.Errorf("stripANSI(colored) = %q, want %q", got, want)
 	}
 }
 

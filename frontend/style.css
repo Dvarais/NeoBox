@@ -4555,8 +4555,6 @@ input.color-hex {
   border-radius: 14px;
   padding: 20px;
   margin-bottom: 20px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   transition: border-color 0.25s ease;
 }
 

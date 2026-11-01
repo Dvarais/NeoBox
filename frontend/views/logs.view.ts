@@ -17,7 +17,7 @@ export interface LogEntry {
 
 // Fixed line height for virtual scrolling
 const ROW_HEIGHT = 24;
-const MAX_LOG_ENTRIES = 3000;
+const MAX_LOG_ENTRIES = 5000;
 
 const logsArray: LogEntry[] = [];
 let filteredLogs: LogEntry[] = [];
@@ -87,7 +87,8 @@ function formatLogLineFast(entry: LogEntry): string {
     compHtml = `<span class="log-context">[${escapeHtml(entry.component)}]</span> `;
   }
 
-  return `<span class="log-time">[${timeStr}]</span> <span class="log-badge badge-${lvl}">${escapeHtml(entry.level || 'INFO')}</span> ${compHtml}<span class="log-msg">${escapeHtml(entry.message || entry.raw || '')}</span>`;
+  const rawMsg = (entry.message || entry.raw || '').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+  return `<span class="log-time">[${timeStr}]</span> <span class="log-badge badge-${lvl}">${escapeHtml(entry.level || 'INFO')}</span> ${compHtml}<span class="log-msg">${escapeHtml(rawMsg)}</span>`;
 }
 
 function isLogsViewOpen(): boolean {
@@ -221,11 +222,6 @@ export function applyLogsLanguage(t: Translations): void {
   setText('logsEmpty', t.noSearchResults);
   setAria('fullLogOutput', t.logsTitle);
 
-  const copySanitizedBtnText = optionalEl('copySanitizedLogsBtnText');
-  if (copySanitizedBtnText) {
-    copySanitizedBtnText.textContent = getLang() === 'RU' ? 'Обезличить' : 'Sanitize';
-  }
-
   const logTabs = optionalEl('logTabs') || document.querySelector('.log-tabs');
   if (logTabs) logTabs.setAttribute('aria-label', t.logFilterLabel);
 
@@ -308,7 +304,23 @@ export function initLogsView(options: {
         return;
       }
       try {
-        const path = await window.api.saveLogs(rawLogs);
+        // NBX-192-SEC: Автоматическое обезличивание логов перед сохранением
+        let sanitized = rawLogs;
+        if (window.api && (window.api as unknown as { sanitizeLogText?: (s: string) => Promise<string> }).sanitizeLogText) {
+          sanitized = await (window.api as unknown as { sanitizeLogText: (s: string) => Promise<string> }).sanitizeLogText(rawLogs);
+        } else {
+          sanitized = rawLogs
+            .replace(/\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g, '[REDACTED-UUID]')
+            .replace(/(?:password|secret|key|uuid|token)=([^&\s]+)/gi, 'token=[REDACTED]')
+            .replace(/\b([0-9]{1,3}\.[0-9]{1,3}\.)[0-9]{1,3}\.[0-9]{1,3}(:[0-9]+)?\b/g, (match) => {
+              if (match.startsWith('127.0.0.1') || match.startsWith('0.0.0.0')) return match;
+              const parts = match.split('.');
+              const portIdx = parts[3].indexOf(':');
+              const port = portIdx !== -1 ? parts[3].slice(portIdx) : '';
+              return `${parts[0]}.${parts[1]}.*.*${port}`;
+            });
+        }
+        const path = await window.api.saveLogs(sanitized);
         if (path) {
           const confirmed = await showConfirmFn(t.logsSavedConfirm.replace('{path}', path));
           if (confirmed) {
@@ -321,43 +333,6 @@ export function initLogsView(options: {
         console.error('Failed to save logs:', e);
         showAlertFn(t.errorDialogTitle, errorText(e) || t.logsSaveFailed, true, t);
       }
-    };
-  }
-
-  // NBX-192-SEC: Кнопка безопасного копирования логов без персональных данных
-  const copySanitizedBtn = optionalEl<HTMLButtonElement>('copySanitizedLogsBtn');
-  if (copySanitizedBtn) {
-    copySanitizedBtn.onclick = async () => {
-      const raw = logsArray.map((l) => l.raw).join('\n');
-      const t = translations[getLang()];
-      if (!raw.trim()) {
-        showAlertFn(t.alertDialogTitle, t.logsEmptyAlert, false, t);
-        return;
-      }
-      let sanitized = raw;
-      if (window.api && (window.api as unknown as { sanitizeLogText?: (s: string) => Promise<string> }).sanitizeLogText) {
-        sanitized = await (window.api as unknown as { sanitizeLogText: (s: string) => Promise<string> }).sanitizeLogText(raw);
-      } else {
-        // Fallback sanitize
-        sanitized = raw
-          .replace(/\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g, '[REDACTED-UUID]')
-          .replace(/(?:password|secret|key|uuid|token)=([^&\s]+)/gi, 'token=[REDACTED]')
-          .replace(/\b([0-9]{1,3}\.[0-9]{1,3}\.)[0-9]{1,3}\.[0-9]{1,3}(:[0-9]+)?\b/g, (match) => {
-            if (match.startsWith('127.0.0.1') || match.startsWith('0.0.0.0')) return match;
-            const parts = match.split('.');
-            const portIdx = parts[3].indexOf(':');
-            const port = portIdx !== -1 ? parts[3].slice(portIdx) : '';
-            return `${parts[0]}.${parts[1]}.*.*${port}`;
-          });
-      }
-      await navigator.clipboard.writeText(sanitized);
-      const originalText = copySanitizedBtn.textContent;
-      copySanitizedBtn.textContent = '✓ ' + (getLang() === 'RU' ? 'Обезличено' : 'Sanitized');
-      copySanitizedBtn.disabled = true;
-      setTimeout(() => {
-        copySanitizedBtn.textContent = originalText;
-        copySanitizedBtn.disabled = false;
-      }, 2000);
     };
   }
 
