@@ -95,7 +95,10 @@ export function initSubManagePanel(): void {
 
 export async function loadSubscriptions(): Promise<void> {
   const currentLang = getLang();
-  const subTabsContainer = optionalEl('subTabsContainer');
+  const subTabsContainer =
+    optionalEl('subscription-tabs') ||
+    optionalEl('subTabsContainer') ||
+    document.querySelector<HTMLElement>('.subscription-tabs');
   const subStatusLine = optionalEl('subStatusLine');
 
   await loadSubsBase(() => {
@@ -300,8 +303,12 @@ export function applySubscriptionsLanguage(t: Translations): void {
   setText('qrModalClose', t.errorDialogClose);
 
   const currentLang = getLang();
+  const subTabsContainer =
+    optionalEl('subscription-tabs') ||
+    optionalEl('subTabsContainer') ||
+    document.querySelector<HTMLElement>('.subscription-tabs');
   renderSubTabs(
-    optionalEl('subTabsContainer'),
+    subTabsContainer,
     translations,
     currentLang,
     () => {

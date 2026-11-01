@@ -302,11 +302,11 @@ func (s *AppService) onWindowRestored() {
 		return
 	}
 	totalUp, totalDown := s.sessionTraffic()
-	s.emitSafe("traffic-stats", map[string]interface{}{
-		"up":        int64(0),
-		"down":      int64(0),
-		"totalUp":   totalUp,
-		"totalDown": totalDown,
+	s.emitSafe("traffic-stats", TrafficStatsPayload{
+		Up:        0,
+		Down:      0,
+		TotalUp:   totalUp,
+		TotalDown: totalDown,
 	})
 }
 

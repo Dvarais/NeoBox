@@ -91,8 +91,10 @@ func (s *AppService) startWatchdog(link string, useSystemProxy bool) {
 	upstream := upstreamProbeAddr(link)
 
 	// Give the VPN core time to fully initialise before probing
+	initTimer := time.NewTimer(20 * time.Second)
+	defer initTimer.Stop()
 	select {
-	case <-time.After(20 * time.Second):
+	case <-initTimer.C:
 	case <-ctx.Done():
 		return
 	}
@@ -115,7 +117,10 @@ func (s *AppService) startWatchdog(link string, useSystemProxy bool) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			conn, err := net.DialTimeout("tcp", core.ProxyListenAddr, 3*time.Second)
+			var dialer net.Dialer
+			dialCtx, dialCancel := context.WithTimeout(ctx, 3*time.Second)
+			conn, err := dialer.DialContext(dialCtx, "tcp", core.ProxyListenAddr)
+			dialCancel()
 			if err == nil {
 				_ = conn.Close()
 				failCount = 0

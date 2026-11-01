@@ -299,6 +299,13 @@ const api: NeoBoxApi = {
 
   // Logs
   saveLogs: (content) => SaveLogs(content),
+  sanitizeLogText: async (content: string) => {
+    const w = window as unknown as { go?: { service?: { AppService?: { SanitizeLogText?: (c: string) => Promise<string> } } } };
+    if (w.go?.service?.AppService?.SanitizeLogText) {
+      return w.go.service.AppService.SanitizeLogText(content);
+    }
+    return content;
+  },
   openLogsFolder: () => OpenLogsFolder(),
 
   // Watchdog events

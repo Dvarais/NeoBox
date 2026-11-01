@@ -397,6 +397,20 @@
             </label>
             <p class="routes-instrument-hint">Трафик к российским сайтам, банкам и сервисам направляется напрямую вне VPN без потери скорости.</p>
           </div>
+          <div class="routes-instrument-box">
+            <label class="check-row check-row--flush" for="blockTorrentCheckbox">
+              <input type="checkbox" id="blockTorrentCheckbox">
+              <span id="blockTorrentLabel" class="routes-toggle-label">Блокировать BitTorrent / P2P</span>
+            </label>
+            <p id="blockTorrentDesc" class="routes-instrument-hint">Блокировать BitTorrent / P2P (защита от банов)</p>
+          </div>
+          <div class="routes-instrument-box">
+            <label class="check-row check-row--flush" for="blockQuicCheckbox">
+              <input type="checkbox" id="blockQuicCheckbox">
+              <span id="blockQuicLabel" class="routes-toggle-label">Блокировать QUIC / HTTP-3</span>
+            </label>
+            <p id="blockQuicDesc" class="routes-instrument-hint">Блокировать QUIC / HTTP-3 (ускоряет YouTube)</p>
+          </div>
         </div>
       </div>
 
@@ -813,6 +827,10 @@
           <button id="saveLogsBtn" class="btn-glass" type="button" title="Сохранить логи в файл">
             <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             <span id="saveLogsBtnText">Сохранить</span>
+          </button>
+          <button id="copySanitizedLogsBtn" class="btn-glass" type="button" title="Скопировать логи с маскировкой IP и ключей (NBX-192-SEC)">
+            <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <span id="copySanitizedLogsBtnText">Обезличить</span>
           </button>
           <button id="clearLogsBtn" class="btn-glass" type="button">Очистить</button>
         </div>

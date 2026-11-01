@@ -2,6 +2,9 @@ package service
 
 import (
 	"fmt"
+	"net"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -12,35 +15,157 @@ import (
 // Bound-method results take the same route. There is no cheaper transport, so
 // the only lever on renderer memory is how many messages we send.
 //
-// That matters because sing-box logs the open and the close of every single
-// connection at "info" level. Emitting one event per line meant an ordinary
-// browsing session pushed hundreds of unique scripts per second into WebView2,
-// and its renderer process grew without bound — 45 MB to over 1.7 GB within a
-// single session.
-//
-// logStreamer fixes that at the source: lines land in a bounded ring buffer and
-// leave in one batched event a few times per second, which is two orders of
-// magnitude fewer ExecuteScript calls while the user still sees every line.
+// logStreamer buffers sing-box log lines and delivers them to the frontend in
+// batches. It satisfies sing-box's log.PlatformWriter.
 const (
-	// maxBufferedLogLines caps the buffer. It matches MAX_LOG_ENTRIES in
-	// renderer.js: the UI never shows more than this, so holding more here
-	// would only be memory we are about to throw away anyway.
-	maxBufferedLogLines = 500
+	// maxBufferedLogLines caps the buffer.
+	maxBufferedLogLines = 2000
 
 	// logFlushInterval bounds how often the frontend is woken. Four batches a
 	// second still reads as live output to a human.
 	logFlushInterval = 250 * time.Millisecond
 )
 
+// LogEntry represents a structured, pre-parsed log record delivered to Wails.
+type LogEntry struct {
+	Timestamp int64  `json:"t"`                   // Unix timestamp in milliseconds
+	Level     string `json:"level"`               // "DEBUG", "INFO", "WARN", "ERROR"
+	Category  string `json:"category"`            // "dns", "router", "inbound", "outbound", "system"
+	Component string `json:"component,omitempty"` // e.g. "inbound/tun[tun-in]"
+	Message   string `json:"message"`             // Clean payload
+	Raw       string `json:"raw"`                 // Original raw line for exports
+}
+
+// fastScanLog performs zero-regex, fast string extraction for sing-box lines.
+func fastScanLog(level uint8, raw string) LogEntry {
+	now := time.Now().UnixMilli()
+	lvlStr := "INFO"
+	switch level {
+	case 1:
+		lvlStr = "TRACE"
+	case 2:
+		lvlStr = "DEBUG"
+	case 3:
+		lvlStr = "INFO"
+	case 4:
+		lvlStr = "WARN"
+	case 5, 6, 7:
+		lvlStr = "ERROR"
+	}
+
+	trimmed := strings.TrimSpace(raw)
+	msg := trimmed
+
+	// Handle prefix like "INFO[0001] " or "WARN [NeoBox] "
+	if strings.HasPrefix(msg, "INFO[") || strings.HasPrefix(msg, "WARN[") ||
+		strings.HasPrefix(msg, "ERROR[") || strings.HasPrefix(msg, "DEBUG[") ||
+		strings.HasPrefix(msg, "FATAL[") || strings.HasPrefix(msg, "PANIC[") ||
+		strings.HasPrefix(msg, "WARN [") || strings.HasPrefix(msg, "INFO [") ||
+		strings.HasPrefix(msg, "ERROR [") {
+		if bracketIdx := strings.IndexByte(msg, ']'); bracketIdx > 0 {
+			prefix := msg[:bracketIdx]
+			if strings.Contains(prefix, "ERROR") || strings.Contains(prefix, "FATAL") {
+				lvlStr = "ERROR"
+			} else if strings.Contains(prefix, "WARN") {
+				lvlStr = "WARN"
+			} else if strings.Contains(prefix, "DEBUG") {
+				lvlStr = "DEBUG"
+			}
+			msg = strings.TrimSpace(msg[bracketIdx+1:])
+		}
+	}
+
+	// Extract session tag prefix if present: "[3542283088 0ms] "
+	if strings.HasPrefix(msg, "[") {
+		if endTag := strings.IndexByte(msg, ']'); endTag > 0 {
+			msg = strings.TrimSpace(msg[endTag+1:])
+		}
+	}
+
+	category := "system"
+	component := ""
+
+	switch {
+	case strings.HasPrefix(msg, "dns:"):
+		category = "dns"
+		component = "dns"
+	case strings.HasPrefix(msg, "router:"):
+		category = "router"
+		component = "router"
+	case strings.HasPrefix(msg, "inbound/"):
+		category = "inbound"
+		if colon := strings.IndexByte(msg, ':'); colon > 0 {
+			component = msg[:colon]
+			msg = strings.TrimSpace(msg[colon+1:])
+		}
+	case strings.HasPrefix(msg, "outbound/"):
+		category = "outbound"
+		if colon := strings.IndexByte(msg, ':'); colon > 0 {
+			component = msg[:colon]
+			msg = strings.TrimSpace(msg[colon+1:])
+		}
+	default:
+		if strings.Contains(msg, "connection opened") || strings.Contains(msg, "connection closed") {
+			category = "router"
+		}
+	}
+
+	return LogEntry{
+		Timestamp: now,
+		Level:     lvlStr,
+		Category:  category,
+		Component: component,
+		Message:   msg,
+		Raw:       trimmed,
+	}
+}
+
+// circularLogBuffer implements an allocation-free O(1) circular ring buffer.
+type circularLogBuffer struct {
+	entries []LogEntry
+	head    int
+	count   int
+	cap     int
+}
+
+func newCircularLogBuffer(capacity int) *circularLogBuffer {
+	return &circularLogBuffer{
+		entries: make([]LogEntry, capacity),
+		cap:     capacity,
+	}
+}
+
+func (c *circularLogBuffer) Push(entry LogEntry) bool {
+	if c.count < c.cap {
+		c.entries[(c.head+c.count)%c.cap] = entry
+		c.count++
+		return false
+	}
+	c.entries[c.head] = entry
+	c.head = (c.head + 1) % c.cap
+	return true
+}
+
+func (c *circularLogBuffer) Drain() []LogEntry {
+	if c.count == 0 {
+		return nil
+	}
+	out := make([]LogEntry, c.count)
+	for i := 0; i < c.count; i++ {
+		out[i] = c.entries[(c.head+i)%c.cap]
+	}
+	c.head = 0
+	c.count = 0
+	return out
+}
+
 // logStreamer buffers sing-box log lines and delivers them to the frontend in
 // batches. It satisfies sing-box's log.PlatformWriter.
 type logStreamer struct {
 	mu      sync.Mutex
-	buf     []string
+	ring    *circularLogBuffer
 	dropped int
 
-	// emit and visible are injected rather than taking an *AppService so the
-	// streamer can be tested without a Wails context.
 	emit    func(event string, data ...interface{})
 	visible func() bool
 
@@ -51,7 +176,7 @@ type logStreamer struct {
 // newLogStreamer starts the flush loop. Call stop() when the core session ends.
 func newLogStreamer(emit func(event string, data ...interface{}), visible func() bool) *logStreamer {
 	ls := &logStreamer{
-		buf:     make([]string, 0, 64),
+		ring:    newCircularLogBuffer(maxBufferedLogLines),
 		emit:    emit,
 		visible: visible,
 		stop:    make(chan struct{}),
@@ -60,20 +185,16 @@ func newLogStreamer(emit func(event string, data ...interface{}), visible func()
 	return ls
 }
 
-// WriteMessage is called by sing-box from its own goroutines, once per log
-// line. It must stay cheap: no formatting, no IPC, just an append.
+// WriteMessage is called by sing-box from its own goroutines, once per log line.
 func (l *logStreamer) WriteMessage(level uint8, message string) {
+	entry := fastScanLog(level, message)
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if len(l.buf) >= maxBufferedLogLines {
-		// Drop the oldest line rather than the newest: the tail is what the
-		// user is watching. Count the loss so the batch can say so.
-		copy(l.buf, l.buf[1:])
-		l.buf = l.buf[:len(l.buf)-1]
+	if dropped := l.ring.Push(entry); dropped {
 		l.dropped++
 	}
-	l.buf = append(l.buf, message)
 }
 
 func (l *logStreamer) run() {
@@ -82,13 +203,9 @@ func (l *logStreamer) run() {
 	for {
 		select {
 		case <-l.stop:
-			// Final flush so the tail of a session is not lost.
 			l.flush()
 			return
 		case <-ticker.C:
-			// While the window is hidden nothing can read the output, so
-			// sending it would only keep WebView2 awake. Lines keep collecting
-			// in the bounded buffer and go out in one batch on restore.
 			if l.visible == nil || l.visible() {
 				l.flush()
 			}
@@ -96,32 +213,63 @@ func (l *logStreamer) run() {
 	}
 }
 
-// flush sends everything buffered as a single event. It is safe to call from
-// any goroutine and does nothing when there is nothing to send.
+// flush sends everything buffered as a single event.
 func (l *logStreamer) flush() {
 	l.mu.Lock()
-	if len(l.buf) == 0 && l.dropped == 0 {
+	if l.ring.count == 0 && l.dropped == 0 {
 		l.mu.Unlock()
 		return
 	}
-	lines := l.buf
+	entries := l.ring.Drain()
 	dropped := l.dropped
-	l.buf = make([]string, 0, 64)
 	l.dropped = 0
 	l.mu.Unlock()
 
 	if dropped > 0 {
-		// Say it out loud instead of silently showing a gap in the log.
-		notice := fmt.Sprintf("WARN [NeoBox] %d log lines dropped (output faster than the UI can consume)", dropped)
-		lines = append([]string{notice}, lines...)
+		notice := fastScanLog(4, fmt.Sprintf("WARN [NeoBox] %d log lines dropped (output faster than the UI can consume)", dropped))
+		entries = append([]LogEntry{notice}, entries...)
 	}
 
 	if l.emit != nil {
-		l.emit("xray-log-batch", lines)
+		l.emit("xray-log-batch", entries)
 	}
 }
 
 // stopStreaming ends the flush loop after one final flush. Safe to call twice.
 func (l *logStreamer) stopStreaming() {
 	l.stopOnce.Do(func() { close(l.stop) })
+}
+
+var (
+	reIPv4 = regexp.MustCompile(`\b([0-9]{1,3}\.[0-9]{1,3}\.)[0-9]{1,3}\.[0-9]{1,3}(:[0-9]+)?\b`)
+	reUUID = regexp.MustCompile(`\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`)
+	reKey  = regexp.MustCompile(`(?i)(password|secret|key|uuid|token)=([^&\s]+)`)
+)
+
+// SanitizeLogText masks external IP addresses, private credentials, and UUIDs
+// according to specification NBX-192-SEC.
+func SanitizeLogText(content string) string {
+	content = reUUID.ReplaceAllString(content, "[REDACTED-UUID]")
+	content = reKey.ReplaceAllString(content, `$1=[REDACTED]`)
+	content = reIPv4.ReplaceAllStringFunc(content, func(matched string) string {
+		host, port, err := net.SplitHostPort(matched)
+		if err != nil {
+			host = matched
+			port = ""
+		}
+		ip := net.ParseIP(host)
+		if ip == nil || ip.IsLoopback() || ip.IsUnspecified() {
+			return matched
+		}
+		parts := strings.Split(host, ".")
+		if len(parts) != 4 {
+			return matched
+		}
+		maskedHost := fmt.Sprintf("%s.%s.*.*", parts[0], parts[1])
+		if port != "" {
+			return maskedHost + ":" + port
+		}
+		return maskedHost
+	})
+	return content
 }

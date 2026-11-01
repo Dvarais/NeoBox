@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -65,11 +66,11 @@ func TestTestServerSpeed_NoServerSpecified(t *testing.T) {
 	s.setVPNState(VPNStateDisconnected)
 
 	res := s.TestServerSpeed("")
-	if res["success"] != false {
+	if res.Success != false {
 		t.Errorf("expected success: false, got %v", res)
 	}
-	if res["error"] != "no server specified" {
-		t.Errorf("expected 'no server specified', got %v", res["error"])
+	if res.Error != "no server specified" {
+		t.Errorf("expected 'no server specified', got %v", res.Error)
 	}
 }
 
@@ -101,7 +102,7 @@ func TestMeasureActiveConnectionSpeed_DirectServer(t *testing.T) {
 
 	res := s.TestServerSpeed("invalid-link://test")
 	// Expected to fail cleanly with invalid link
-	if res["success"] != false {
+	if res.Success != false {
 		t.Errorf("expected success: false for invalid link, got %v", res)
 	}
 }
@@ -111,11 +112,40 @@ func TestTestServerSpeed_AutoModeDisconnected(t *testing.T) {
 	s.setVPNState(VPNStateDisconnected)
 
 	res := s.TestServerSpeed("neobox://auto")
-	if res["success"] != false {
+	if res.Success != false {
 		t.Errorf("expected success: false for auto mode when disconnected, got %v", res)
 	}
-	if res["error"] != "speed test in auto mode requires an active connection" {
-		t.Errorf("expected 'speed test in auto mode requires an active connection', got %v", res["error"])
+	if res.Error != "speed test in auto mode requires an active connection" {
+		t.Errorf("expected 'speed test in auto mode requires an active connection', got %v", res.Error)
+	}
+}
+
+func TestServerSpeedPayload_JSON(t *testing.T) {
+	p := ServerSpeedPayload{
+		Success: true,
+		Mbps:    45.6,
+		Speed:   45.6,
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	expected := `{"success":true,"mbps":45.6,"speed":45.6}`
+	if string(data) != expected {
+		t.Errorf("got %s, want %s", string(data), expected)
+	}
+
+	pErr := ServerSpeedPayload{
+		Success: false,
+		Error:   "speed test failed",
+	}
+	dataErr, err := json.Marshal(pErr)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	expectedErr := `{"success":false,"error":"speed test failed"}`
+	if string(dataErr) != expectedErr {
+		t.Errorf("got %s, want %s", string(dataErr), expectedErr)
 	}
 }
 

@@ -1035,8 +1035,8 @@ label.check-row,
   display: flex;
   justify-content: space-between;
   align-items: center;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 62px;
 }
 
 .server-card:hover {
@@ -1384,14 +1384,16 @@ textarea:focus {
 
 .log-line {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  word-wrap: break-word;
-  white-space: pre-wrap;
-  margin-bottom: 4px;
-  padding: 4px 6px;
-  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  height: 24px;
+  box-sizing: border-box;
+  margin-bottom: 0;
+  padding: 0 6px;
+  border-radius: 4px;
   font-family: var(--font-mono);
   transition: background-color 0.1s ease;
 }
@@ -2066,9 +2068,7 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   display: flex;
   align-items: center;
   gap: 14px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, background 0.2s ease;
 }
 
 .history-stat-card:hover {
@@ -2141,10 +2141,10 @@ body[data-active-tab="view-servers"] main::-webkit-scrollbar {
   display: flex;
   align-items: center;
   gap: 16px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, background 0.2s ease;
   animation: fadeIn 0.3s ease forwards;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 72px;
 }
 
 .history-card:hover {

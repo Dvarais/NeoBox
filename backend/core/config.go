@@ -2,6 +2,7 @@ package core
 
 import (
 	"NeoBox/backend/i18n"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -340,6 +341,7 @@ type Settings struct {
 	ProcessListBlacklist []string `json:"processListBlacklist"`
 	ProcessListWhitelist []string `json:"processListWhitelist"`
 	BypassRu             bool     `json:"bypassRu"`
+	BlockQuic            bool     `json:"blockQuic"`
 	KillSwitch           bool     `json:"killSwitch"`
 	// DnsLeakProtection: when true (default), all DNS is routed through VPN to prevent leaks.
 	// When false, the local DNS resolver is allowed as fallback.
@@ -362,6 +364,8 @@ type Settings struct {
 	// AllowLan binds the mixed inbound (SOCKS5+HTTP) to 0.0.0.0 instead of 127.0.0.1,
 	// allowing other devices on the local area network to use this machine as a proxy.
 	AllowLan bool `json:"allowLan"`
+	// BlockTorrent drops BitTorrent/P2P protocol traffic to protect against host bans.
+	BlockTorrent bool `json:"blockTorrent"`
 }
 
 // CustomRule represents a single user-defined routing rule.
@@ -1634,6 +1638,26 @@ func GenerateConfigWithCandidates(candidates []map[string]interface{}, outbound 
 		})
 	}
 
+	// Block BitTorrent (P2P) in the tunnel to prevent host bans / DMCA complaints.
+	if settings.BlockTorrent {
+		routeRules = append(routeRules, map[string]interface{}{
+			"protocol": []string{"bittorrent"},
+			"action":   "reject",
+			"method":   "default",
+		})
+	}
+
+	// Block QUIC / HTTP-3 (UDP 443) traffic, forcing clients to fallback to TCP (HTTP/1.1 and HTTP/2),
+	// which prevents throttling and censorship of YouTube/Google services on UDP.
+	if settings.BlockQuic {
+		routeRules = append(routeRules, map[string]interface{}{
+			"network": "udp",
+			"port":    []int{443},
+			"action":  "reject",
+			"method":  "default",
+		})
+	}
+
 	// Custom user-defined routing rules (take priority over geoip/geosite)
 	for _, rule := range settings.CustomRules {
 		if rule.Value == "" || rule.Type == "" || rule.Action == "" {
@@ -2019,6 +2043,7 @@ var restrictedCIDRs = []string{
 	"224.0.0.0/4",        // Multicast (RFC 5771)
 	"240.0.0.0/4",        // Reserved for future use (RFC 1112)
 	"255.255.255.255/32", // Limited Broadcast (RFC 919)
+	"::/96",              // IPv4-compatible IPv6 (deprecated RFC 4291)
 	"::/128",             // Unspecified IPv6
 	"::1/128",            // Loopback IPv6 (RFC 4291)
 	"fc00::/7",           // Unique Local Addresses / ULA (RFC 4193)
@@ -2029,6 +2054,8 @@ var restrictedCIDRs = []string{
 	"2001::/32",          // Teredo tunneling prefix (RFC 4380)
 	"2001:db8::/32",      // Documentation (RFC 3849)
 	"2002::/16",          // 6to4 prefix (RFC 3056)
+	"fec0::/10",          // Site-Local Unicast (deprecated RFC 3879)
+	"192.175.48.0/24",    // AS112 direct delegation (RFC 7535)
 }
 
 var restrictedPrefixes []netip.Prefix
@@ -2041,15 +2068,11 @@ func init() {
 	}
 }
 
-// IsPublicIP reports whether the given IP address is a publicly routable internet address.
-// Returns false for loopback, private, link-local, carrier-grade NAT, cloud metadata,
-// multicast, broadcast, and reserved network addresses.
-func IsPublicIP(ip net.IP) bool {
-	if ip == nil {
-		return false
-	}
-	addr, ok := netip.AddrFromSlice(ip)
-	if !ok || !addr.IsValid() {
+// IsPublicAddr reports whether the given netip.Addr is a publicly routable address.
+// Zero-allocation check against loopback, private, link-local, carrier-grade NAT,
+// cloud metadata, and reserved networks.
+func IsPublicAddr(addr netip.Addr) bool {
+	if !addr.IsValid() {
 		return false
 	}
 	addr = addr.Unmap()
@@ -2068,6 +2091,18 @@ func IsPublicIP(ip net.IP) bool {
 	return true
 }
 
+// IsPublicIP preserves backward compatibility for net.IP callers.
+func IsPublicIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok || !addr.IsValid() {
+		return false
+	}
+	return IsPublicAddr(addr)
+}
+
 // isRestrictedHost checks if a hostname or literal IP target should be rejected
 // up front to prevent SSRF against internal resources or local infrastructure.
 func isRestrictedHost(rawHost string) bool {
@@ -2084,8 +2119,8 @@ func isRestrictedHost(rawHost string) bool {
 		strings.HasSuffix(host, ".onion") {
 		return true
 	}
-	if ip := net.ParseIP(host); ip != nil {
-		return !IsPublicIP(ip)
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return !IsPublicAddr(addr)
 	}
 	return false
 }
@@ -2106,9 +2141,14 @@ func refuseInsecureRedirect(req *http.Request, via []*http.Request) error {
 	if !strings.EqualFold(req.URL.Scheme, "https") {
 		return fmt.Errorf("refusing redirect to %s: subscriptions must stay on HTTPS", req.URL.Scheme)
 	}
-	hostname := req.URL.Hostname()
+	hostname := strings.Trim(strings.TrimSpace(req.URL.Hostname()), "[]")
 	if isRestrictedHost(hostname) {
 		return fmt.Errorf("refusing redirect to restricted host %q: SSRF protection", hostname)
+	}
+	if addr, err := netip.ParseAddr(hostname); err == nil {
+		if !IsPublicAddr(addr) {
+			return fmt.Errorf("refusing redirect to private IP %s: SSRF protection", addr.String())
+		}
 	}
 	return nil
 }
@@ -2206,13 +2246,22 @@ func fetchSubscriptionBodyWithInfo(ctx context.Context, client *http.Client, sub
 		userInfo = ParseSubscriptionUserInfo(rawInfo)
 	}
 
+	// LimitReader prevents unbounded memory exhaustion from malicious subscription endpoints (max 20MB)
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 20*1024*1024))
 	if err != nil {
 		return nil, nil, fmt.Errorf("response read error: %w", err)
 	}
 
-	trimmed := strings.ToLower(strings.TrimSpace(string(body)))
-	if trimmed == "" || strings.Contains(trimmed, "<html") || strings.Contains(trimmed, "<script") {
+	// Sniff first 1024 bytes without allocating the entire 20MB body into a new lowercased string
+	sniffLen := len(body)
+	if sniffLen > 1024 {
+		sniffLen = 1024
+	}
+	sniffHeader := bytes.ToLower(bytes.TrimSpace(body[:sniffLen]))
+	if len(sniffHeader) == 0 ||
+		bytes.Contains(sniffHeader, []byte("<html")) ||
+		bytes.Contains(sniffHeader, []byte("<!doctype html")) ||
+		bytes.Contains(sniffHeader, []byte("<script")) {
 		return nil, nil, errSubBlocked
 	}
 	return body, userInfo, nil
@@ -2283,32 +2332,46 @@ func FetchSubscriptionPayloadContext(ctx context.Context, subURL string) (*Subsc
 		return nil, errors.New(i18n.T(i18n.ErrSubURLNotSecure))
 	}
 
-	// [INTERNET SEARCH PATTERN]
 	// Validate target hostname and IP up front against SSRF and cloud metadata addresses
-	if isRestrictedHost(parsedURL.Hostname()) {
-		return nil, fmt.Errorf("subscription URL points to a private or restricted host %q: SSRF protection", parsedURL.Hostname())
+	destHost := strings.Trim(strings.TrimSpace(parsedURL.Hostname()), "[]")
+	if isRestrictedHost(destHost) {
+		return nil, fmt.Errorf("subscription URL points to a private or restricted host %q: SSRF protection", destHost)
 	}
 
-	// [INTERNET SEARCH PATTERN]
+	// Pre-resolve host via DoH / bootstrap DNS to detect DNS rebinding before any transport connects
+	if addr, err := netip.ParseAddr(destHost); err == nil {
+		if !IsPublicAddr(addr) {
+			return nil, fmt.Errorf("subscription URL points to a private IP %s: SSRF protection", addr.String())
+		}
+	} else if ips, err := ResolveHost(ctx, destHost); err == nil && len(ips) > 0 {
+		for _, ip := range ips {
+			if !IsPublicIP(ip) {
+				return nil, fmt.Errorf("subscription host %q resolved to private or restricted IP %s: SSRF protection", destHost, ip.String())
+			}
+		}
+	}
+
 	// DNS rebinding and SSRF protection via net.Dialer.Control hook.
-	// Executes after DNS resolution and socket creation, but before TCP handshake.
+	// Executes after DNS resolution and socket creation, but before TCP handshake (connect(2)).
 	// Validates that the resolved socket address is not a private or restricted IP.
+	safeDialControl := func(network, address string, c syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			host = address
+		}
+		addr, err := netip.ParseAddr(strings.Trim(strings.TrimSpace(host), "[]"))
+		if err != nil {
+			return fmt.Errorf("ssrf guard: unable to parse resolved IP %q: %w", host, err)
+		}
+		if !IsPublicAddr(addr) {
+			return fmt.Errorf("ssrf guard: connection to private or restricted IP %s blocked", addr.String())
+		}
+		return nil
+	}
+
 	safeDialer := &net.Dialer{
 		Timeout: 10 * time.Second,
-		Control: func(network, address string, c syscall.RawConn) error {
-			host, _, err := net.SplitHostPort(address)
-			if err != nil {
-				host = address
-			}
-			ip := net.ParseIP(host)
-			if ip == nil {
-				return fmt.Errorf("ssrf guard: unable to parse resolved IP %q", host)
-			}
-			if !IsPublicIP(ip) {
-				return fmt.Errorf("ssrf guard: connection to private or restricted IP %s blocked", ip.String())
-			}
-			return nil
-		},
+		Control: safeDialControl,
 	}
 
 	// Transports, in the order they are tried: the local proxy first (highly

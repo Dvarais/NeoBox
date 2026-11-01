@@ -16,6 +16,11 @@ var (
 
 	defaultTransportOnce sync.Once
 	defaultTransport     *http.Transport
+
+	// defaultClientSessionCache is a thread-safe process-wide LRU cache for TLS 1.2/1.3 session tickets.
+	// Caching session states reduces repeated TLS handshakes to DoH resolvers and subscription servers,
+	// saving 1 RTT of latency and skipping expensive asymmetric key exchanges.
+	defaultClientSessionCache = tls.NewLRUClientSessionCache(128)
 )
 
 // SystemCertPool returns the cached system root certificate pool.
@@ -46,12 +51,13 @@ func SystemCertPool() *x509.CertPool {
 	return systemRoots
 }
 
-// SecureTLSConfig returns a *tls.Config with TLS 1.2 minimum version and
-// the cached pure-Go SystemCertPool.
+// SecureTLSConfig returns a *tls.Config with TLS 1.2 minimum version,
+// the cached pure-Go SystemCertPool, and the shared process-wide ClientSessionCache.
 func SecureTLSConfig(serverName string) *tls.Config {
 	cfg := &tls.Config{
-		MinVersion: tls.VersionTLS12,
-		RootCAs:    SystemCertPool(),
+		MinVersion:         tls.VersionTLS12,
+		RootCAs:            SystemCertPool(),
+		ClientSessionCache: defaultClientSessionCache,
 	}
 	if serverName != "" {
 		cfg.ServerName = serverName
@@ -81,4 +87,3 @@ func DefaultHTTPClient(timeout time.Duration) *http.Client {
 		Transport: DefaultTransport(),
 	}
 }
-

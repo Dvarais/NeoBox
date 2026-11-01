@@ -97,6 +97,8 @@ export interface AppSettings {
   verboseLogging: boolean;
   tlsFragment?: boolean;
   allowLan?: boolean;
+  blockTorrent?: boolean;
+  blockQuic?: boolean;
   lastSelectedServer: string | null;
   processMode: 'blacklist' | 'whitelist';
   processListBlacklist: string[];
@@ -132,6 +134,8 @@ export type ProfileSettings = Pick<
   AppSettings,
   | 'dns'
   | 'bypassRu'
+  | 'blockQuic'
+  | 'blockTorrent'
   | 'tunMode'
   | 'systemProxy'
   | 'processMode'
@@ -172,6 +176,9 @@ export interface Profile {
  * каждое поле требует значения по умолчанию на стороне читателя.
  */
 export type StoredSettings = Partial<AppSettings>;
+
+export type Settings = AppSettings;
+export type SettingsKey = keyof AppSettings;
 
 /** Итоги трафика сессии, в байтах. */
 export interface SessionTraffic {
@@ -434,6 +441,7 @@ export interface NeoBoxApi {
 
   // Логи
   saveLogs(content: string): Promise<string>;
+  sanitizeLogText?(content: string): Promise<string>;
   openLogsFolder(): Promise<void>;
 
   // Права администратора

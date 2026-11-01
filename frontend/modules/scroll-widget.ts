@@ -1,9 +1,20 @@
 import { optionalEl, query } from './dom';
 
+let isScrollScheduled = false;
+
 /**
- * Обновляет позицию и размер бегунка интерактивного виджета прокрутки.
+ * Обновляет позицию и размер бегунка интерактивного виджета прокрутки с rAF-дросселированием.
  */
 export function updateCustomScroll(): void {
+  if (isScrollScheduled) return;
+  isScrollScheduled = true;
+  requestAnimationFrame(() => {
+    isScrollScheduled = false;
+    performUpdateCustomScroll();
+  });
+}
+
+function performUpdateCustomScroll(): void {
   const scrollWidget = optionalEl('serversScrollWidget');
   const scrollTrack = optionalEl('scrollTrack');
   const scrollThumb = optionalEl('scrollThumb');
@@ -59,7 +70,7 @@ export function initScrollWidget(): void {
 
   if (!scrollWidget || !mainContainer || !scrollTrack || !scrollThumb) return;
 
-  mainContainer.addEventListener('scroll', updateCustomScroll);
+  mainContainer.addEventListener('scroll', updateCustomScroll, { passive: true });
   window.addEventListener('resize', updateCustomScroll);
 
   scrollThumb.addEventListener('mousedown', (e) => {

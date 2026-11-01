@@ -1,13 +1,16 @@
 package service
 
 import (
+	"bytes"
+	"cmp"
+	"container/heap"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -109,16 +112,20 @@ type clashSnapshot struct {
 	Connections []clashConnection `json:"connections"`
 }
 
+// ConnectionsPayload represents the typed Wails IPC response for GetConnections.
+type ConnectionsPayload struct {
+	Running     bool            `json:"running"`
+	Connections []connectionRow `json:"connections"`
+	Total       int             `json:"total"`
+}
+
 // GetConnections returns a snapshot of the connections the core currently has
 // open, newest first and capped at maxConnectionRows.
-//
-// The shape is map[string]interface{} to match CheckUpdates and StartXray;
-// frontend/modules/api.ts is the hand-written description of it.
-func (s *AppService) GetConnections() map[string]interface{} {
-	empty := map[string]interface{}{
-		"running":     false,
-		"connections": []connectionRow{},
-		"total":       0,
+func (s *AppService) GetConnections() ConnectionsPayload {
+	empty := ConnectionsPayload{
+		Running:     false,
+		Connections: []connectionRow{},
+		Total:       0,
 	}
 
 	// StopXray does not clear clashSecret, so without this gate a stopped
@@ -136,7 +143,7 @@ func (s *AppService) GetConnections() map[string]interface{} {
 	ctx, cancel := context.WithTimeout(context.Background(), clashRequestTimeout)
 	defer cancel()
 
-	payload, err := fetchClash(ctx, http.MethodGet, core.ClashAPIAddr, "/connections", secret)
+	rows, total, err := s.fetchAndDecodeConnections(ctx, secret)
 	if err != nil {
 		// A failure here is nearly always a core that is shutting down between
 		// the IsRunning check and the request. The view polls again in a second;
@@ -144,16 +151,35 @@ func (s *AppService) GetConnections() map[string]interface{} {
 		return empty
 	}
 
-	rows, total, err := decodeConnections(payload)
+	return ConnectionsPayload{
+		Running:     true,
+		Connections: rows,
+		Total:       total,
+	}
+}
+
+// fetchAndDecodeConnections streams and decodes live connections from the Clash API.
+func (s *AppService) fetchAndDecodeConnections(ctx context.Context, secret string) ([]connectionRow, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+core.ClashAPIAddr+"/connections", nil)
 	if err != nil {
-		return empty
+		return nil, 0, err
+	}
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
 	}
 
-	return map[string]interface{}{
-		"running":     true,
-		"connections": rows,
-		"total":       total,
+	resp, err := clashClient.Do(req)
+	if err != nil {
+		return nil, 0, err
 	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, 0, fmt.Errorf("clash api GET /connections: %s (response: %s)", resp.Status, string(b))
+	}
+
+	return decodeConnectionsReader(resp.Body)
 }
 
 // CloseConnection asks the core to tear down one live connection. It reports
@@ -222,57 +248,123 @@ func fetchClash(ctx context.Context, method, addr, path, secret string) ([]byte,
 	return fetchClashWithBody(ctx, method, addr, path, secret, nil)
 }
 
+// candidateRef holds connection index and millisecond timestamp for Top-K selection.
+type candidateRef struct {
+	index   int
+	startMs int64
+}
+
+type minCandidateHeap []candidateRef
+
+func (h minCandidateHeap) Len() int           { return len(h) }
+func (h minCandidateHeap) Less(i, j int) bool { return h[i].startMs < h[j].startMs }
+func (h minCandidateHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *minCandidateHeap) Push(x any)        { *h = append(*h, x.(candidateRef)) }
+func (h *minCandidateHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
+
 // decodeConnections turns a /connections payload into rows for the view. It
-// returns the rows it kept and the number of connections the core reported, so
-// the UI can say "200 of 5374" rather than quietly lying about the total.
+// delegates to decodeConnectionsReader for backward-compatibility with tests.
 func decodeConnections(payload []byte) ([]connectionRow, int, error) {
+	return decodeConnectionsReader(bytes.NewReader(payload))
+}
+
+// decodeConnectionsReader streams JSON from r, extracts the newest maxConnectionRows
+// using a Min-Heap, and computes rule suggestions only for surviving rows.
+func decodeConnectionsReader(r io.Reader) ([]connectionRow, int, error) {
 	var snapshot clashSnapshot
-	if err := json.Unmarshal(payload, &snapshot); err != nil {
+	if err := json.NewDecoder(r).Decode(&snapshot); err != nil {
 		return nil, 0, err
 	}
 
-	rows := make([]connectionRow, 0, len(snapshot.Connections))
-	for _, conn := range snapshot.Connections {
-		// A row with no id cannot be keyed by the view's reconciler and cannot
-		// be closed. Skipping it beats rendering half a row.
+	totalConns := len(snapshot.Connections)
+	if totalConns == 0 {
+		return []connectionRow{}, 0, nil
+	}
+
+	// Fast path: connection count is within maxConnectionRows
+	if totalConns <= maxConnectionRows {
+		rows := make([]connectionRow, 0, totalConns)
+		for _, conn := range snapshot.Connections {
+			if conn.ID == "" {
+				continue
+			}
+			rows = append(rows, mapConnectionRow(conn))
+		}
+		slices.SortFunc(rows, func(a, b connectionRow) int {
+			return cmp.Compare(b.StartMs, a.StartMs) // newest first
+		})
+		return rows, len(rows), nil
+	}
+
+	// Heavy path (> maxConnectionRows): use a Top-K Min-Heap to select only
+	// the newest connections without computing SuggestRuleTarget on discarded rows.
+	h := make(minCandidateHeap, 0, maxConnectionRows)
+	validCount := 0
+
+	for i, conn := range snapshot.Connections {
 		if conn.ID == "" {
 			continue
 		}
-		meta := conn.Metadata
-		ruleType, ruleValue, _ := core.SuggestRuleTarget(meta.Host, meta.DestinationIP)
-
+		validCount++
 		var startMs int64
 		if !conn.Start.IsZero() {
 			startMs = conn.Start.UnixMilli()
 		}
 
-		rows = append(rows, connectionRow{
-			ID:        conn.ID,
-			Host:      meta.Host,
-			DestIP:    meta.DestinationIP,
-			Port:      meta.DestinationPort,
-			Network:   meta.Network,
-			Process:   processName(meta.ProcessPath),
-			Rule:      conn.Rule,
-			Outbound:  finalOutbound(conn.Chains),
-			Upload:    conn.Upload,
-			Download:  conn.Download,
-			StartMs:   startMs,
-			RuleType:  ruleType,
-			RuleValue: ruleValue,
-		})
+		if h.Len() < maxConnectionRows {
+			heap.Push(&h, candidateRef{index: i, startMs: startMs})
+		} else if startMs > h[0].startMs {
+			h[0] = candidateRef{index: i, startMs: startMs}
+			heap.Fix(&h, 0)
+		}
 	}
 
-	// Newest first: it is what someone watching live connections expects, and
-	// it is what lets the view prepend arriving rows without ever moving one
-	// that is already on screen.
-	sort.SliceStable(rows, func(i, j int) bool { return rows[i].StartMs > rows[j].StartMs })
-
-	total := len(rows)
-	if len(rows) > maxConnectionRows {
-		rows = rows[:maxConnectionRows]
+	if validCount == 0 {
+		return []connectionRow{}, 0, nil
 	}
-	return rows, total, nil
+
+	// Pop from Min-Heap gives items ascending from smallest to largest.
+	// Placing them from len(h)-1 down to 0 produces descending order (newest first)
+	// without requiring an extra sorting pass.
+	rows := make([]connectionRow, len(h))
+	for i := len(h) - 1; i >= 0; i-- {
+		top := heap.Pop(&h).(candidateRef)
+		rows[i] = mapConnectionRow(snapshot.Connections[top.index])
+	}
+
+	return rows, validCount, nil
+}
+
+func mapConnectionRow(conn clashConnection) connectionRow {
+	meta := conn.Metadata
+	ruleType, ruleValue, _ := core.SuggestRuleTarget(meta.Host, meta.DestinationIP)
+
+	var startMs int64
+	if !conn.Start.IsZero() {
+		startMs = conn.Start.UnixMilli()
+	}
+
+	return connectionRow{
+		ID:        conn.ID,
+		Host:      meta.Host,
+		DestIP:    meta.DestinationIP,
+		Port:      meta.DestinationPort,
+		Network:   meta.Network,
+		Process:   processName(meta.ProcessPath),
+		Rule:      conn.Rule,
+		Outbound:  finalOutbound(conn.Chains),
+		Upload:    conn.Upload,
+		Download:  conn.Download,
+		StartMs:   startMs,
+		RuleType:  ruleType,
+		RuleValue: ruleValue,
+	}
 }
 
 // processName reduces the process descriptor to something that fits a table

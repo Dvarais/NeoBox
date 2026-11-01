@@ -200,28 +200,33 @@ func removeKillSwitchRules() {
 		}(name)
 	}
 	wg.Wait()
-
-	// Also ensure PowerShell TUN rule is removed
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
-	psCleanup := `Remove-NetFirewallRule -Name 'NeoBox-KillSwitch-TUN' -ErrorAction SilentlyContinue`
-	psCmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psCleanup)
-	hideWindow(psCmd)
-	_ = psCmd.Run()
 }
 
-// EnableKillSwitch sets up Windows Firewall rules to block all WAN traffic
+// EnableKillSwitch sets up WFP kernel rules (or Netsh fallback) to block all WAN traffic
 // except to local LAN, the VPN server IP, the NeoBox app, and the virtual TUN adapter.
 //
-// In Windows Defender Firewall (WFP), a generic "action=block" rule unconditionally overrides
-// all "action=allow" rules. Therefore, rather than a global block rule, we switch the default
-// profile policy to "blockinbound,blockoutbound" and poke explicit holes for allowed destinations.
+// Tier 1 attempts a dynamic kernel WFP session via fwpuclnt.dll. WFP dynamic sessions
+// are automatically destroyed by the Windows kernel if the process terminates, preventing
+// network lockouts. If Base Filtering Engine (BFE) is unavailable, it gracefully falls back
+// to Netsh profile policies.
 func EnableKillSwitch(serverHost string) error {
 	ips, err := resolveKillSwitchHost(serverHost)
 	if err != nil {
 		return err
 	}
 
+	tunName := findTunInterfaceName()
+
+	// Tier 1: Try Native Kernel WFP with Dynamic Session (0 ms teardown on crash)
+	if err := EnableWFPKillSwitch(ips, tunName); err == nil {
+		return nil
+	}
+
+	// Tier 2: Fallback to netsh if BFE service is unavailable
+	return enableNetshKillSwitch(ips, tunName)
+}
+
+func enableNetshKillSwitch(ips []net.IP, tunName string) error {
 	// 1. Capture and save current baseline firewall profile policies BEFORE touching anything
 	saveCurrentFirewallPolicies()
 
@@ -269,7 +274,7 @@ func EnableKillSwitch(serverHost string) error {
 	}
 
 	// 6. Allow traffic routed through the virtual TUN adapter ("tun-neobox") via PowerShell InterfaceAlias
-	if tunName := findTunInterfaceName(); tunName != "" {
+	if tunName != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 		defer cancel()
 		psCmd := fmt.Sprintf(`New-NetFirewallRule -Name 'NeoBox-KillSwitch-TUN' -DisplayName 'NeoBox-KillSwitch-TUN' -Direction Outbound -InterfaceAlias '%s' -Action Allow -Description '%s'`, tunName, killSwitchDesc)
@@ -303,10 +308,12 @@ var killSwitchRuleNames = []string{
 
 // DisableKillSwitch removes the NeoBox firewall rules and restores default policy.
 func DisableKillSwitch() error {
+	_ = DisableWFPKillSwitch()
+
 	// 1. Revert default outbound policy back to saved state (or standard allow)
 	_ = restoreFirewallPolicies()
 
-	// 2. Remove all created firewall rules concurrently
+	// 2. Remove all created firewall rules
 	removeKillSwitchRules()
 
 	if remaining := KillSwitchRulesPresent(); remaining {
@@ -317,6 +324,10 @@ func DisableKillSwitch() error {
 
 // KillSwitchRulesPresent reports whether any NeoBox firewall rule currently exists.
 func KillSwitchRulesPresent() bool {
+	if IsWFPActive() {
+		return true
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 

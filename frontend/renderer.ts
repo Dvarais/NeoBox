@@ -1013,6 +1013,8 @@ function collectAndSaveSettings(showFeedback = true) {
     language: currentLanguage,
     dns: currentDnsSetting(),
     bypassRu: el<HTMLInputElement>('bypassRuCheckbox').checked,
+    blockTorrent: optionalEl<HTMLInputElement>('blockTorrentCheckbox')?.checked ?? false,
+    blockQuic: optionalEl<HTMLInputElement>('blockQuicCheckbox')?.checked ?? false,
     tunMode: el<HTMLInputElement>('tunModeCheckbox').checked,
     // Обязательно сохранять: на это поле рассчитывают и подключение из трея
     // (tray.go читает settings["systemProxy"]), и авто-выбор лучшего сервера.
@@ -1422,6 +1424,14 @@ async function init() {
     }
     
     el<HTMLInputElement>('bypassRuCheckbox').checked = !!settings.bypassRu;
+    const blockTorrentBox = optionalEl<HTMLInputElement>('blockTorrentCheckbox');
+    if (blockTorrentBox) {
+      blockTorrentBox.checked = !!settings.blockTorrent;
+    }
+    const blockQuicBox = optionalEl<HTMLInputElement>('blockQuicCheckbox');
+    if (blockQuicBox) {
+      blockQuicBox.checked = !!settings.blockQuic;
+    }
     
     if (settings.dns) setDnsSetting(settings.dns);
     // Снимок того, что уже действует: без него первое же «Сохранить» без

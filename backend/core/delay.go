@@ -30,22 +30,22 @@ const DefaultSpeedTestURL = "https://speed.cloudflare.com/__down?bytes=5000000"
 // running simultaneously for delay and speed testing to prevent CPU and RAM spikes.
 const maxConcurrentDelayTests = 8
 
+var (
+	staticDelayDNSJSON    = []byte(`{"servers":[{"type":"local","tag":"dns-direct"}],"final":"dns-direct"}`)
+	staticDelayDirectJSON = []byte(`{"type":"direct","tag":"direct"}`)
+)
+
 var delayTestSem = make(chan struct{}, maxConcurrentDelayTests)
 
 // createTestDialer boots an ephemeral sing-box instance for the given proxy link
 // and extracts the outbound or endpoint network dialer.
 // The returned cleanup function closes the instance and releases all context resources.
 func createTestDialer(ctx context.Context, link string) (func(), N.Dialer, error) {
-	outbound, err := ParseProxyLink(link)
+	workOutbound, err := ParseProxyLink(link)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse proxy link: %w", err)
 	}
 
-	// Work on a copy with a known test tag
-	workOutbound := make(map[string]interface{}, len(outbound)+1)
-	for k, v := range outbound {
-		workOutbound[k] = v
-	}
 	const testTag = "test-proxy-node"
 	workOutbound["tag"] = testTag
 
@@ -61,13 +61,13 @@ func createTestDialer(ctx context.Context, link string) (func(), N.Dialer, error
 	boxCtx = include.Context(boxCtx)
 
 	var dnsOpts option.DNSOptions
-	if err := dnsOpts.UnmarshalJSONContext(boxCtx, []byte(`{"servers":[{"type":"local","tag":"dns-direct"}],"final":"dns-direct"}`)); err != nil {
+	if err := dnsOpts.UnmarshalJSONContext(boxCtx, staticDelayDNSJSON); err != nil {
 		cancelBox()
 		return nil, nil, fmt.Errorf("failed to parse delay test dns: %w", err)
 	}
 
 	var directOb option.Outbound
-	if err := directOb.UnmarshalJSONContext(boxCtx, []byte(`{"type":"direct","tag":"direct"}`)); err != nil {
+	if err := directOb.UnmarshalJSONContext(boxCtx, staticDelayDirectJSON); err != nil {
 		cancelBox()
 		return nil, nil, fmt.Errorf("failed to parse delay test direct outbound: %w", err)
 	}

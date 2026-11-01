@@ -256,6 +256,18 @@ export function applyRoutingLanguage(t: Translations): void {
   const bypassRuLabel = optionalEl('bypassRuLabel');
   if (bypassRuLabel) bypassRuLabel.textContent = t.bypassRuLabel;
 
+  const blockTorrentLabel = optionalEl('blockTorrentLabel');
+  if (blockTorrentLabel) blockTorrentLabel.textContent = t.blockTorrentLabel;
+
+  const blockTorrentDesc = optionalEl('blockTorrentDesc');
+  if (blockTorrentDesc) blockTorrentDesc.textContent = t.blockTorrentDesc;
+
+  const blockQuicLabel = optionalEl('blockQuicLabel');
+  if (blockQuicLabel) blockQuicLabel.textContent = t.blockQuicLabel;
+
+  const blockQuicDesc = optionalEl('blockQuicDesc');
+  if (blockQuicDesc) blockQuicDesc.textContent = t.blockQuicDesc;
+
   const splitTunnelingTitle = optionalEl('splitTunnelingTitle');
   if (splitTunnelingTitle) splitTunnelingTitle.textContent = t.splitTunnelingTitle;
 
@@ -559,6 +571,24 @@ export function initRoutingView(options: RoutingViewOptions): void {
 
   if (isInitialized) return;
   isInitialized = true;
+
+  // Block BitTorrent (P2P) checkbox
+  const blockTorrentCheckbox = optionalEl<HTMLInputElement>('blockTorrentCheckbox');
+  if (blockTorrentCheckbox) {
+    blockTorrentCheckbox.onchange = () => {
+      markRulesPending();
+      safeSaveSettings();
+    };
+  }
+
+  // Block QUIC / HTTP-3 checkbox
+  const blockQuicCheckbox = optionalEl<HTMLInputElement>('blockQuicCheckbox');
+  if (blockQuicCheckbox) {
+    blockQuicCheckbox.onchange = () => {
+      markRulesPending();
+      safeSaveSettings();
+    };
+  }
 
   // Process Mode tabs
   const processTabs = document.querySelectorAll<HTMLElement>('.process-tab');

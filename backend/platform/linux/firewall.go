@@ -1,6 +1,8 @@
 package linux
 
 import (
+	"NeoBox/backend/core"
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -33,9 +35,13 @@ func ParseServerIPs(serverHost string) []string {
 	if ip := net.ParseIP(cleanHost); ip != nil {
 		serverIPs = append(serverIPs, ip.String())
 	} else if cleanHost != "" {
-		if ips, err := net.LookupIP(cleanHost); err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if ips, err := core.ResolveHost(ctx, cleanHost); err == nil {
 			for _, ip := range ips {
-				serverIPs = append(serverIPs, ip.String())
+				if ip != nil {
+					serverIPs = append(serverIPs, ip.String())
+				}
 			}
 		}
 	}
@@ -50,9 +56,9 @@ func BuildNftablesRules(serverIPs []string) []string {
 		"add table inet neobox_killswitch",
 		"delete table inet neobox_killswitch",
 		"add table inet neobox_killswitch",
-		"add chain inet neobox_killswitch output { type filter hook output priority 0; policy drop; }",
+		"add chain inet neobox_killswitch output { type filter hook output priority filter - 10; policy drop; }",
 		"add rule inet neobox_killswitch output oifname \"lo\" accept",
-		"add rule inet neobox_killswitch output oifname \"tun*\" accept",
+		"add rule inet neobox_killswitch output oifname { \"tun-neobox\", \"tun*\" } accept",
 		// Guard against invalid conntrack states; established traffic is restricted to tunnel and allowed destinations
 		"add rule inet neobox_killswitch output ct state invalid drop",
 		// Prevent PMTUD black-holing (RFC 1191) & IPv6 NDP breakage (RFC 4861) - router-advert excluded on output

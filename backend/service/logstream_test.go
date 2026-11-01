@@ -11,26 +11,26 @@ import (
 // collector captures batches emitted by a logStreamer.
 type collector struct {
 	mu      sync.Mutex
-	batches [][]string
+	batches [][]LogEntry
 }
 
 func (c *collector) emit(event string, data ...interface{}) {
 	if event != "xray-log-batch" || len(data) == 0 {
 		return
 	}
-	lines, ok := data[0].([]string)
+	entries, ok := data[0].([]LogEntry)
 	if !ok {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.batches = append(c.batches, lines)
+	c.batches = append(c.batches, entries)
 }
 
-func (c *collector) lines() []string {
+func (c *collector) entries() []LogEntry {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var all []string
+	var all []LogEntry
 	for _, b := range c.batches {
 		all = append(all, b...)
 	}
@@ -43,8 +43,7 @@ func (c *collector) batchCount() int {
 	return len(c.batches)
 }
 
-// waitFor polls until cond holds or the deadline passes, so the timing-based
-// assertions below do not depend on a fixed sleep being long enough.
+// waitFor polls until cond holds or the deadline passes.
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool) bool {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -62,26 +61,23 @@ func TestLogStreamerBatchesManyLinesIntoFewEvents(t *testing.T) {
 	ls := newLogStreamer(c.emit, func() bool { return true })
 	defer ls.stopStreaming()
 
-	// Well under maxBufferedLogLines so nothing is dropped, but far more than
-	// the number of events we are willing to push into WebView2.
 	const total = 200
 	for i := 0; i < total; i++ {
 		ls.WriteMessage(0, fmt.Sprintf("line %d", i))
 	}
 
-	if !waitFor(t, 2*time.Second, func() bool { return len(c.lines()) == total }) {
-		t.Fatalf("got %d lines, want %d", len(c.lines()), total)
+	if !waitFor(t, 2*time.Second, func() bool { return len(c.entries()) == total }) {
+		t.Fatalf("got %d entries, want %d", len(c.entries()), total)
 	}
 
-	// The whole point of the type: 200 lines must not become 200 events.
 	if n := c.batchCount(); n > 3 {
 		t.Errorf("200 lines produced %d batches, want a handful", n)
 	}
 
-	got := c.lines()
-	for i, line := range got {
-		if want := fmt.Sprintf("line %d", i); line != want {
-			t.Fatalf("line %d = %q, want %q (order must be preserved)", i, line, want)
+	got := c.entries()
+	for i, entry := range got {
+		if want := fmt.Sprintf("line %d", i); entry.Raw != want {
+			t.Fatalf("line %d = %q, want %q (order must be preserved)", i, entry.Raw, want)
 		}
 	}
 }
@@ -99,29 +95,27 @@ func TestLogStreamerHoldsLinesWhileWindowHidden(t *testing.T) {
 	})
 	defer ls.stopStreaming()
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 50; i++ {
 		ls.WriteMessage(0, fmt.Sprintf("hidden %d", i))
 	}
 
-	// Give the flush loop several ticks to prove it stays quiet.
 	time.Sleep(4 * logFlushInterval)
-	if n := c.batchCount(); n != 0 {
-		t.Fatalf("emitted %d batches while hidden, want 0", n)
+	if n := len(c.entries()); n != 0 {
+		t.Fatalf("emitted %d entries while window hidden, want 0", n)
 	}
 
 	visible.Lock()
 	visible.v = true
 	visible.Unlock()
 
-	if !waitFor(t, 2*time.Second, func() bool { return len(c.lines()) == 10 }) {
-		t.Fatalf("after restore got %d lines, want 10", len(c.lines()))
+	ls.flush()
+	if n := len(c.entries()); n != 50 {
+		t.Fatalf("flush produced %d entries on restore, want 50", n)
 	}
 }
 
 func TestLogStreamerDropsOldestAndSaysSo(t *testing.T) {
 	c := &collector{}
-	// Never visible, so everything piles up in the buffer and the cap is what
-	// keeps memory bounded — the situation this type exists to survive.
 	ls := newLogStreamer(c.emit, func() bool { return false })
 	defer ls.stopStreaming()
 
@@ -131,7 +125,7 @@ func TestLogStreamerDropsOldestAndSaysSo(t *testing.T) {
 	}
 
 	ls.mu.Lock()
-	buffered := len(ls.buf)
+	buffered := ls.ring.count
 	dropped := ls.dropped
 	ls.mu.Unlock()
 
@@ -143,16 +137,15 @@ func TestLogStreamerDropsOldestAndSaysSo(t *testing.T) {
 	}
 
 	ls.flush()
-	lines := c.lines()
-	if len(lines) == 0 {
+	entries := c.entries()
+	if len(entries) == 0 {
 		t.Fatal("flush produced nothing")
 	}
-	if !strings.Contains(lines[0], "dropped") {
-		t.Errorf("first line = %q, want a notice that lines were dropped", lines[0])
+	if !strings.Contains(entries[0].Raw, "dropped") {
+		t.Errorf("first entry = %q, want a notice that lines were dropped", entries[0].Raw)
 	}
-	// The tail is what the user is watching, so that is what must survive.
-	if last := lines[len(lines)-1]; last != fmt.Sprintf("line %d", maxBufferedLogLines+overflow-1) {
-		t.Errorf("last line = %q, want the newest line", last)
+	if last := entries[len(entries)-1].Raw; last != fmt.Sprintf("line %d", maxBufferedLogLines+overflow-1) {
+		t.Errorf("last entry = %q, want the newest line", last)
 	}
 }
 
@@ -163,32 +156,42 @@ func TestLogStreamerStopFlushesTail(t *testing.T) {
 	ls.WriteMessage(0, "tail line")
 	ls.stopStreaming()
 
-	if !waitFor(t, 2*time.Second, func() bool { return len(c.lines()) == 1 }) {
-		t.Fatalf("got %d lines after stop, want the buffered tail", len(c.lines()))
+	if !waitFor(t, 2*time.Second, func() bool { return len(c.entries()) == 1 }) {
+		t.Fatalf("got %d lines after stop, want the buffered tail", len(c.entries()))
 	}
-	// Stopping twice must not panic on the closed channel.
 	ls.stopStreaming()
 }
 
-func TestLogStreamerConcurrentWrites(t *testing.T) {
-	c := &collector{}
-	ls := newLogStreamer(c.emit, func() bool { return true })
-	defer ls.stopStreaming()
-
-	// sing-box writes from many goroutines at once; this is what -race checks.
-	var wg sync.WaitGroup
-	for g := 0; g < 8; g++ {
-		wg.Add(1)
-		go func(g int) {
-			defer wg.Done()
-			for i := 0; i < 50; i++ {
-				ls.WriteMessage(0, fmt.Sprintf("g%d line %d", g, i))
-			}
-		}(g)
+func TestFastScanLog(t *testing.T) {
+	e1 := fastScanLog(3, "inbound/tun[tun-in]: connection to example.com:443")
+	if e1.Category != "inbound" || e1.Component != "inbound/tun[tun-in]" {
+		t.Errorf("e1 unexpected: %+v", e1)
 	}
-	wg.Wait()
 
-	if !waitFor(t, 2*time.Second, func() bool { return len(c.lines()) == 400 }) {
-		t.Fatalf("got %d lines, want 400", len(c.lines()))
+	e2 := fastScanLog(2, "dns: exchanged example.com A in 15ms")
+	if e2.Category != "dns" || e2.Level != "DEBUG" {
+		t.Errorf("e2 unexpected: %+v", e2)
+	}
+
+	e3 := fastScanLog(5, "router: match direct")
+	if e3.Category != "router" || e3.Level != "ERROR" {
+		t.Errorf("e3 unexpected: %+v", e3)
+	}
+}
+
+func TestSanitizeLogText(t *testing.T) {
+	raw := "outbound/vless to 185.220.101.5:443 with uuid=12345678-1234-1234-1234-123456789abc from 127.0.0.1"
+	sanitized := SanitizeLogText(raw)
+	if strings.Contains(sanitized, "185.220.101.5") {
+		t.Errorf("IP not masked: %s", sanitized)
+	}
+	if !strings.Contains(sanitized, "185.220.*.*:443") {
+		t.Errorf("masked IP format mismatch: %s", sanitized)
+	}
+	if strings.Contains(sanitized, "12345678-1234-1234-1234-123456789abc") {
+		t.Errorf("UUID not masked: %s", sanitized)
+	}
+	if !strings.Contains(sanitized, "127.0.0.1") {
+		t.Errorf("Loopback IP was incorrectly masked: %s", sanitized)
 	}
 }

@@ -150,27 +150,6 @@ function onHistoryListClick(e: MouseEvent): void {
   }
 }
 
-function onHistoryListMouseMove(e: MouseEvent): void {
-  const iconBtn = (e.target as HTMLElement | null)?.closest<HTMLElement>('.history-card-icon');
-  if (iconBtn) {
-    const entryId = iconBtn.getAttribute('data-id');
-    const hist = loadHistory();
-    const entry = hist.find((item) => item.id === entryId);
-    if (entry) {
-      const isStableEgg =
-        entry.server?.toLowerCase().includes('youtube') ||
-        entry.server?.toLowerCase().includes('yt') ||
-        entry.server?.toLowerCase().includes('goog') ||
-        entry.server?.toLowerCase().includes('dpi') ||
-        (entry.id && entry.id.charCodeAt(0) % 10 === 0);
-      if (e.shiftKey) {
-        iconBtn.classList.add('youtube-easter-egg');
-      } else if (!isStableEgg) {
-        iconBtn.classList.remove('youtube-easter-egg');
-      }
-    }
-  }
-}
 
 export function renderHistoryTab(): void {
   const t = translations[getLang()];
@@ -347,7 +326,6 @@ export function initHistoryView(options: HistoryViewOptions): void {
   const list = optionalEl('historyList');
   if (list) {
     list.addEventListener('click', onHistoryListClick);
-    list.addEventListener('mousemove', onHistoryListMouseMove);
   }
 
   const clearBtn = optionalEl('clearHistoryBtn');

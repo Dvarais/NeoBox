@@ -229,9 +229,7 @@ func (s *AppService) startCore(link string, _ string, useSystemProxy bool, newSe
 	s.stateMu.Unlock()
 	// Каждый монитор подключается к своему ядру впервые — иначе он объявил бы
 	// «поток восстановлен» на обычном первом подключении.
-	s.trafficMu.Lock()
-	s.trafficStreamOpened = false
-	s.trafficMu.Unlock()
+	s.trafficStreamOpened.Store(false)
 	go s.startTrafficMonitor(monitorCtx)
 
 	s.setTrayConnected(true, parseServerNameFromLink(link))
@@ -474,10 +472,19 @@ func (s *AppService) MeasureActiveConnectionSpeed(ctx context.Context, testURL s
 	return mbps, nil
 }
 
+// ServerSpeedPayload represents the typed Wails response for TestServerSpeed,
+// matching frontend ServerSpeedResult in frontend/modules/api.ts.
+type ServerSpeedPayload struct {
+	Success bool    `json:"success"`
+	Mbps    float64 `json:"mbps,omitempty"`
+	Speed   float64 `json:"speed,omitempty"`
+	Error   string  `json:"error,omitempty"`
+}
+
 // TestServerSpeed tests the effective downstream throughput in Mbps of a proxy server.
 // If the VPN is active and testing the current server, it downloads through the live tunnel.
 // Otherwise, it spins up an ephemeral core instance to measure throughput before connecting.
-func (s *AppService) TestServerSpeed(link string) map[string]interface{} {
+func (s *AppService) TestServerSpeed(link string) ServerSpeedPayload {
 	trimmedLink := strings.TrimSpace(link)
 	if trimmedLink == "" {
 		s.stateMu.Lock()
@@ -485,9 +492,9 @@ func (s *AppService) TestServerSpeed(link string) map[string]interface{} {
 		s.stateMu.Unlock()
 	}
 	if trimmedLink == "" {
-		return map[string]interface{}{
-			"success": false,
-			"error":   "no server specified",
+		return ServerSpeedPayload{
+			Success: false,
+			Error:   "no server specified",
 		}
 	}
 
@@ -500,9 +507,9 @@ func (s *AppService) TestServerSpeed(link string) map[string]interface{} {
 	vpnConnected := s.GetVPNState() == VPNStateConnected
 
 	if trimmedLink == core.AutoServerLink && !vpnConnected {
-		return map[string]interface{}{
-			"success": false,
-			"error":   "speed test in auto mode requires an active connection",
+		return ServerSpeedPayload{
+			Success: false,
+			Error:   "speed test in auto mode requires an active connection",
 		}
 	}
 
@@ -518,18 +525,17 @@ func (s *AppService) TestServerSpeed(link string) map[string]interface{} {
 	}
 
 	if err != nil {
-		return map[string]interface{}{
-			"success": false,
-			"error":   err.Error(),
+		return ServerSpeedPayload{
+			Success: false,
+			Error:   err.Error(),
 		}
 	}
 
-	// Round to 1 decimal place
 	roundedMbps := math.Round(mbps*10) / 10
-
-	return map[string]interface{}{
-		"success": true,
-		"mbps":    roundedMbps,
+	return ServerSpeedPayload{
+		Success: true,
+		Mbps:    roundedMbps,
+		Speed:   roundedMbps,
 	}
 }
 
@@ -644,11 +650,7 @@ func (s *AppService) streamTraffic(ctx context.Context) error {
 	// Сюда доходят только когда поток действительно открыт. Если это не первое
 	// подключение за сессию, о восстановлении сообщаем: пользователь уже видел
 	// предупреждение выше и вправе узнать, чем дело кончилось.
-	s.trafficMu.Lock()
-	reconnected := s.trafficStreamOpened
-	s.trafficStreamOpened = true
-	s.trafficMu.Unlock()
-	if reconnected {
+	if reconnected := s.trafficStreamOpened.Swap(true); reconnected {
 		s.logNotice("INFO", "traffic stream restored")
 	}
 
@@ -685,12 +687,12 @@ func (s *AppService) streamTraffic(ctx context.Context) error {
 				continue
 			}
 
-			// Emit stats to the Wails frontend
-			s.emitSafe("traffic-stats", map[string]interface{}{
-				"up":        stats.Up,
-				"down":      stats.Down,
-				"totalUp":   totalUp,
-				"totalDown": totalDown,
+			// Emit typed stats to the Wails frontend without heap boxing
+			s.emitSafe("traffic-stats", TrafficStatsPayload{
+				Up:        stats.Up,
+				Down:      stats.Down,
+				TotalUp:   totalUp,
+				TotalDown: totalDown,
 			})
 		}
 	}

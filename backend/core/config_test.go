@@ -153,3 +153,106 @@ func TestParseProxyLink_ALPN_Hysteria2(t *testing.T) {
 		t.Errorf("expected custom Hysteria2 ALPN ['h3', 'hy2'], got '%v'", alpnCustom)
 	}
 }
+
+func TestBlockTorrentRuleGeneration(t *testing.T) {
+	node := map[string]interface{}{
+		"type":        "vless",
+		"tag":         "test-node",
+		"server":      "1.1.1.1",
+		"server_port": 443,
+		"uuid":        "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+	}
+
+	hasTorrentRejectRule := func(cfg map[string]interface{}) bool {
+		route, ok := cfg["route"].(map[string]interface{})
+		if !ok {
+			return false
+		}
+		rules, ok := route["rules"].([]map[string]interface{})
+		if !ok {
+			return false
+		}
+		for _, r := range rules {
+			if r["action"] == "reject" {
+				if proto, ok := r["protocol"].([]string); ok {
+					for _, p := range proto {
+						if p == "bittorrent" {
+							return true
+						}
+					}
+				}
+			}
+		}
+		return false
+	}
+
+	// 1. blockTorrent: true -> rule present
+	cfgBlocked, err := GenerateConfigWithCandidates(nil, node, Settings{BlockTorrent: true}, false, "cache.db", "secret")
+	if err != nil {
+		t.Fatalf("GenerateConfigWithCandidates failed with BlockTorrent=true: %v", err)
+	}
+	if !hasTorrentRejectRule(cfgBlocked) {
+		t.Errorf("expected bittorrent reject rule when BlockTorrent is true, but not found")
+	}
+
+	// 2. blockTorrent: false -> rule absent
+	cfgUnblocked, err := GenerateConfigWithCandidates(nil, node, Settings{BlockTorrent: false}, false, "cache.db", "secret")
+	if err != nil {
+		t.Fatalf("GenerateConfigWithCandidates failed with BlockTorrent=false: %v", err)
+	}
+	if hasTorrentRejectRule(cfgUnblocked) {
+		t.Errorf("unexpected bittorrent reject rule when BlockTorrent is false")
+	}
+}
+
+func TestBlockQuicRuleGeneration(t *testing.T) {
+	node := map[string]interface{}{
+		"type":        "vless",
+		"tag":         "test-node",
+		"server":      "1.1.1.1",
+		"server_port": 443,
+		"uuid":        "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+	}
+
+	hasQuicRejectRule := func(cfg map[string]interface{}) bool {
+		route, ok := cfg["route"].(map[string]interface{})
+		if !ok {
+			return false
+		}
+		rules, ok := route["rules"].([]map[string]interface{})
+		if !ok {
+			return false
+		}
+		for _, r := range rules {
+			if r["action"] == "reject" && r["network"] == "udp" {
+				if ports, ok := r["port"].([]int); ok {
+					for _, p := range ports {
+						if p == 443 {
+							return true
+						}
+					}
+				}
+			}
+		}
+		return false
+	}
+
+	// 1. blockQuic: true -> rule present
+	cfgBlocked, err := GenerateConfigWithCandidates(nil, node, Settings{BlockQuic: true}, false, "cache.db", "secret")
+	if err != nil {
+		t.Fatalf("GenerateConfigWithCandidates failed with BlockQuic=true: %v", err)
+	}
+	if !hasQuicRejectRule(cfgBlocked) {
+		t.Errorf("expected UDP 443 reject rule when BlockQuic is true, but not found")
+	}
+
+	// 2. blockQuic: false -> rule absent
+	cfgUnblocked, err := GenerateConfigWithCandidates(nil, node, Settings{BlockQuic: false}, false, "cache.db", "secret")
+	if err != nil {
+		t.Fatalf("GenerateConfigWithCandidates failed with BlockQuic=false: %v", err)
+	}
+	if hasQuicRejectRule(cfgUnblocked) {
+		t.Errorf("unexpected UDP 443 reject rule when BlockQuic is false")
+	}
+}
+

@@ -390,13 +390,10 @@ func TestGetConnectionsReturnsNothingWhileTheCoreIsStopped(t *testing.T) {
 
 	snapshot := s.GetConnections()
 
-	if running, _ := snapshot["running"].(bool); running {
+	if snapshot.Running {
 		t.Error("running = true with no core started")
 	}
-	rows, ok := snapshot["connections"].([]connectionRow)
-	if !ok {
-		t.Fatalf("connections has type %T, want []connectionRow", snapshot["connections"])
-	}
+	rows := snapshot.Connections
 	if len(rows) != 0 {
 		t.Errorf("got %d rows from a stopped core", len(rows))
 	}

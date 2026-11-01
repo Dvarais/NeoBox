@@ -55,6 +55,8 @@ export function currentProfileSettings(): ProfileSettings {
   return {
     dns: currentDnsSetting(),
     bypassRu: optionalEl<HTMLInputElement>('bypassRuCheckbox')?.checked ?? false,
+    blockQuic: optionalEl<HTMLInputElement>('blockQuicCheckbox')?.checked ?? false,
+    blockTorrent: optionalEl<HTMLInputElement>('blockTorrentCheckbox')?.checked ?? false,
     tunMode: optionalEl<HTMLInputElement>('tunModeCheckbox')?.checked ?? false,
     systemProxy: optionalEl<HTMLInputElement>('systemProxyCheckbox')?.checked ?? true,
     processMode: getProcessMode(),
@@ -78,6 +80,12 @@ export function applyProfileSettings(p: ProfileSettings): void {
 
   const bypassRu = optionalEl<HTMLInputElement>('bypassRuCheckbox');
   if (bypassRu) bypassRu.checked = p.bypassRu;
+
+  const blockQuic = optionalEl<HTMLInputElement>('blockQuicCheckbox');
+  if (blockQuic) blockQuic.checked = !!p.blockQuic;
+
+  const blockTorrent = optionalEl<HTMLInputElement>('blockTorrentCheckbox');
+  if (blockTorrent) blockTorrent.checked = !!p.blockTorrent;
 
   const tunMode = optionalEl<HTMLInputElement>('tunModeCheckbox');
   if (tunMode) tunMode.checked = p.tunMode;

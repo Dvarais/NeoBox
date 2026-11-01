@@ -7,25 +7,30 @@ export type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
 export type LogFilter = 'ALL' | LogLevel;
 
 export interface LogEntry {
-  level: LogLevel;
-  text: string;
+  t: number;             // Unix timestamp ms
+  level: LogLevel;       // INFO, WARN, ERROR, DEBUG
+  category: string;      // dns, router, inbound, outbound, system
+  component?: string;    // inbound/tun[tun-in], dns, router
+  message: string;       // Clean text
+  raw: string;           // Original raw string
 }
 
-const MAX_LOG_ENTRIES = 500;
+// Fixed line height for virtual scrolling
+const ROW_HEIGHT = 24;
+const MAX_LOG_ENTRIES = 3000;
+
 const logsArray: LogEntry[] = [];
+let filteredLogs: LogEntry[] = [];
 let currentLogFilter: LogFilter = 'ALL';
 let logSearchQuery = '';
 let isScrolledToBottom = true;
 let logsDomStale = true;
+let virtualScrollRaf: number | null = null;
 
 let getLang: () => Language = () => 'RU';
 let showAlertFn: (title: string, message: string, isError: boolean, t: Translations) => void | Promise<unknown> = () => {};
 let showConfirmFn: (message: string) => Promise<boolean> = async () => true;
 let onLogUnsub: (() => void) | null = null;
-
-function stripAnsi(str: string): string {
-  return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-}
 
 function normalizeLevel(raw: string): LogLevel {
   switch (raw.toUpperCase()) {
@@ -44,22 +49,18 @@ function normalizeLevel(raw: string): LogLevel {
   }
 }
 
-function parseLogLine(clean: string): {
+function parseLegacyLogLine(clean: string): {
   level: LogLevel;
-  timeStr: string;
   contextStr: string;
   messageStr: string;
-  isSuccess: boolean;
 } {
   let level: LogLevel = 'INFO';
-  let timeStr = '';
   let contextStr = '';
   let messageStr = clean;
 
   const match = clean.match(/^([A-Z]+)\[([0-9]+)\]\s+(?:\[([0-9\s.a-zA-Z]+)\]\s+)?(.*)$/);
   if (match) {
     level = normalizeLevel(match[1]);
-    timeStr = match[2];
     contextStr = match[3] || '';
     messageStr = match[4];
   } else {
@@ -73,92 +74,73 @@ function parseLogLine(clean: string): {
     }
   }
 
-  let isSuccess = false;
-  const upperMsg = messageStr.toUpperCase();
-  if (upperMsg.includes('NOERROR') || upperMsg.includes('SUCCESS') || upperMsg.includes('OPENED') || upperMsg.includes('STARTED')) {
-    isSuccess = true;
-    if (level === 'ERROR') {
-      level = 'INFO';
-    }
-  }
-
-  return { level, timeStr, contextStr, messageStr, isSuccess };
+  return { level, contextStr, messageStr };
 }
 
-function renderLogHtml({ level, timeStr, contextStr, messageStr, isSuccess }: ReturnType<typeof parseLogLine>): string {
-  let html = '';
+function formatLogLineFast(entry: LogEntry): string {
+  const date = new Date(entry.t || Date.now());
+  const timeStr = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
+  const lvl = (entry.level || 'INFO').toLowerCase();
 
-  if (timeStr) {
-    let formattedTime = timeStr;
-    if (timeStr.length === 4) {
-      formattedTime = timeStr.slice(0, 2) + ':' + timeStr.slice(2);
-    }
-    html += `<span class="log-time">[${formattedTime}]</span> `;
+  let compHtml = '';
+  if (entry.component) {
+    compHtml = `<span class="log-context">[${escapeHtml(entry.component)}]</span> `;
   }
 
-  let badgeClass = `badge-${level.toLowerCase()}`;
-  let displayLevel: string = level;
-  if (isSuccess && level === 'INFO') {
-    badgeClass = 'badge-success';
-    displayLevel = 'SUCCESS';
-  }
-  html += `<span class="log-badge ${badgeClass}">${displayLevel}</span> `;
-
-  if (contextStr) {
-    const cleanedContext = escapeHtml(contextStr.trim().replace(/\s+/, ' • '));
-    html += `<span class="log-context">[${cleanedContext}]</span> `;
-  }
-
-  let formattedMessage = escapeHtml(messageStr);
-  if (formattedMessage.includes('dns: exchanged')) {
-    formattedMessage = formattedMessage.replace(/exchanged\s+([a-zA-Z0-9.-]+)/g, 'exchanged <span class="log-domain">$1</span>');
-    formattedMessage = formattedMessage.replace(/NOERROR/g, '<span class="log-status-success">NOERROR</span>');
-    formattedMessage = formattedMessage.replace(/NXDOMAIN/g, '<span class="log-status-warn">NXDOMAIN</span>');
-    formattedMessage = formattedMessage.replace(/SERVFAIL/g, '<span class="log-status-error">SERVFAIL</span>');
-  }
-
-  formattedMessage = formattedMessage.replace(/(outbound\/[a-zA-Z0-9-]+\[[a-zA-Z0-9-]+\])/g, '<span class="log-component">$1</span>');
-  formattedMessage = formattedMessage.replace(/(inbound\/[a-zA-Z0-9-]+\[[a-zA-Z0-9-]+\])/g, '<span class="log-component">$1</span>');
-  formattedMessage = formattedMessage.replace(/connection opened/g, '<span class="log-status-success">connection opened</span>');
-  formattedMessage = formattedMessage.replace(/connection closed/g, '<span class="log-status-dim">connection closed</span>');
-
-  html += `<span class="log-msg">${formattedMessage}</span>`;
-  return html;
+  return `<span class="log-time">[${timeStr}]</span> <span class="log-badge badge-${lvl}">${escapeHtml(entry.level || 'INFO')}</span> ${compHtml}<span class="log-msg">${escapeHtml(entry.message || entry.raw || '')}</span>`;
 }
 
 function isLogsViewOpen(): boolean {
   return document.body.getAttribute('data-active-tab') === 'view-logs';
 }
 
-function makeLogElement(entry: LogEntry): HTMLElement {
-  const node = document.createElement('div');
-  node.className = `log-line log-${entry.level.toLowerCase()}`;
-  node.innerHTML = renderLogHtml(parseLogLine(entry.text));
-  return node;
-}
-
 function logMatchesFilters(entry: LogEntry): boolean {
   if (currentLogFilter !== 'ALL' && entry.level !== currentLogFilter) return false;
-  if (logSearchQuery && !entry.text.toLowerCase().includes(logSearchQuery)) return false;
+  if (logSearchQuery && !entry.raw.toLowerCase().includes(logSearchQuery)) return false;
   return true;
+}
+
+function recomputeFilteredLogs(): void {
+  filteredLogs = logsArray.filter(logMatchesFilters);
+}
+
+function updateVirtualViewport(): void {
+  const fullLogOutput = optionalEl('fullLogOutput');
+  if (!fullLogOutput) return;
+
+  const total = filteredLogs.length;
+  const clientH = fullLogOutput.clientHeight || 400;
+  const scrollTop = fullLogOutput.scrollTop;
+
+  const visibleCount = Math.ceil(clientH / ROW_HEIGHT) + 4;
+  const startIndex = Math.max(0, Math.min(Math.floor(scrollTop / ROW_HEIGHT), Math.max(0, total - visibleCount)));
+  const endIndex = Math.min(total, startIndex + visibleCount);
+
+  const topOffset = startIndex * ROW_HEIGHT;
+  const bottomOffset = Math.max(0, (total - endIndex) * ROW_HEIGHT);
+
+  let html = `<div style="height:${topOffset}px;pointer-events:none;"></div>`;
+  for (let i = startIndex; i < endIndex; i++) {
+    const entry = filteredLogs[i];
+    html += `<div class="log-line log-${(entry.level || 'info').toLowerCase()}">${formatLogLineFast(entry)}</div>`;
+  }
+  html += `<div style="height:${bottomOffset}px;pointer-events:none;"></div>`;
+
+  fullLogOutput.innerHTML = html;
 }
 
 export function renderLogs(): void {
   const fullLogOutput = optionalEl('fullLogOutput');
   if (!fullLogOutput) return;
 
-  fullLogOutput.innerHTML = '';
-  const fragment = document.createDocumentFragment();
-  let shown = 0;
-  logsArray.forEach((entry) => {
-    if (!logMatchesFilters(entry)) return;
-    fragment.appendChild(makeLogElement(entry));
-    shown++;
-  });
-  fullLogOutput.appendChild(fragment);
-  fullLogOutput.scrollTop = fullLogOutput.scrollHeight;
+  recomputeFilteredLogs();
+  updateLogsEmptyState(filteredLogs.length);
+  updateVirtualViewport();
+
+  if (isScrolledToBottom) {
+    fullLogOutput.scrollTop = fullLogOutput.scrollHeight;
+  }
   logsDomStale = false;
-  updateLogsEmptyState(shown);
 }
 
 function updateLogsEmptyState(shown: number): void {
@@ -170,44 +152,56 @@ function updateLogsEmptyState(shown: number): void {
   empty.textContent = t.noSearchResults;
 }
 
-export function addLogEntries(lines: string[]): void {
-  if (!Array.isArray(lines) || lines.length === 0) return;
+export function addLogEntries(batch: unknown[]): void {
+  if (!Array.isArray(batch) || batch.length === 0) return;
 
-  const fullLogOutput = optionalEl('fullLogOutput');
-  const wasAtBottom = isScrolledToBottom;
   const viewOpen = isLogsViewOpen();
-  const fragment = viewOpen && fullLogOutput ? document.createDocumentFragment() : null;
-  let appended = 0;
 
-  for (const raw of lines) {
-    const text = stripAnsi(String(raw));
-
-    if (text.includes('wsasend: An established connection was aborted')) continue;
-    if (text.includes('connection was aborted by the software in your host machine')) continue;
-
-    const entry: LogEntry = { level: parseLogLine(text).level, text };
-    logsArray.push(entry);
-
-    if (fragment && logMatchesFilters(entry)) {
-      fragment.appendChild(makeLogElement(entry));
-      appended++;
+  for (const item of batch) {
+    let entry: LogEntry;
+    if (typeof item === 'string') {
+      const parsed = parseLegacyLogLine(item);
+      entry = {
+        t: Date.now(),
+        level: parsed.level,
+        category: 'system',
+        component: parsed.contextStr,
+        message: parsed.messageStr,
+        raw: item,
+      };
+    } else if (item && typeof item === 'object') {
+      const obj = item as Record<string, unknown>;
+      entry = {
+        t: Number(obj.t || Date.now()),
+        level: normalizeLevel(String(obj.level || 'INFO')),
+        category: String(obj.category || 'system'),
+        component: obj.component ? String(obj.component) : undefined,
+        message: String(obj.message || obj.raw || ''),
+        raw: String(obj.raw || obj.message || ''),
+      };
+    } else {
+      continue;
     }
+    logsArray.push(entry);
   }
 
   if (logsArray.length > MAX_LOG_ENTRIES) {
     logsArray.splice(0, logsArray.length - MAX_LOG_ENTRIES);
   }
 
-  if (!fragment || !fullLogOutput) {
+  if (!viewOpen) {
     logsDomStale = true;
-  } else if (appended > 0) {
-    fullLogOutput.appendChild(fragment);
-    const excess = fullLogOutput.childNodes.length - MAX_LOG_ENTRIES;
-    for (let i = 0; i < excess && fullLogOutput.firstChild; i++) {
-      fullLogOutput.removeChild(fullLogOutput.firstChild);
+    return;
+  }
+
+  recomputeFilteredLogs();
+  updateVirtualViewport();
+
+  if (isScrolledToBottom) {
+    const fullLogOutput = optionalEl('fullLogOutput');
+    if (fullLogOutput) {
+      fullLogOutput.scrollTop = fullLogOutput.scrollHeight;
     }
-    if (wasAtBottom) fullLogOutput.scrollTop = fullLogOutput.scrollHeight;
-    updateLogsEmptyState(fullLogOutput.childNodes.length);
   }
 }
 
@@ -226,6 +220,11 @@ export function applyLogsLanguage(t: Translations): void {
   setAria('logSearchInput', t.logSearchPlaceholder);
   setText('logsEmpty', t.noSearchResults);
   setAria('fullLogOutput', t.logsTitle);
+
+  const copySanitizedBtnText = optionalEl('copySanitizedLogsBtnText');
+  if (copySanitizedBtnText) {
+    copySanitizedBtnText.textContent = getLang() === 'RU' ? 'Обезличить' : 'Sanitize';
+  }
 
   const logTabs = optionalEl('logTabs') || document.querySelector('.log-tabs');
   if (logTabs) logTabs.setAttribute('aria-label', t.logFilterLabel);
@@ -249,8 +248,15 @@ export function initLogsView(options: {
   if (fullLogOutput) {
     fullLogOutput.addEventListener('scroll', () => {
       isScrolledToBottom =
-        Math.abs(fullLogOutput.scrollHeight - fullLogOutput.clientHeight - fullLogOutput.scrollTop) < 5;
-    });
+        Math.abs(fullLogOutput.scrollHeight - fullLogOutput.clientHeight - fullLogOutput.scrollTop) < 20;
+
+      if (virtualScrollRaf === null) {
+        virtualScrollRaf = requestAnimationFrame(() => {
+          virtualScrollRaf = null;
+          updateVirtualViewport();
+        });
+      }
+    }, { passive: true });
   }
 
   document.querySelectorAll<HTMLElement>('.log-tab').forEach((tab) => {
@@ -271,8 +277,10 @@ export function initLogsView(options: {
   if (clearLogsBtn) {
     clearLogsBtn.onclick = () => {
       logsArray.length = 0;
+      filteredLogs.length = 0;
       if (fullLogOutput) fullLogOutput.innerHTML = '';
       logsDomStale = false;
+      updateLogsEmptyState(0);
     };
   }
 
@@ -293,7 +301,7 @@ export function initLogsView(options: {
   const saveLogsBtn = optionalEl('saveLogsBtn');
   if (saveLogsBtn) {
     saveLogsBtn.onclick = async () => {
-      const rawLogs = logsArray.map((l) => l.text).join('\n');
+      const rawLogs = logsArray.map((l) => l.raw).join('\n');
       const t = translations[getLang()];
       if (!rawLogs.trim()) {
         showAlertFn(t.alertDialogTitle, t.logsEmptyAlert, false, t);
@@ -316,11 +324,48 @@ export function initLogsView(options: {
     };
   }
 
+  // NBX-192-SEC: Кнопка безопасного копирования логов без персональных данных
+  const copySanitizedBtn = optionalEl<HTMLButtonElement>('copySanitizedLogsBtn');
+  if (copySanitizedBtn) {
+    copySanitizedBtn.onclick = async () => {
+      const raw = logsArray.map((l) => l.raw).join('\n');
+      const t = translations[getLang()];
+      if (!raw.trim()) {
+        showAlertFn(t.alertDialogTitle, t.logsEmptyAlert, false, t);
+        return;
+      }
+      let sanitized = raw;
+      if (window.api && (window.api as unknown as { sanitizeLogText?: (s: string) => Promise<string> }).sanitizeLogText) {
+        sanitized = await (window.api as unknown as { sanitizeLogText: (s: string) => Promise<string> }).sanitizeLogText(raw);
+      } else {
+        // Fallback sanitize
+        sanitized = raw
+          .replace(/\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g, '[REDACTED-UUID]')
+          .replace(/(?:password|secret|key|uuid|token)=([^&\s]+)/gi, 'token=[REDACTED]')
+          .replace(/\b([0-9]{1,3}\.[0-9]{1,3}\.)[0-9]{1,3}\.[0-9]{1,3}(:[0-9]+)?\b/g, (match) => {
+            if (match.startsWith('127.0.0.1') || match.startsWith('0.0.0.0')) return match;
+            const parts = match.split('.');
+            const portIdx = parts[3].indexOf(':');
+            const port = portIdx !== -1 ? parts[3].slice(portIdx) : '';
+            return `${parts[0]}.${parts[1]}.*.*${port}`;
+          });
+      }
+      await navigator.clipboard.writeText(sanitized);
+      const originalText = copySanitizedBtn.textContent;
+      copySanitizedBtn.textContent = '✓ ' + (getLang() === 'RU' ? 'Обезличено' : 'Sanitized');
+      copySanitizedBtn.disabled = true;
+      setTimeout(() => {
+        copySanitizedBtn.textContent = originalText;
+        copySanitizedBtn.disabled = false;
+      }, 2000);
+    };
+  }
+
   if (onLogUnsub) {
     onLogUnsub();
     onLogUnsub = null;
   }
-  onLogUnsub = window.api.onLog(addLogEntries);
+  onLogUnsub = window.api.onLog(addLogEntries as (lines: string[]) => void);
 
   return () => {
     if (onLogUnsub) {

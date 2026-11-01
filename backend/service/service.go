@@ -101,17 +101,13 @@ type AppService struct {
 	// activeServerLink stores the currently active server URL for zero-downtime hot-switching.
 	activeServerLink string
 
-	// trafficMu guards the session traffic totals. They are accumulated in Go
-	// rather than the frontend so they stay correct across periods where the
-	// window is hidden and no traffic-stats events are sent at all.
-	trafficMu   sync.Mutex
-	sessionUp   int64
-	sessionDown int64
-	// trafficStreamOpened is true once the /traffic stream has been open at
-	// least once this session. It is what separates "connecting for the first
-	// time" from "reconnecting", so the log only claims a recovery when
-	// something was actually lost.
-	trafficStreamOpened bool
+	// sessionUp and sessionDown atomically track running session traffic totals in Go
+	// so onWindowRestored has the totals ready even if events were skipped while hidden.
+	sessionUp   atomic.Int64
+	sessionDown atomic.Int64
+	// trafficStreamOpened atomically tracks if the /traffic stream has been open at
+	// least once this session, separating "first connect" from "recovery".
+	trafficStreamOpened atomic.Bool
 
 	// watchdogMu guards the auto-reconnect watchdog.
 	watchdogMu     sync.Mutex
@@ -249,21 +245,24 @@ func (s *AppService) logNotice(level, format string, args ...interface{}) {
 	ls.WriteMessage(0, level+" [NeoBox] "+fmt.Sprintf(format, args...))
 }
 
+// TrafficStatsPayload represents real-time network throughput and accumulated session bandwidth.
+type TrafficStatsPayload struct {
+	Up        int64 `json:"up"`
+	Down      int64 `json:"down"`
+	TotalUp   int64 `json:"totalUp"`
+	TotalDown int64 `json:"totalDown"`
+}
+
 // resetSessionTraffic zeroes the counters at the start of a core session.
 func (s *AppService) resetSessionTraffic() {
-	s.trafficMu.Lock()
-	s.sessionUp, s.sessionDown = 0, 0
-	s.trafficMu.Unlock()
+	s.sessionUp.Store(0)
+	s.sessionDown.Store(0)
 }
 
 // addSessionTraffic folds one sample of the Clash traffic stream into the
 // session totals and returns the running totals.
 func (s *AppService) addSessionTraffic(up, down int64) (totalUp, totalDown int64) {
-	s.trafficMu.Lock()
-	defer s.trafficMu.Unlock()
-	s.sessionUp += up
-	s.sessionDown += down
-	return s.sessionUp, s.sessionDown
+	return s.sessionUp.Add(up), s.sessionDown.Add(down)
 }
 
 // SessionTraffic reports the running session totals, in bytes, to the frontend.
@@ -282,9 +281,17 @@ func (s *AppService) SessionTraffic() map[string]int64 {
 
 // sessionTraffic reads the running totals.
 func (s *AppService) sessionTraffic() (totalUp, totalDown int64) {
-	s.trafficMu.Lock()
-	defer s.trafficMu.Unlock()
-	return s.sessionUp, s.sessionDown
+	return s.sessionUp.Load(), s.sessionDown.Load()
+}
+
+// SaveLogsSanitized writes the log text with sensitive IP and credential masks (NBX-192-SEC).
+func (s *AppService) SaveLogsSanitized(content string) string {
+	return s.SaveLogs(SanitizeLogText(content))
+}
+
+// SanitizeLogText masks external IP addresses and credentials for safe export.
+func (s *AppService) SanitizeLogText(raw string) string {
+	return SanitizeLogText(raw)
 }
 
 // SaveLogs writes the provided log text to a timestamped file in the logs directory.

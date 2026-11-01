@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -51,13 +52,7 @@ func VerifyFileSignature(filePath string, signatureHex string) error {
 	}
 	pubKey := ed25519.PublicKey(pubKeyBytes)
 
-	// Read the file
-	fileData, err := os.ReadFile(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to read file for verification: %w", err)
-	}
-
-	// Decode the signature
+	// Decode the signature first to avoid expensive disk I/O on malformed signatures
 	sigBytes, err := hex.DecodeString(signatureHex)
 	if err != nil {
 		return fmt.Errorf("invalid signature format: %w", err)
@@ -66,11 +61,21 @@ func VerifyFileSignature(filePath string, signatureHex string) error {
 		return fmt.Errorf("invalid signature size: got %d bytes, expected %d", len(sigBytes), ed25519.SignatureSize)
 	}
 
-	// Compute SHA-256 hash of the file
-	hash := sha256.Sum256(fileData)
+	// Stream and compute SHA-256 hash of the file in 32KB chunks without loading the entire installer into RAM
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file for verification: %w", err)
+	}
+	defer file.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return fmt.Errorf("failed to compute file hash: %w", err)
+	}
+	digest := hasher.Sum(nil)
 
 	// Verify the signature
-	if !ed25519.Verify(pubKey, hash[:], sigBytes) {
+	if !ed25519.Verify(pubKey, digest, sigBytes) {
 		return fmt.Errorf("signature verification failed — the file may have been tampered with")
 	}
 

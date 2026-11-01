@@ -186,3 +186,76 @@ func TestWatchdogCandidatesNoSubscriptions(t *testing.T) {
 		t.Fatalf("без подписок кандидатов быть не должно, получено %v", got)
 	}
 }
+
+
+func TestWatchdogEarlyCancelExitsPromptly(t *testing.T) {
+	s := &AppService{coreManager: core.NewCoreManager()}
+	done := make(chan struct{})
+	go func() {
+		s.startWatchdog(deadLink, false)
+		close(done)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	s.stopWatchdog()
+
+	select {
+	case <-done:
+		// Exited promptly without leaking or blocking on 20s init timer
+	case <-time.After(2 * time.Second):
+		t.Fatal("startWatchdog did not exit promptly upon cancellation")
+	}
+}
+
+func TestWatchdogRestartCancelsPrevious(t *testing.T) {
+	s := &AppService{coreManager: core.NewCoreManager()}
+	done1 := make(chan struct{})
+	go func() {
+		s.startWatchdog(deadLink, false)
+		close(done1)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	done2 := make(chan struct{})
+	go func() {
+		s.startWatchdog(deadLink, false)
+		close(done2)
+	}()
+
+	select {
+	case <-done1:
+		// First watchdog was cancelled promptly by starting the second watchdog
+	case <-time.After(2 * time.Second):
+		t.Fatal("first startWatchdog was not cancelled when second watchdog started")
+	}
+
+	s.stopWatchdog()
+	select {
+	case <-done2:
+		// Second watchdog stopped promptly
+	case <-time.After(2 * time.Second):
+		t.Fatal("second startWatchdog did not exit on stopWatchdog")
+	}
+}
+
+func TestWatchdogDialerContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Pre-cancel context
+
+	var dialer net.Dialer
+	dialCtx, dialCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer dialCancel()
+
+	start := time.Now()
+	conn, err := dialer.DialContext(dialCtx, "tcp", core.ProxyListenAddr)
+	if conn != nil {
+		conn.Close()
+	}
+	if err == nil {
+		t.Fatal("expected error dialing with cancelled context, got nil")
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("dialing took %v with cancelled context, expected immediate abort", elapsed)
+	}
+}

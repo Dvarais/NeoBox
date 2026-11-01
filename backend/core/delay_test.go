@@ -3,12 +3,22 @@ package core
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 )
+
+func TestStaticDelayJSON(t *testing.T) {
+	if len(staticDelayDNSJSON) == 0 {
+		t.Fatal("staticDelayDNSJSON is empty")
+	}
+	if len(staticDelayDirectJSON) == 0 {
+		t.Fatal("staticDelayDirectJSON is empty")
+	}
+}
 
 func TestMeasureProxyDelay_InvalidLink(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -75,31 +85,9 @@ func TestMeasureProxyDelay_RealLocalProxy(t *testing.T) {
 				go func() {
 					defer clientConn.Close()
 					defer destConn.Close()
-					buf := make([]byte, 32*1024)
-					for {
-						n, err := clientConn.Read(buf)
-						if n > 0 {
-							if _, wErr := destConn.Write(buf[:n]); wErr != nil {
-								return
-							}
-						}
-						if err != nil {
-							return
-						}
-					}
+					_, _ = io.Copy(destConn, clientConn)
 				}()
-				buf := make([]byte, 32*1024)
-				for {
-					n, err := destConn.Read(buf)
-					if n > 0 {
-						if _, wErr := clientConn.Write(buf[:n]); wErr != nil {
-							return
-						}
-					}
-					if err != nil {
-						return
-					}
-				}
+				_, _ = io.Copy(clientConn, destConn)
 			} else {
 				w.WriteHeader(http.StatusOK)
 			}
@@ -170,31 +158,9 @@ func TestMeasureProxySpeed_RealLocalProxy(t *testing.T) {
 				go func() {
 					defer clientConn.Close()
 					defer destConn.Close()
-					buf := make([]byte, 32*1024)
-					for {
-						n, err := clientConn.Read(buf)
-						if n > 0 {
-							if _, wErr := destConn.Write(buf[:n]); wErr != nil {
-								return
-							}
-						}
-						if err != nil {
-							return
-						}
-					}
+					_, _ = io.Copy(destConn, clientConn)
 				}()
-				buf := make([]byte, 32*1024)
-				for {
-					n, err := destConn.Read(buf)
-					if n > 0 {
-						if _, wErr := clientConn.Write(buf[:n]); wErr != nil {
-							return
-						}
-					}
-					if err != nil {
-						return
-					}
-				}
+				_, _ = io.Copy(clientConn, destConn)
 			} else {
 				w.WriteHeader(http.StatusOK)
 			}
@@ -239,5 +205,22 @@ func TestMeasureProxyDelay_ConcurrencySemaphore(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatal("semaphore deadlock or timeout occurred")
 		}
+	}
+}
+
+func BenchmarkCreateTestDialer(b *testing.B) {
+	ctx := context.Background()
+	link := "http://127.0.0.1:18080#bench-node"
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		cleanup, dialer, err := createTestDialer(ctx, link)
+		if err != nil {
+			b.Fatalf("createTestDialer failed: %v", err)
+		}
+		if dialer == nil {
+			b.Fatal("nil dialer")
+		}
+		cleanup()
 	}
 }
