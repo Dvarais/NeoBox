@@ -166,11 +166,16 @@ func TestSwitchServer_EndToEndHotSwitch(t *testing.T) {
 
 	var receivedPath string
 	var receivedBody map[string]string
+	var connectionsClosed bool
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedPath = r.URL.Path
-		body, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(body, &receivedBody)
+		if r.Method == http.MethodPut {
+			receivedPath = r.URL.Path
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &receivedBody)
+		} else if r.Method == http.MethodDelete && r.URL.Path == "/connections" {
+			connectionsClosed = true
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
@@ -199,6 +204,9 @@ func TestSwitchServer_EndToEndHotSwitch(t *testing.T) {
 	}
 	if receivedBody["name"] != "Node-Beta" {
 		t.Errorf("receivedBody name = %s, want Node-Beta", receivedBody["name"])
+	}
+	if !connectionsClosed {
+		t.Errorf("expected DELETE /connections to be called on hot-switch")
 	}
 
 	s.stateMu.Lock()
@@ -261,11 +269,16 @@ func TestSwitchServer_AutoServerLink(t *testing.T) {
 
 	var receivedPath string
 	var receivedBody map[string]string
+	var connectionsClosed bool
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedPath = r.URL.Path
-		body, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(body, &receivedBody)
+		if r.Method == http.MethodPut {
+			receivedPath = r.URL.Path
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &receivedBody)
+		} else if r.Method == http.MethodDelete && r.URL.Path == "/connections" {
+			connectionsClosed = true
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer srv.Close()
@@ -296,6 +309,9 @@ func TestSwitchServer_AutoServerLink(t *testing.T) {
 	}
 	if receivedBody["name"] != core.OutboundAutoTag {
 		t.Errorf("receivedBody name = %s, want %s", receivedBody["name"], core.OutboundAutoTag)
+	}
+	if !connectionsClosed {
+		t.Errorf("expected DELETE /connections to be called on hot-switch")
 	}
 
 	s.stateMu.Lock()

@@ -8,7 +8,7 @@ import type {
 } from './modules/api';
 import { fetchIP, isDialogOpen, showConfirm, showAlert, trapFocus, errorText } from './modules/ui-utils';
 import { allSubscriptions } from './modules/subscription-manager';
-import { parseBasicInfo, pingData, pingDisplay } from './modules/server-manager';
+import { parseBasicInfo, pingData, pingDisplay, updateCardsSelection } from './modules/server-manager';
 import {
   initKillSwitchView,
   refreshKillSwitchStatus,
@@ -810,7 +810,15 @@ window.api.onServerSwitched((data) => {
     activeServerLink = data.link;
     resetSpeedTestBtn();
     updateActiveServerInfo(data.link);
-    updateCards();
+    const serversGrid = optionalEl('serversGrid');
+    if (serversGrid) {
+      updateCardsSelection(serversGrid, data.link);
+    } else {
+      updateCards();
+    }
+    if (appState === 'on') {
+      setTimeout(() => fetchIP(currentIp, translations[currentLanguage]), 800);
+    }
     if (data.link === 'neobox://auto' && appState === 'on') {
       startAutoNodePolling();
     } else {
@@ -836,6 +844,7 @@ window.api.onTrayStartReconnect((data) => {
       try {
         const res = await window.api.switchServer(data.link);
         if (res && res.hotSwitched) {
+          setTimeout(() => fetchIP(currentIp, translations[currentLanguage]), 800);
           return;
         }
       } catch (e) {
@@ -877,6 +886,26 @@ function startConnection(userInitiated: boolean) {
     const t = translations[currentLanguage];
     showAlert(t.alertDialogTitle, t.selectServerAlert, false, t);
     return;
+  }
+  const info = parseBasicInfo(activeServerLink);
+  const isHttp = (info?.type || '').toUpperCase() === 'HTTP' || /^http:\/\//i.test(activeServerLink);
+  if (isHttp) {
+    const allowInsecureBox = optionalEl<HTMLInputElement>('allowInsecureHttpCheckbox');
+    if (allowInsecureBox && !allowInsecureBox.checked) {
+      if (!userInitiated) {
+        return;
+      }
+      (async () => {
+        const confirmed = await showConfirm(translations[currentLanguage].httpWarningMessage);
+        if (!confirmed) {
+          return;
+        }
+        allowInsecureBox.checked = true;
+        await collectAndSaveSettings();
+        startConnection(true);
+      })();
+      return;
+    }
   }
   updateAppInterface('connecting');
   (async () => {
@@ -1036,6 +1065,7 @@ function collectAndSaveSettings(showFeedback = true) {
     verboseLogging: el<HTMLInputElement>('verboseLoggingCheckbox').checked,
     tlsFragment: el<HTMLInputElement>('tlsFragmentCheckbox').checked,
     allowLan: el<HTMLInputElement>('allowLanCheckbox').checked,
+    allowInsecureHttp: optionalEl<HTMLInputElement>('allowInsecureHttpCheckbox')?.checked ?? false,
     lastSelectedServer: activeServerLink,
     processMode: getProcessMode(),
     processListBlacklist: getProcessListBlacklist(),
@@ -1201,6 +1231,17 @@ async function selectAndConnectServer(link: string) {
   const info = parseBasicInfo(link);
   if (!info) return;
 
+  const isHttp = (info.type || '').toUpperCase() === 'HTTP' || /^http:\/\//i.test(link);
+  if (isHttp) {
+    const allowInsecureBox = optionalEl<HTMLInputElement>('allowInsecureHttpCheckbox');
+    if (allowInsecureBox && !allowInsecureBox.checked) {
+      const confirmed = await showConfirm(translations[currentLanguage].httpWarningMessage);
+      if (!confirmed) return;
+      allowInsecureBox.checked = true;
+      await collectAndSaveSettings();
+    }
+  }
+
   resetSpeedTestBtn();
   activeServerLink = link;
   updateActiveServerInfo(link);
@@ -1210,7 +1251,12 @@ async function selectAndConnectServer(link: string) {
     stopAutoNodePolling();
   }
 
-  updateCards();
+  const serversGrid = optionalEl('serversGrid');
+  if (serversGrid) {
+    updateCardsSelection(serversGrid, link);
+  } else {
+    updateCards();
+  }
   collectAndSaveSettings();
 
   // Если VPN выключен — подключаемся, если включен — пробуем мгновенно переключить через Clash API, при отказе перезапускаем
@@ -1231,6 +1277,7 @@ async function selectAndConnectServer(link: string) {
       const res = await window.api.switchServer(activeServerLink);
       if (res && res.hotSwitched) {
         // Мгновенное переключение успешно завершено без сброса TUN и без простоя
+        setTimeout(() => fetchIP(currentIp, translations[currentLanguage]), 800);
         const homeTab = document.querySelector<HTMLElement>('.nav-item[data-target="view-home"]');
         if (homeTab) {
           homeTab.click();
@@ -1371,6 +1418,12 @@ async function init() {
     onSaveSettings: () => collectAndSaveSettings(),
     showAlert,
     showConfirm,
+    getAllowInsecureHttp: () => optionalEl<HTMLInputElement>('allowInsecureHttpCheckbox')?.checked ?? false,
+    setAllowInsecureHttp: async (allow: boolean) => {
+      const box = optionalEl<HTMLInputElement>('allowInsecureHttpCheckbox');
+      if (box) box.checked = allow;
+      await collectAndSaveSettings();
+    },
   });
 
   initTrafficView();
@@ -1397,6 +1450,13 @@ async function init() {
     onUpdateCards: () => updateCards(),
     onSubscriptionsLoaded: () => renderHistoryTab(),
     showAlert,
+    showConfirm,
+    getAllowInsecureHttp: () => optionalEl<HTMLInputElement>('allowInsecureHttpCheckbox')?.checked ?? false,
+    setAllowInsecureHttp: async (allow: boolean) => {
+      const box = optionalEl<HTMLInputElement>('allowInsecureHttpCheckbox');
+      if (box) box.checked = allow;
+      await collectAndSaveSettings();
+    },
   });
 
   const settings = await window.api.getSettings();
@@ -1466,6 +1526,10 @@ async function init() {
     el<HTMLInputElement>('fakeDnsCheckbox').checked = settings.fakeDns !== undefined ? !!settings.fakeDns : true;
     el<HTMLInputElement>('verboseLoggingCheckbox').checked = !!settings.verboseLogging;
     el<HTMLInputElement>('tlsFragmentCheckbox').checked = !!settings.tlsFragment;
+    const allowInsecureHttpBox = optionalEl<HTMLInputElement>('allowInsecureHttpCheckbox');
+    if (allowInsecureHttpBox) {
+      allowInsecureHttpBox.checked = !!settings.allowInsecureHttp;
+    }
     updateInterceptionGuidance();
     void refreshKillSwitchStatus();
     

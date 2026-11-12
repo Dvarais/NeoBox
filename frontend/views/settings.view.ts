@@ -492,6 +492,8 @@ export function applySettingsLanguage(t: Translations): void {
   setText('verboseLoggingDesc', t.verboseLoggingDesc);
   setText('tlsFragmentLabel', t.tlsFragmentLabel);
   setText('tlsFragmentDesc', t.tlsFragmentDesc);
+  setText('allowInsecureHttpLabel', t.allowInsecureHttpLabel);
+  setText('allowInsecureHttpDesc', t.allowInsecureHttpDesc);
 
   const autoSaveText = optionalEl('settingsAutoSaveText');
   if (autoSaveText) autoSaveText.textContent = t.statusSaved;
@@ -765,6 +767,7 @@ export function initSettingsView(options: SettingsViewOptions): void {
     'fakeDnsCheckbox',
     'verboseLoggingCheckbox',
     'tlsFragmentCheckbox',
+    'allowInsecureHttpCheckbox',
   ];
   autoSaveSecurityCheckboxes.forEach((id) => {
     const checkbox = optionalEl<HTMLInputElement>(id);

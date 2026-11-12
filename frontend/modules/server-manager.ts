@@ -247,6 +247,27 @@ export function updateCardPing(link: string, value: PingValue): boolean {
   return true;
 }
 
+/**
+ * updateCardsSelection обновляет класс .selected и aria-current на существующих карточках
+ * без полной перерисовки DOM, исключая прыжки интерфейса и сброс скролла.
+ */
+export function updateCardsSelection(container: HTMLElement | null, activeServerLink: string | null): void {
+  if (!container) return;
+  const cards = container.querySelectorAll<HTMLElement>('.server-card');
+  cards.forEach((card) => {
+    const isSelected = card.dataset.link === activeServerLink;
+    card.classList.toggle('selected', isSelected);
+    const mainBtn = card.querySelector<HTMLButtonElement>('.server-card-main');
+    if (mainBtn) {
+      if (isSelected) {
+        mainBtn.setAttribute('aria-current', 'true');
+      } else {
+        mainBtn.removeAttribute('aria-current');
+      }
+    }
+  });
+}
+
 export function renderCards(
   container: HTMLElement | null,
   servers: string[],
@@ -260,6 +281,8 @@ export function renderCards(
   t: Translations,
 ): void {
   if (!container) return;
+  const scrollContainer = container.closest('main') || container;
+  const prevScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
   container.innerHTML = '';
   pingCells.clear();
 
@@ -288,6 +311,7 @@ export function renderCards(
     const autoCard = document.createElement('div');
     autoCard.className = `server-card auto-card ${isAutoSelected ? 'selected' : ''}`;
     autoCard.setAttribute('role', 'listitem');
+    autoCard.dataset.link = AUTO_SERVER_LINK;
 
     const autoBtn = document.createElement('button');
     autoBtn.type = 'button';
@@ -356,6 +380,7 @@ export function renderCards(
     const card = document.createElement('div');
     card.className = `server-card ${activeServerLink === link ? 'selected' : ''}`;
     card.setAttribute('role', 'listitem');
+    card.dataset.link = link;
 
     // Карточку нельзя сделать одной большой <button>: внутри неё живёт кнопка
     // избранного, а вложенные друг в друга кнопки — невалидная разметка,
@@ -459,6 +484,10 @@ export function renderCards(
 
     container.appendChild(card);
   });
+
+  if (scrollContainer && prevScrollTop > 0) {
+    scrollContainer.scrollTop = prevScrollTop;
+  }
 }
 
 export function setSortMode(mode: SortMode): void {

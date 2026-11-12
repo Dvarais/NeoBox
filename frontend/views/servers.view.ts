@@ -13,6 +13,7 @@ import {
   setPingData,
   setSortMode,
   updateCardPing,
+  updateCardsSelection,
 } from '../modules/server-manager';
 import type { SortMode } from '../modules/server-manager';
 
@@ -26,6 +27,8 @@ export interface ServersViewOptions {
   onSaveSettings: () => Promise<unknown> | unknown;
   showAlert: (title: string, message: string, isError: boolean, t: Translations) => Promise<unknown> | void;
   showConfirm: (message: string) => Promise<boolean>;
+  getAllowInsecureHttp?: () => boolean;
+  setAllowInsecureHttp?: (allow: boolean) => Promise<unknown> | unknown;
 }
 
 let getLang: () => Language = () => 'RU';
@@ -37,6 +40,8 @@ let startCoreFn: (link: string) => Promise<void> = async () => {};
 let onSaveSettingsFn: () => Promise<unknown> | unknown = () => {};
 let showAlertFn: (title: string, message: string, isError: boolean, t: Translations) => Promise<unknown> | void = () => {};
 let showConfirmFn: (message: string) => Promise<boolean> = async () => true;
+let getAllowInsecureHttpFn: (() => boolean) | undefined;
+let setAllowInsecureHttpFn: ((allow: boolean) => Promise<unknown> | unknown) | undefined;
 
 let favoriteLinks = new Set<string>();
 let serverSearchQuery = '';
@@ -91,28 +96,33 @@ export function updateCards(): void {
     activeLink,
     pingData,
     currentSortMode,
-    (link, name, type, address) => {
+    async (link, name, type, address) => {
+      const isHttp = (type || '').toUpperCase() === 'HTTP' || /^http:\/\//i.test(link);
+      if (isHttp && getAllowInsecureHttpFn && !getAllowInsecureHttpFn()) {
+        const confirmed = await showConfirmFn(t.httpWarningMessage);
+        if (!confirmed) {
+          return;
+        }
+        await setAllowInsecureHttpFn?.(true);
+      }
+
       const isNewServer = activeLink !== link;
       setActiveServerFn(link, name, type, address);
-      updateCards();
+      updateCardsSelection(serversGrid, link);
       Promise.resolve(onSaveSettingsFn()).catch((err) =>
         console.error('Failed to save settings on server select:', err),
       );
       const appState = getAppStateFn();
       if (isNewServer && (appState === 'on' || appState === 'connecting')) {
         if (appState === 'on' && window.api?.switchServer) {
-          void (async () => {
-            try {
-              const res = await window.api.switchServer(link);
-              if (res && res.hotSwitched) {
-                return;
-              }
-            } catch (e) {
-              console.warn('Hot switch failed on server select, falling back to restart:', e);
+          try {
+            const res = await window.api.switchServer(link);
+            if (res && res.hotSwitched) {
+              return;
             }
-            restartCoreFn();
-          })();
-          return;
+          } catch (e) {
+            console.warn('Hot switch failed on server select, falling back to restart:', e);
+          }
         }
         restartCoreFn();
       }
@@ -184,8 +194,15 @@ export async function runAutoBestServer(): Promise<void> {
       const appState = getAppStateFn();
       const wasActive = appState === 'on' || appState === 'connecting';
 
+      const info = parseBasicInfo(bestLink);
+      const isHttp = (info.type || '').toUpperCase() === 'HTTP' || /^http:\/\//i.test(bestLink);
+      if (isHttp && getAllowInsecureHttpFn && !getAllowInsecureHttpFn()) {
+        const confirmed = await showConfirmFn(t.httpWarningMessage);
+        if (!confirmed) return;
+        await setAllowInsecureHttpFn?.(true);
+      }
+
       if (wasActive && isNewServer) {
-        const info = parseBasicInfo(bestLink);
         const confirmMsg = t.bestServerSwitchConfirm.replace('{name}', info.name);
         const confirmed = await showConfirmFn(confirmMsg);
         if (!confirmed) return;
@@ -194,9 +211,13 @@ export async function runAutoBestServer(): Promise<void> {
         return;
       }
 
-      const info = parseBasicInfo(bestLink);
       setActiveServerFn(bestLink, info.name, info.type.toUpperCase(), info.address);
-      updateCards();
+      const serversGrid = optionalEl('serversGrid');
+      if (serversGrid) {
+        updateCardsSelection(serversGrid, bestLink);
+      } else {
+        updateCards();
+      }
       Promise.resolve(onSaveSettingsFn()).catch((err) =>
         console.error('Failed to save settings on auto best server:', err),
       );
@@ -288,6 +309,8 @@ export function initServersView(options: ServersViewOptions): void {
   onSaveSettingsFn = options.onSaveSettings;
   showAlertFn = options.showAlert;
   showConfirmFn = options.showConfirm;
+  getAllowInsecureHttpFn = options.getAllowInsecureHttp;
+  setAllowInsecureHttpFn = options.setAllowInsecureHttp;
 
   if (isInitialized) return;
   isInitialized = true;

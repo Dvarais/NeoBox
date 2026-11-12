@@ -290,6 +290,10 @@ func (s *AppService) FetchSubscription(url string) ([]string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	var settings core.Settings
+	if err := json.Unmarshal([]byte(s.GetSettings()), &settings); err == nil && settings.AllowInsecureHttp {
+		ctx = core.WithAllowInsecureHTTP(ctx)
+	}
 	return core.FetchSubscriptionContext(ctx, url)
 }
 
@@ -304,6 +308,10 @@ func (s *AppService) FetchSubscriptionWithInfo(url string) (*SubscriptionFetchRe
 	ctx := s.context()
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	var settings core.Settings
+	if err := json.Unmarshal([]byte(s.GetSettings()), &settings); err == nil && settings.AllowInsecureHttp {
+		ctx = core.WithAllowInsecureHTTP(ctx)
 	}
 	payload, err := core.FetchSubscriptionPayloadContext(ctx, url)
 	if err != nil {
@@ -466,8 +474,14 @@ func (s *AppService) refreshSubscriptions(ctx context.Context, want func(Subscri
 
 	results := make(map[string]subFetch, len(targets))
 
+	fetchCtx := ctx
+	var settings core.Settings
+	if err := json.Unmarshal([]byte(s.GetSettings()), &settings); err == nil && settings.AllowInsecureHttp {
+		fetchCtx = core.WithAllowInsecureHTTP(ctx)
+	}
+
 	fetchSingle := func(sub Subscription) subFetch {
-		payload, err := core.FetchSubscriptionPayloadContext(ctx, sub.URL)
+		payload, err := core.FetchSubscriptionPayloadContext(fetchCtx, sub.URL)
 		switch {
 		case err != nil:
 			return subFetch{Err: err.Error()}

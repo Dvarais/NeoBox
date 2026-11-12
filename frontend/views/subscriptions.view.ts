@@ -15,12 +15,18 @@ export interface SubscriptionsViewOptions {
   onUpdateCards: () => void;
   onSubscriptionsLoaded?: () => void;
   showAlert: (title: string, message: string, isError: boolean, t: Translations) => Promise<unknown> | void;
+  showConfirm?: (message: string) => Promise<boolean>;
+  getAllowInsecureHttp?: () => boolean;
+  setAllowInsecureHttp?: (allow: boolean) => Promise<unknown> | unknown;
 }
 
 let getLang: () => Language = () => 'RU';
 let onUpdateCardsFn: () => void = () => {};
 let onSubscriptionsLoadedFn: (() => void) | undefined;
 let showAlertFn: (title: string, message: string, isError: boolean, t: Translations) => Promise<unknown> | void = () => {};
+let showConfirmFn: (message: string) => Promise<boolean> = async () => true;
+let getAllowInsecureHttpFn: (() => boolean) | undefined;
+let setAllowInsecureHttpFn: ((allow: boolean) => Promise<unknown> | unknown) | undefined;
 
 let isInitialized = false;
 let qrStream: MediaStream | null = null;
@@ -266,6 +272,15 @@ async function handleQrImport(link: string): Promise<void> {
   }
 
   if (/^https?:\/\//i.test(trimmed)) {
+    if (trimmed.toLowerCase().startsWith('http://')) {
+      if (getAllowInsecureHttpFn && !getAllowInsecureHttpFn()) {
+        const confirmed = await showConfirmFn(t.httpSubWarningMessage);
+        if (!confirmed) {
+          return;
+        }
+        await setAllowInsecureHttpFn?.(true);
+      }
+    }
     closeQrModal();
     let name = trimmed;
     try {
@@ -326,6 +341,9 @@ export function initSubscriptionsView(options: SubscriptionsViewOptions): void {
   onUpdateCardsFn = options.onUpdateCards;
   onSubscriptionsLoadedFn = options.onSubscriptionsLoaded;
   showAlertFn = options.showAlert;
+  if (options.showConfirm) showConfirmFn = options.showConfirm;
+  getAllowInsecureHttpFn = options.getAllowInsecureHttp;
+  setAllowInsecureHttpFn = options.setAllowInsecureHttp;
 
   if (isInitialized) return;
   isInitialized = true;
@@ -342,6 +360,17 @@ export function initSubscriptionsView(options: SubscriptionsViewOptions): void {
       const name = nameInput.value.trim();
       const url = urlInput.value.trim();
       if (!name || !url) return;
+
+      if (url.toLowerCase().startsWith('http://')) {
+        if (getAllowInsecureHttpFn && !getAllowInsecureHttpFn()) {
+          const t = translations[getLang()];
+          const confirmed = await showConfirmFn(t.httpSubWarningMessage);
+          if (!confirmed) {
+            return;
+          }
+          await setAllowInsecureHttpFn?.(true);
+        }
+      }
 
       nameInput.value = '';
       urlInput.value = '';

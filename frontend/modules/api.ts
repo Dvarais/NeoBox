@@ -97,6 +97,7 @@ export interface AppSettings {
   verboseLogging: boolean;
   tlsFragment?: boolean;
   allowLan?: boolean;
+  allowInsecureHttp?: boolean;
   blockTorrent?: boolean;
   blockQuic?: boolean;
   lastSelectedServer: string | null;

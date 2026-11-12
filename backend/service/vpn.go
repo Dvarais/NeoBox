@@ -924,6 +924,10 @@ func (s *AppService) SwitchServer(link string) map[string]interface{} {
 	s.activeServerLink = trimmedLink
 	s.stateMu.Unlock()
 
+	// Sever any existing keep-alive connections on the previous outbound so all
+	// traffic and IP checks immediately route through the new node.
+	_, _ = fetchClash(ctx, http.MethodDelete, clashAddr, "/connections", secret)
+
 	// Keep watchdog synchronized so it probes the newly active node
 	s.watchdogMu.Lock()
 	s.watchdogLink = trimmedLink

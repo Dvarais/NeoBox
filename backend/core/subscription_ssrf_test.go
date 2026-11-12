@@ -154,3 +154,19 @@ func TestFetchSubscriptionRejectsRedirectToPrivateIP(t *testing.T) {
 	}
 }
 
+func TestFetchSubscriptionAllowInsecureHTTP(t *testing.T) {
+	// By default, HTTP is rejected up front with ErrSubURLNotSecure
+	ctx := context.Background()
+	_, err := FetchSubscriptionContext(ctx, "http://example.com/sub")
+	if err == nil {
+		t.Fatal("expected http:// subscription to be rejected without permission")
+	}
+
+	// With permission flag, the check passes (will fail later on network connect in test)
+	ctxAllowed := WithAllowInsecureHTTP(ctx)
+	_, errAllowed := FetchSubscriptionContext(ctxAllowed, "http://example.com/sub")
+	if errAllowed != nil && strings.Contains(errAllowed.Error(), "HTTPS вместо HTTP") {
+		t.Fatalf("expected WithAllowInsecureHTTP to bypass HTTPS check, but got %v", errAllowed)
+	}
+}
+

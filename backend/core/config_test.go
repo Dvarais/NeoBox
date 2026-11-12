@@ -256,3 +256,75 @@ func TestBlockQuicRuleGeneration(t *testing.T) {
 	}
 }
 
+func TestUserVLESSLink_AndSelectorInterrupt(t *testing.T) {
+	link := "vless://a4f1995f-d7f4-4dab-a8b3-92928935b965@89.125.124.164:443?encryption=none&flow=xtls-rprx-vision&fp=chrome&pbk=lyTiDvHAVE3O7m7iFg-qqy0W9DIqfQfQLjAKUzyYbQ0&security=reality&sid=e64fb149f92adb&sni=www.pgroup.com&spx=%2Fd116a777793e115&support-x25519mlkem768=true&type=tcp#test-n8944ohj"
+
+	outbound, err := ParseProxyLink(link)
+	if err != nil {
+		t.Fatalf("failed to parse user VLESS link: %v", err)
+	}
+
+	if outbound["type"] != "vless" {
+		t.Errorf("type = %v, want vless", outbound["type"])
+	}
+	if outbound["flow"] != "xtls-rprx-vision" {
+		t.Errorf("flow = %v, want xtls-rprx-vision", outbound["flow"])
+	}
+	if outbound["server"] != "89.125.124.164" {
+		t.Errorf("server = %v, want 89.125.124.164", outbound["server"])
+	}
+	tls, ok := outbound["tls"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("missing tls section in parsed outbound")
+	}
+	reality, ok := tls["reality"].(map[string]interface{})
+	if !ok || reality["public_key"] != "lyTiDvHAVE3O7m7iFg-qqy0W9DIqfQfQLjAKUzyYbQ0" {
+		t.Errorf("invalid reality public_key: %v", reality)
+	}
+
+	// Now verify that selector and urltest outbounds have interrupt_exist_connections = true
+	cand2 := map[string]interface{}{
+		"type":        "vless",
+		"tag":         "node-2",
+		"server":      "1.1.1.1",
+		"server_port": 443,
+		"uuid":        "00000000-0000-0000-0000-000000000002",
+	}
+	cfg, err := GenerateConfigWithCandidates([]map[string]interface{}{outbound, cand2}, outbound, Settings{}, false, "cache.db", "secret")
+	if err != nil {
+		t.Fatalf("GenerateConfigWithCandidates failed: %v", err)
+	}
+
+	outbounds, ok := cfg["outbounds"].([]interface{})
+	if !ok {
+		t.Fatalf("cfg missing outbounds")
+	}
+
+	var foundSelector, foundURLTest bool
+	for _, ob := range outbounds {
+		obMap, ok := ob.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if obMap["type"] == "selector" && obMap["tag"] == OutboundSelectorTag {
+			foundSelector = true
+			if obMap["interrupt_exist_connections"] != true {
+				t.Errorf("selector interrupt_exist_connections = %v, want true", obMap["interrupt_exist_connections"])
+			}
+		}
+		if obMap["type"] == "urltest" && obMap["tag"] == OutboundAutoTag {
+			foundURLTest = true
+			if obMap["interrupt_exist_connections"] != true {
+				t.Errorf("urltest interrupt_exist_connections = %v, want true", obMap["interrupt_exist_connections"])
+			}
+		}
+	}
+	if !foundSelector {
+		t.Errorf("selector outbound not found")
+	}
+	if !foundURLTest {
+		t.Errorf("urltest outbound not found")
+	}
+}
+
+

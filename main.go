@@ -50,6 +50,12 @@ func main() {
 	// Hide the console window immediately if running in standalone mode (e.g. from registry startup)
 	security.HideConsoleIfNeeded()
 
+	// Ensure compatibility with Windhawk before any WebView2 or UI components spin up.
+	// This registers NeoBox and msedgewebview2.exe in Windhawk's process exclusion list (HKLM/HKCU),
+	// preventing SEH stack unwind crashes (Go 1.25+ runtime.mcall RBP zeroing vs RtlVirtualUnwind)
+	// and WebView2 injection instability.
+	_ = security.EnsureWindhawkCompatibility()
+
 	userDataDir := platform.Current().Paths().UserDataDir()
 	// Ensure the directory exists before writing the encryption key
 	_ = os.MkdirAll(userDataDir, 0755)
@@ -104,6 +110,8 @@ func main() {
 	// Clean up any legacy Task Scheduler tasks ("NeoBox", "NeoBox-Go") when elevated.
 	if service.IsElevated() {
 		security.RemoveLegacyScheduledTasks()
+		// Ensure Windhawk exclusion is written to HKLM with elevated privileges.
+		_ = security.EnsureWindhawkCompatibility()
 	}
 
 	// 2. Initialize embedded core manager

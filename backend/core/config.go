@@ -366,6 +366,8 @@ type Settings struct {
 	AllowLan bool `json:"allowLan"`
 	// BlockTorrent drops BitTorrent/P2P protocol traffic to protect against host bans.
 	BlockTorrent bool `json:"blockTorrent"`
+	// AllowInsecureHttp allows connecting to unencrypted HTTP proxy nodes and fetching HTTP subscriptions.
+	AllowInsecureHttp bool `json:"allowInsecureHttp"`
 }
 
 // CustomRule represents a single user-defined routing rule.
@@ -640,6 +642,11 @@ func ParseProxyLink(link string) (map[string]interface{}, error) {
 					"enabled":    true,
 					"public_key": params.Get("pbk"),
 					"short_id":   params.Get("sid"),
+				}
+			}
+			if strings.EqualFold(params.Get("support-x25519mlkem768"), "true") || params.Get("support-x25519mlkem768") == "1" {
+				if security == "tls" {
+					tlsMap["curve_preferences"] = []string{"X25519MLKEM768", "X25519", "P256"}
 				}
 			}
 			if isFragmentRequested(params) {
@@ -1828,7 +1835,7 @@ func GenerateConfigWithCandidates(candidates []map[string]interface{}, outbound 
 			"tag":                         OutboundSelectorTag,
 			"outbounds":                   selectorOutbounds,
 			"default":                     selectorDefault,
-			"interrupt_exist_connections": false,
+			"interrupt_exist_connections": true,
 		}
 
 		autoOutbound := map[string]interface{}{
@@ -1839,7 +1846,7 @@ func GenerateConfigWithCandidates(candidates []map[string]interface{}, outbound 
 			"interval":                    "3m",
 			"tolerance":                   50,
 			"idle_timeout":                "30m",
-			"interrupt_exist_connections": false,
+			"interrupt_exist_connections": true,
 		}
 
 		outboundsList = append(outboundsList, selectorOutbound, autoOutbound)
@@ -2125,6 +2132,21 @@ func isRestrictedHost(rawHost string) bool {
 	return false
 }
 
+type allowInsecureHTTPContextKey struct{}
+
+// WithAllowInsecureHTTP attaches a permission flag to the context to allow plain HTTP subscriptions.
+func WithAllowInsecureHTTP(ctx context.Context) context.Context {
+	return context.WithValue(ctx, allowInsecureHTTPContextKey{}, true)
+}
+
+func isAllowInsecureHTTP(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(allowInsecureHTTPContextKey{}).(bool)
+	return v
+}
+
 // refuseInsecureRedirect keeps a subscription fetch on HTTPS for the whole of
 // its redirect chain and validates target hosts against SSRF attacks.
 //
@@ -2138,7 +2160,7 @@ func refuseInsecureRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
 	}
-	if !strings.EqualFold(req.URL.Scheme, "https") {
+	if !strings.EqualFold(req.URL.Scheme, "https") && !(strings.EqualFold(req.URL.Scheme, "http") && isAllowInsecureHTTP(req.Context())) {
 		return fmt.Errorf("refusing redirect to %s: subscriptions must stay on HTTPS", req.URL.Scheme)
 	}
 	hostname := strings.Trim(strings.TrimSpace(req.URL.Hostname()), "[]")
@@ -2318,8 +2340,8 @@ func FetchSubscriptionPayloadContext(ctx context.Context, subURL string) (*Subsc
 		return &SubscriptionPayload{Links: []string{trimmedURL}}, nil
 	}
 
-	// Security: block plain HTTP subscription URLs — only HTTPS is allowed.
-	if strings.HasPrefix(lowerURL, "http://") {
+	// Security: block plain HTTP subscription URLs unless explicitly allowed by user.
+	if strings.HasPrefix(lowerURL, "http://") && !isAllowInsecureHTTP(ctx) {
 		return nil, errors.New(i18n.T(i18n.ErrSubURLNotSecure))
 	}
 
@@ -2328,7 +2350,8 @@ func FetchSubscriptionPayloadContext(ctx context.Context, subURL string) (*Subsc
 		return nil, fmt.Errorf("invalid subscription URL: %w", err)
 	}
 
-	if !strings.EqualFold(parsedURL.Scheme, "https") {
+	scheme := strings.ToLower(parsedURL.Scheme)
+	if scheme != "https" && !(scheme == "http" && isAllowInsecureHTTP(ctx)) {
 		return nil, errors.New(i18n.T(i18n.ErrSubURLNotSecure))
 	}
 

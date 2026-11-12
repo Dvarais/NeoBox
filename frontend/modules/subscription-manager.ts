@@ -250,6 +250,7 @@ export function renderSubStatus(
 
   element.innerHTML = '';
   element.classList.remove('sub-status-line--error');
+  element.classList.remove('sub-status-line--warning');
 
   const sub = allSubscriptions.find((s) => s.id === currentActiveSubId);
   if (!sub || !sub.url) {

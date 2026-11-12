@@ -4315,48 +4315,108 @@ input.color-hex {
   box-shadow: 0 0 12px var(--accent-wash);
 }
 
+/* ── Информация о выбранной подписке (время, срок, квота) ─────────────── */
+
 .sub-status-line {
+  margin: 10px 0 14px;
+  padding: 8px 14px;
+  background: var(--glass-02);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   font-size: var(--fs-micro);
   color: var(--text-dim);
-  margin: 4px 0 0;
-  min-height: 16px;
+  line-height: 1.4;
+  box-sizing: border-box;
+  transition: all 0.2s ease;
+}
+
+.sub-status-line:empty {
+  display: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+}
+
+.sub-status-line--error {
+  background: rgb(var(--danger-rgb) / 0.1);
+  border-color: rgb(var(--danger-rgb) / 0.3);
+  color: var(--danger);
+}
+
+.sub-status-line--warning {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: rgb(var(--warning-rgb) / 0.08);
+  border-color: rgb(var(--warning-rgb) / 0.25);
+}
+
+.sub-error-text {
+  color: var(--danger);
+  font-size: var(--fs-micro);
+}
+
+.sub-cache-badge {
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--accent-tint);
+  border: 1px solid rgb(var(--accent-rgb) / 0.3);
+  color: var(--accent-color);
+  display: inline-flex;
+  align-items: center;
 }
 
 .sub-status-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
+}
+
+.sub-update-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
 }
 
 .sub-expire-badge {
   display: inline-flex;
   align-items: center;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.2;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-dim);
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: var(--glass-03);
+  border: 1px solid var(--glass-border);
+  color: var(--text-main);
   font-family: var(--font-mono);
   font-weight: 500;
 }
 
 .sub-expire-badge.is-warning {
-  background: rgba(255, 170, 0, 0.15);
+  background: rgb(var(--warning-rgb) / 0.15);
   color: var(--warning);
-  border: 1px solid rgba(255, 170, 0, 0.3);
+  border-color: rgb(var(--warning-rgb) / 0.35);
 }
 
 .sub-expire-badge.is-expired {
-  background: rgba(255, 77, 79, 0.15);
+  background: rgb(var(--danger-rgb) / 0.15);
   color: var(--danger);
-  border: 1px solid rgba(255, 77, 79, 0.3);
+  border-color: rgb(var(--danger-rgb) / 0.35);
 }
 
 .sub-quota-box {
-  margin-top: 6px;
-  max-width: 440px;
+  margin-top: 2px;
+  max-width: 480px;
 }
 
 .sub-quota-labels {
@@ -4366,13 +4426,13 @@ input.color-hex {
   font-size: 11px;
   color: var(--text-dim);
   font-family: var(--font-mono);
-  margin-bottom: 3px;
+  margin-bottom: 4px;
 }
 
 .sub-quota-track {
   width: 100%;
   height: 4px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--glass-03);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -4384,7 +4444,7 @@ input.color-hex {
 }
 
 .sub-quota-fill.normal {
-  background: var(--accent);
+  background: var(--accent-color);
 }
 
 .sub-quota-fill.warning {
@@ -5541,43 +5601,7 @@ input.color-hex {
   background: rgb(var(--danger-rgb) / 0.1);
 }
 
-/* ── Состояние автообновления подписки ───────────────────────────────────── */
-
-.sub-status-line {
-  color: var(--text-dim);
-  font-size: var(--fs-micro);
-  margin: -12px 0 14px;
-  min-height: 1em;
-}
-
-/* Неудача обязана читаться как неудача, а не как подпись помельче. */
-.sub-status-line--error {
-  color: var(--danger);
-}
-
-.sub-status-line--warning {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.sub-error-text {
-  color: var(--danger);
-  font-size: var(--fs-micro);
-}
-
-.sub-cache-badge {
-  font-size: var(--fs-micro);
-  font-weight: 600;
-  padding: 2px 7px;
-  border-radius: 6px;
-  background: var(--accent-tint);
-  border: 1px solid rgb(var(--accent-rgb) / 0.3);
-  color: var(--accent-color);
-  display: inline-flex;
-  align-items: center;
-}
+/* ── Состояние автообновления подписки перенесено в блок подписок выше ── */
 
 /* Пара полей для сочетаний клавиш. Подпись — поле — подпись — поле в одну
    строку, чтобы было видно, что это две настройки одной галки, а не четыре
