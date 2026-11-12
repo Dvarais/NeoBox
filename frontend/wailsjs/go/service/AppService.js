@@ -162,12 +162,20 @@ export function RestartXray(arg1, arg2, arg3) {
   return window['go']['service']['AppService']['RestartXray'](arg1, arg2, arg3);
 }
 
+export function SanitizeLogText(arg1) {
+  return window['go']['service']['AppService']['SanitizeLogText'](arg1);
+}
+
 export function SaveHistory(arg1) {
   return window['go']['service']['AppService']['SaveHistory'](arg1);
 }
 
 export function SaveLogs(arg1) {
   return window['go']['service']['AppService']['SaveLogs'](arg1);
+}
+
+export function SaveLogsSanitized(arg1) {
+  return window['go']['service']['AppService']['SaveLogsSanitized'](arg1);
 }
 
 export function SaveSettings(arg1) {

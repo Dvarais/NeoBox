@@ -34,7 +34,7 @@ export function GetAppVersion():Promise<string>;
 
 export function GetAutoSelectedNode():Promise<Record<string, any>>;
 
-export function GetConnections():Promise<Record<string, any>>;
+export function GetConnections():Promise<service.ConnectionsPayload>;
 
 export function GetHistory():Promise<string>;
 
@@ -84,9 +84,13 @@ export function RequestAdmin():Promise<void>;
 
 export function RestartXray(arg1:string,arg2:string,arg3:boolean):Promise<Record<string, any>>;
 
+export function SanitizeLogText(arg1:string):Promise<string>;
+
 export function SaveHistory(arg1:string):Promise<boolean>;
 
 export function SaveLogs(arg1:string):Promise<string>;
+
+export function SaveLogsSanitized(arg1:string):Promise<string>;
 
 export function SaveSettings(arg1:string):Promise<boolean>;
 
@@ -120,7 +124,7 @@ export function StopXray():Promise<Record<string, any>>;
 
 export function SwitchServer(arg1:string):Promise<Record<string, any>>;
 
-export function TestServerSpeed(arg1:string):Promise<Record<string, any>>;
+export function TestServerSpeed(arg1:string):Promise<service.ServerSpeedPayload>;
 
 export function UpdateSubscriptionNow(arg1:string):Promise<void>;
 
